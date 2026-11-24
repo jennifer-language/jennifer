@@ -23,11 +23,11 @@ func TestRecvTimeoutReturnsAWaitingValue(t *testing.T) {
 	ch := makeChan(t, in, 2)
 	mustInvoke(t, in, "send", ch, interpreter.IntVal(5))
 	mustInvoke(t, in, "send", ch, interpreter.IntVal(6))
-	if v := mustInvoke(t, in, "recvTimeout", ch, interpreter.IntVal(0)); v.Int != 5 {
-		t.Errorf("recvTimeout(ch, 0) = %d, want 5", v.Int)
+	if v := mustInvoke(t, in, "recvTimeout", ch, interpreter.IntVal(0)); v.Int() != 5 {
+		t.Errorf("recvTimeout(ch, 0) = %d, want 5", v.Int())
 	}
-	if v := mustInvoke(t, in, "recvTimeout", ch, interpreter.IntVal(1000)); v.Int != 6 {
-		t.Errorf("recvTimeout(ch, 1000) = %d, want 6", v.Int)
+	if v := mustInvoke(t, in, "recvTimeout", ch, interpreter.IntVal(1000)); v.Int() != 6 {
+		t.Errorf("recvTimeout(ch, 1000) = %d, want 6", v.Int())
 	}
 }
 
@@ -50,8 +50,8 @@ func TestRecvTimeoutTimesOut(t *testing.T) {
 		t.Errorf("poll of an empty channel: err = %v, want a timeout", err)
 	}
 	mustInvoke(t, in, "send", ch, interpreter.IntVal(9))
-	if v := mustInvoke(t, in, "recv", ch); v.Int != 9 {
-		t.Errorf("recv after the timeout = %d, want 9", v.Int)
+	if v := mustInvoke(t, in, "recv", ch); v.Int() != 9 {
+		t.Errorf("recv after the timeout = %d, want 9", v.Int())
 	}
 }
 
@@ -66,8 +66,8 @@ func TestRecvTimeoutWakesOnLaterSend(t *testing.T) {
 			panic(err)
 		}
 	}()
-	if v := mustInvoke(t, in, "recvTimeout", ch, interpreter.IntVal(5000)); v.Int != 7 {
-		t.Errorf("recvTimeout = %d, want 7", v.Int)
+	if v := mustInvoke(t, in, "recvTimeout", ch, interpreter.IntVal(5000)); v.Int() != 7 {
+		t.Errorf("recvTimeout = %d, want 7", v.Int())
 	}
 }
 
@@ -78,8 +78,8 @@ func TestRecvTimeoutClosedAndArguments(t *testing.T) {
 	ch := makeChan(t, in, 1)
 	mustInvoke(t, in, "send", ch, interpreter.IntVal(1))
 	mustInvoke(t, in, "close", ch)
-	if v := mustInvoke(t, in, "recvTimeout", ch, interpreter.IntVal(10)); v.Int != 1 {
-		t.Errorf("recvTimeout on a closed channel with a value = %d, want 1", v.Int)
+	if v := mustInvoke(t, in, "recvTimeout", ch, interpreter.IntVal(10)); v.Int() != 1 {
+		t.Errorf("recvTimeout on a closed channel with a value = %d, want 1", v.Int())
 	}
 	wantErr(t, in, "recvTimeout", "receive on a closed channel", ch, interpreter.IntVal(10))
 	open := makeChan(t, in, 1)

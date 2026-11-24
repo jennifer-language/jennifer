@@ -234,7 +234,7 @@ func levelFor(fnName string, args []interpreter.Value, idx int) (int, error) {
 	if args[idx].Kind != interpreter.KindString {
 		return 0, fmt.Errorf("%s: level must be string, got %s", fnName, args[idx].Kind)
 	}
-	switch args[idx].Str {
+	switch args[idx].Str() {
 	case "fast":
 		return flate.BestSpeed, nil
 	case "default":
@@ -242,7 +242,7 @@ func levelFor(fnName string, args []interpreter.Value, idx int) (int, error) {
 	case "best":
 		return flate.BestCompression, nil
 	}
-	return 0, fmt.Errorf("%s: unknown level %q; known: %s", fnName, args[idx].Str, levelList)
+	return 0, fmt.Errorf("%s: unknown level %q; known: %s", fnName, args[idx].Str(), levelList)
 }
 
 // packFn implements `compress.pack(algo, bytes [, level]) -> bytes`.
@@ -261,12 +261,12 @@ func packFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 		return interpreter.Null(), err
 	}
 	var buf bytes.Buffer
-	algo := args[0].Str
+	algo := args[0].Str()
 	w, err := acquireWriter(algo, &buf, level)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("compress.pack: %v", err)
 	}
-	if _, err := w.Write(args[1].Bytes); err != nil {
+	if _, err := w.Write(args[1].Bytes()); err != nil {
 		w.Close()
 		return interpreter.Null(), fmt.Errorf("compress.pack: %v", err)
 	}
@@ -346,12 +346,12 @@ func unpackFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		if args[2].Kind != interpreter.KindInt {
 			return interpreter.Null(), fmt.Errorf("%s: maxBytes must be int, got %s", fn, args[2].Kind)
 		}
-		if args[2].Int < 1 {
-			return interpreter.Null(), fmt.Errorf("%s: maxBytes must be at least 1, got %d", fn, args[2].Int)
+		if args[2].Int() < 1 {
+			return interpreter.Null(), fmt.Errorf("%s: maxBytes must be at least 1, got %d", fn, args[2].Int())
 		}
-		limit = args[2].Int
+		limit = args[2].Int()
 	}
-	return unpackBytes(ctx, fn, args[0].Str, args[1].Bytes, limit)
+	return unpackBytes(ctx, fn, args[0].Str(), args[1].Bytes(), limit)
 }
 
 // unpackWithFn implements `compress.unpackWith(algo, bytes,
@@ -366,25 +366,25 @@ func unpackWithFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpr
 		return interpreter.Null(), err
 	}
 	o := args[2]
-	if o.Kind != interpreter.KindStruct || o.StructNS != LibraryName || o.StructName != "UnpackOptions" {
+	if o.Kind != interpreter.KindStruct || o.StructNS() != LibraryName || o.StructName() != "UnpackOptions" {
 		return interpreter.Null(), fmt.Errorf("%s: argument 3 must be a compress.UnpackOptions, got %s", fn, o.Kind)
 	}
 	limit := int64(maxDecompressed)
-	for _, f := range o.Fields {
+	for _, f := range o.Fields() {
 		if f.Name != "maxBytes" {
 			continue
 		}
 		if f.Value.Kind != interpreter.KindInt {
 			return interpreter.Null(), fmt.Errorf("%s: maxBytes must be int, got %s", fn, f.Value.Kind)
 		}
-		if f.Value.Int < 0 {
-			return interpreter.Null(), fmt.Errorf("%s: maxBytes must be 0 (the default), positive, or math.MAX_INT (no cap), got %d", fn, f.Value.Int)
+		if f.Value.Int() < 0 {
+			return interpreter.Null(), fmt.Errorf("%s: maxBytes must be 0 (the default), positive, or math.MAX_INT (no cap), got %d", fn, f.Value.Int())
 		}
-		if f.Value.Int > 0 {
-			limit = f.Value.Int
+		if f.Value.Int() > 0 {
+			limit = f.Value.Int()
 		}
 	}
-	return unpackBytes(ctx, fn, args[0].Str, args[1].Bytes, limit)
+	return unpackBytes(ctx, fn, args[0].Str(), args[1].Bytes(), limit)
 }
 
 // unpackArgs checks the (algo, bytes, ...) arguments unpack and unpackWith share.
@@ -440,15 +440,15 @@ func makeStream(id int64) interpreter.Value {
 }
 
 func extractStreamID(fnName string, v interpreter.Value) (int64, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "Stream" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "Stream" {
 		return 0, fmt.Errorf("%s: argument must be a compress.Stream, got %s", fnName, v.Kind)
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == "id" {
 			if f.Value.Kind != interpreter.KindInt {
 				return 0, fmt.Errorf("%s: compress.Stream.id is not int (got %s)", fnName, f.Value.Kind)
 			}
-			return f.Value.Int, nil
+			return f.Value.Int(), nil
 		}
 	}
 	return 0, fmt.Errorf("%s: compress.Stream has no id field", fnName)
@@ -467,7 +467,7 @@ func streamFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		return interpreter.Null(), err
 	}
 	var buf bytes.Buffer
-	w, err := writerFor(args[0].Str, &buf, level)
+	w, err := writerFor(args[0].Str(), &buf, level)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("compress.stream: %v", err)
 	}
@@ -502,7 +502,7 @@ func updateFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		return interpreter.Null(), interpreter.KindedError("closed", fmt.Sprintf("compress.update: stream %d has already been finalized or discarded, or never existed", id))
 	}
 	st.mu.Lock()
-	_, werr := st.w.Write(args[1].Bytes)
+	_, werr := st.w.Write(args[1].Bytes())
 	st.mu.Unlock()
 	if werr != nil {
 		return interpreter.Null(), fmt.Errorf("compress.update: %v", werr)

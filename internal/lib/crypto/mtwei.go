@@ -425,10 +425,10 @@ func mtweiIdFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if args[2].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("crypto.mtweiId: salt must be bytes")
 	}
-	if len(args[2].Bytes) != 16 {
-		return interpreter.Null(), fmt.Errorf("crypto.mtweiId: salt must be 16 bytes, got %d", len(args[2].Bytes))
+	if len(args[2].Bytes()) != 16 {
+		return interpreter.Null(), fmt.Errorf("crypto.mtweiId: salt must be 16 bytes, got %d", len(args[2].Bytes()))
 	}
-	out := mtweiID(args[0].Str, args[1].Str, args[2].Bytes)
+	out := mtweiID(args[0].Str(), args[1].Str(), args[2].Bytes())
 	return interpreter.BytesVal(out), nil
 }
 
@@ -444,10 +444,10 @@ func mtweiClientKeyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (inter
 			return interpreter.Null(), fmt.Errorf("crypto.mtweiClientKey: %s must be bytes", name)
 		}
 	}
-	if len(args[0].Bytes) != 32 {
-		return interpreter.Null(), fmt.Errorf("crypto.mtweiClientKey: private must be 32 bytes, got %d", len(args[0].Bytes))
+	if len(args[0].Bytes()) != 32 {
+		return interpreter.Null(), fmt.Errorf("crypto.mtweiClientKey: private must be 32 bytes, got %d", len(args[0].Bytes()))
 	}
-	out, err := mtweiClientKey(args[0].Bytes, args[1].Bytes, args[2].Bytes, args[3].Bytes)
+	out, err := mtweiClientKey(args[0].Bytes(), args[1].Bytes(), args[2].Bytes(), args[3].Bytes())
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("crypto.mtweiClientKey: %w", err)
 	}

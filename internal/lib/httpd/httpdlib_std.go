@@ -41,6 +41,7 @@ import (
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
+	"jennifer-lang.dev/jennifer/internal/memlimit"
 )
 
 // parseListenAddr splits a listen address into a net.Listen network + address.
@@ -943,16 +944,16 @@ func setMaxBufferBudgetFromRAMFn(_ interpreter.BuiltinCtx, args []Value) (Value,
 	var frac float64
 	switch args[0].Kind {
 	case interpreter.KindFloat:
-		frac = args[0].Float
+		frac = args[0].Float()
 	case interpreter.KindInt:
-		frac = float64(args[0].Int)
+		frac = float64(args[0].Int())
 	default:
 		return interpreter.Null(), fmt.Errorf("httpd.setMaxBufferBudgetFromRAM: fraction must be a float in (0, 1], got %s", args[0].Kind)
 	}
 	if !(frac > 0 && frac <= 1.0) {
 		return interpreter.Null(), fmt.Errorf("httpd.setMaxBufferBudgetFromRAM: fraction must be > 0 and <= 1.0, got %v", frac)
 	}
-	limit, err := detectMemoryLimitBytes()
+	limit, err := memlimit.Detect()
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("httpd.setMaxBufferBudgetFromRAM: %v; set an explicit budget with httpd.setMaxBufferBudget instead", err)
 	}

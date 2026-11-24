@@ -52,8 +52,8 @@ func TestSetLocaleNormalizesAndRefusesUnknown(t *testing.T) {
 	if err := set("DE-at"); err != nil {
 		t.Fatal(err)
 	}
-	if lv, _ := c.localeFn(noCtx, nil); lv.Str != "de-AT" {
-		t.Errorf("locale = %q, want de-AT", lv.Str)
+	if lv, _ := c.localeFn(noCtx, nil); lv.Str() != "de-AT" {
+		t.Errorf("locale = %q, want de-AT", lv.Str())
 	}
 	if got := tr(t, c, interpreter.StringVal("k")); got != "de-AT" {
 		t.Errorf("tr = %q, want de-AT", got)
@@ -66,8 +66,8 @@ func TestSetLocaleNormalizesAndRefusesUnknown(t *testing.T) {
 			t.Errorf("setLocale(%q) accepted", tag)
 		}
 	}
-	if lv, _ := c.localeFn(noCtx, nil); lv.Str != "en-GB" {
-		t.Errorf("a refused setLocale changed the locale to %q", lv.Str)
+	if lv, _ := c.localeFn(noCtx, nil); lv.Str() != "en-GB" {
+		t.Errorf("a refused setLocale changed the locale to %q", lv.Str())
 	}
 }
 

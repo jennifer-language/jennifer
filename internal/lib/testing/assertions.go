@@ -84,7 +84,7 @@ func boolArg(fnName string, args []Value) (bool, error) {
 	if args[0].Kind != interpreter.KindBool {
 		return false, fmt.Errorf("%s: condition must be bool, got %s", fnName, args[0].Kind)
 	}
-	return args[0].Bool, nil
+	return args[0].Bool(), nil
 }
 
 // assertContainsFn dispatches on the haystack's kind: substring for a string,
@@ -99,12 +99,12 @@ func assertContainsFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if needle.Kind != interpreter.KindString {
 			return interpreter.Null(), fmt.Errorf("testing.assertContains: needle for a string must be string, got %s", needle.Kind)
 		}
-		if !strings.Contains(haystack.Str, needle.Str) {
+		if !strings.Contains(haystack.Str(), needle.Str()) {
 			return interpreter.Null(), assertFail(ctx,
-				fmt.Sprintf("assertContains: %q does not contain %q", haystack.Str, needle.Str))
+				fmt.Sprintf("assertContains: %q does not contain %q", haystack.Str(), needle.Str()))
 		}
 	case interpreter.KindList:
-		for _, el := range haystack.List {
+		for _, el := range haystack.List() {
 			if el.Equal(needle) {
 				return interpreter.Null(), nil
 			}
@@ -112,7 +112,7 @@ func assertContainsFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), assertFail(ctx,
 			fmt.Sprintf("assertContains: list does not contain %s", needle.Display()))
 	case interpreter.KindMap:
-		for _, e := range haystack.Map {
+		for _, e := range haystack.Map() {
 			if e.Key.Equal(needle) {
 				return interpreter.Null(), nil
 			}
@@ -194,7 +194,7 @@ func makeAssertThrowsWithFn(_ *interpreter.Interpreter, fnName string) interpret
 		if args[1].Kind != interpreter.KindList {
 			return interpreter.Null(), fmt.Errorf("testing.%s: args must be a list, got %s", fnName, args[1].Kind)
 		}
-		callArgs := args[1].List
+		callArgs := args[1].List()
 		wantKind, err := takeStringArg("testing."+fnName, args, 2, "kind")
 		if err != nil {
 			return interpreter.Null(), err

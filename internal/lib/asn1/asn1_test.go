@@ -38,7 +38,7 @@ func der(t *testing.T, v interpreter.Value) []byte {
 	if out.Kind != interpreter.KindBytes {
 		t.Fatalf("encode returned %s, want bytes", out.Kind)
 	}
-	return out.Bytes
+	return out.Bytes()
 }
 
 func decode(t *testing.T, data []byte) interpreter.Value {
@@ -75,8 +75,8 @@ func TestIntegerCodec(t *testing.T) {
 		if err != nil {
 			t.Fatalf("asInt(%d): %v", n, err)
 		}
-		if got.Int != n {
-			t.Errorf("integer round-trip: got %d, want %d", got.Int, n)
+		if got.Int() != n {
+			t.Errorf("integer round-trip: got %d, want %d", got.Int(), n)
 		}
 	}
 }
@@ -94,8 +94,8 @@ func TestOIDCodec(t *testing.T) {
 		if err != nil {
 			t.Fatalf("asOid(%q): %v", oid, err)
 		}
-		if got.Str != oid {
-			t.Errorf("OID round-trip: got %q, want %q", got.Str, oid)
+		if got.Str() != oid {
+			t.Errorf("OID round-trip: got %q, want %q", got.Str(), oid)
 		}
 	}
 }
@@ -129,8 +129,8 @@ func TestImplicitRetag(t *testing.T) {
 	back := decode(t, der(t, retagged))
 	cls, _ := call(tagClassFn, back)
 	num, _ := call(tagNumberFn, back)
-	if cls.Str != "context" || num.Int != 1 {
-		t.Fatalf("retag class/num = %s/%d, want context/1", cls.Str, num.Int)
+	if cls.Str() != "context" || num.Int() != 1 {
+		t.Fatalf("retag class/num = %s/%d, want context/1", cls.Str(), num.Int())
 	}
 	// The content is still the integer's, so a matching-shape read recovers it.
 	if !bytes.Equal(elemContent(mustUnwrap(t, retagged)), encodeIntContent(500)) {
@@ -145,11 +145,11 @@ func TestDecodeBER(t *testing.T) {
 	indef := []byte{0x30, 0x80, 0x02, 0x01, 0x05, 0x00, 0x00}
 	v := decode(t, indef)
 	length, err := call(lengthFn, v)
-	if err != nil || length.Int != 1 {
+	if err != nil || length.Int() != 1 {
 		t.Fatalf("indefinite length: len = %v, %v; want 1", length, err)
 	}
 	got, err := call(asIntFn, v, interpreter.StringVal("/0"))
-	if err != nil || got.Int != 5 {
+	if err != nil || got.Int() != 5 {
 		t.Fatalf("indefinite child: %v, %v; want 5", got, err)
 	}
 
@@ -159,8 +159,8 @@ func TestDecodeBER(t *testing.T) {
 	hv := decode(t, hi)
 	cls, _ := call(tagClassFn, hv)
 	num, _ := call(tagNumberFn, hv)
-	if cls.Str != "application" || num.Int != 31 {
-		t.Fatalf("high-tag: class/num = %s/%d, want application/31", cls.Str, num.Int)
+	if cls.Str() != "application" || num.Int() != 31 {
+		t.Fatalf("high-tag: class/num = %s/%d, want application/31", cls.Str(), num.Int())
 	}
 }
 
@@ -262,8 +262,8 @@ func TestLongFormLength(t *testing.T) {
 		t.Fatalf("valid long-form length: %v", err)
 	}
 	b, err := call(asBytesFn, v)
-	if err != nil || len(b.Bytes) != 200 {
-		t.Fatalf("long-form octet string: got %v (%d bytes), %v; want 200 bytes", b.Kind, len(b.Bytes), err)
+	if err != nil || len(b.Bytes()) != 200 {
+		t.Fatalf("long-form octet string: got %v (%d bytes), %v; want 200 bytes", b.Kind, len(b.Bytes()), err)
 	}
 }
 
@@ -303,7 +303,7 @@ func TestHighTagDecodeCap(t *testing.T) {
 		interpreter.IntVal(maxTagNumber), mustBuild(t, integerFn, interpreter.IntVal(1)))
 	back := decode(t, der(t, atCap))
 	num, err := call(tagNumberFn, back)
-	if err != nil || num.Int != maxTagNumber {
+	if err != nil || num.Int() != maxTagNumber {
 		t.Fatalf("tag at cap round-trip: got %v, %v; want %d", num, err, maxTagNumber)
 	}
 }
@@ -319,7 +319,7 @@ func TestOIDArcCap(t *testing.T) {
 		t.Fatalf("oid(%q): %v", big, err)
 	}
 	got, err := call(asOidFn, decode(t, der(t, v)))
-	if err != nil || got.Str != big {
+	if err != nil || got.Str() != big {
 		t.Fatalf("big-arc OID round-trip: got %v, %v; want %q", got, err, big)
 	}
 	// An arc past the cap is rejected rather than encoded to something decode

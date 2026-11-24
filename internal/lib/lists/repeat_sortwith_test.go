@@ -15,19 +15,19 @@ import (
 func TestReplicate(t *testing.T) {
 	got := okCall(t, replicateFn, intList(1, 0), interpreter.IntVal(3))
 	want := []int64{1, 0, 1, 0, 1, 0}
-	if len(got.List) != len(want) {
-		t.Fatalf("replicate([1, 0], 3) has %d elements, want %d", len(got.List), len(want))
+	if len(got.List()) != len(want) {
+		t.Fatalf("replicate([1, 0], 3) has %d elements, want %d", len(got.List()), len(want))
 	}
 	for i, w := range want {
-		if got.List[i].Int != w {
-			t.Errorf("replicate([1, 0], 3)[%d] = %d, want %d", i, got.List[i].Int, w)
+		if got.List()[i].Int() != w {
+			t.Errorf("replicate([1, 0], 3)[%d] = %d, want %d", i, got.List()[i].Int(), w)
 		}
 	}
-	if v := okCall(t, replicateFn, intList(1, 2), interpreter.IntVal(0)); len(v.List) != 0 {
-		t.Errorf("replicate(xs, 0) = %v, want []", v.List)
+	if v := okCall(t, replicateFn, intList(1, 2), interpreter.IntVal(0)); len(v.List()) != 0 {
+		t.Errorf("replicate(xs, 0) = %v, want []", v.List())
 	}
-	if v := okCall(t, replicateFn, intList(), interpreter.IntVal(math.MaxInt64)); len(v.List) != 0 {
-		t.Errorf("replicate([], huge) = %v, want []", v.List)
+	if v := okCall(t, replicateFn, intList(), interpreter.IntVal(math.MaxInt64)); len(v.List()) != 0 {
+		t.Errorf("replicate([], huge) = %v, want []", v.List())
 	}
 	errCall(t, "replicate negative", replicateFn, intList(1), interpreter.IntVal(-1))
 	errCall(t, "replicate float count", replicateFn, intList(1), interpreter.FloatVal(2))
@@ -55,8 +55,8 @@ io.printf("%d %d %d %d\n", len($grid), $grid[0][0], $grid[1][0], $grid[2][0]);
 func TestReplicateCap(t *testing.T) {
 	defer func(n int) { maxListElements = n }(maxListElements)
 	maxListElements = 10
-	if v := okCall(t, replicateFn, intList(1, 2), interpreter.IntVal(5)); len(v.List) != 10 {
-		t.Errorf("replicate at the cap: %d elements, want 10", len(v.List))
+	if v := okCall(t, replicateFn, intList(1, 2), interpreter.IntVal(5)); len(v.List()) != 10 {
+		t.Errorf("replicate at the cap: %d elements, want 10", len(v.List()))
 	}
 	var ce *limits.CapError
 	for _, n := range []int64{6, math.MaxInt64, math.MaxInt64 / 2} {

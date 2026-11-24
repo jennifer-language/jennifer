@@ -148,15 +148,15 @@ func argvFromList(fnName string, v interpreter.Value) ([]string, error) {
 	if v.Kind != interpreter.KindList {
 		return nil, fmt.Errorf("%s: argv must be a list of string, got %s", fnName, v.Kind)
 	}
-	if len(v.List) == 0 {
+	if len(v.List()) == 0 {
 		return nil, fmt.Errorf("%s: argv must contain at least one element (the program name)", fnName)
 	}
-	out := make([]string, len(v.List))
-	for i, elem := range v.List {
+	out := make([]string, len(v.List()))
+	for i, elem := range v.List() {
 		if elem.Kind != interpreter.KindString {
 			return nil, fmt.Errorf("%s: argv[%d] must be string, got %s", fnName, i, elem.Kind)
 		}
-		out[i] = elem.Str
+		out[i] = elem.Str()
 	}
 	return out, nil
 }
@@ -221,15 +221,15 @@ func makeProcess(handle, pid int64) interpreter.Value {
 // outside this library). The OS pid field is informational only and is not used
 // here (the handle, not the recyclable pid, identifies the child).
 func extractHandle(fnName string, v interpreter.Value) (int64, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != "os" || v.StructName != "Process" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != "os" || v.StructName() != "Process" {
 		return 0, fmt.Errorf("%s: argument must be an os.Process, got %s", fnName, v.Kind)
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == "handle" {
 			if f.Value.Kind != interpreter.KindInt {
 				return 0, fmt.Errorf("%s: os.Process.handle is not int (got %s)", fnName, f.Value.Kind)
 			}
-			return f.Value.Int, nil
+			return f.Value.Int(), nil
 		}
 	}
 	return 0, fmt.Errorf("%s: os.Process has no handle field", fnName)
@@ -241,9 +241,9 @@ func extractHandle(fnName string, v interpreter.Value) (int64, error) {
 func stdinBytes(fnName string, v interpreter.Value) ([]byte, error) {
 	switch v.Kind {
 	case interpreter.KindString:
-		return []byte(v.Str), nil
+		return []byte(v.Str()), nil
 	case interpreter.KindBytes:
-		return v.Bytes, nil
+		return v.Bytes(), nil
 	default:
 		return nil, fmt.Errorf("%s: stdin must be a string or bytes, got %s", fnName, v.Kind)
 	}
@@ -321,23 +321,23 @@ func spawnOptions(fn string, opts interpreter.Value) (stdout, stderr string, err
 	if opts.Kind != interpreter.KindMap {
 		return "", "", nil
 	}
-	for _, e := range opts.Map {
+	for _, e := range opts.Map() {
 		if e.Key.Kind != interpreter.KindString {
 			return "", "", fmt.Errorf("%s: option keys must be strings, got %s", fn, e.Key.Kind)
 		}
-		if e.Key.Str != "stdout" && e.Key.Str != "stderr" {
-			return "", "", fmt.Errorf("%s: unknown option %q; known: stdout, stderr", fn, e.Key.Str)
+		if e.Key.Str() != "stdout" && e.Key.Str() != "stderr" {
+			return "", "", fmt.Errorf("%s: unknown option %q; known: stdout, stderr", fn, e.Key.Str())
 		}
 		if e.Value.Kind != interpreter.KindString {
-			return "", "", fmt.Errorf("%s: option %q must be a string, got %s", fn, e.Key.Str, e.Value.Kind)
+			return "", "", fmt.Errorf("%s: option %q must be a string, got %s", fn, e.Key.Str(), e.Value.Kind)
 		}
-		if err := checkSpawnMode(fn, e.Key.Str, e.Value.Str); err != nil {
+		if err := checkSpawnMode(fn, e.Key.Str(), e.Value.Str()); err != nil {
 			return "", "", err
 		}
-		if e.Key.Str == "stdout" {
-			stdout = e.Value.Str
+		if e.Key.Str() == "stdout" {
+			stdout = e.Value.Str()
 		} else {
-			stderr = e.Value.Str
+			stderr = e.Value.Str()
 		}
 	}
 	return stdout, stderr, nil
@@ -453,24 +453,24 @@ func spawnWithFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 		return interpreter.Null(), err
 	}
 	o := args[1]
-	if o.Kind != interpreter.KindStruct || o.StructNS != LibraryName || o.StructName != "SpawnOptions" {
+	if o.Kind != interpreter.KindStruct || o.StructNS() != LibraryName || o.StructName() != "SpawnOptions" {
 		return interpreter.Null(), fmt.Errorf("%s: options must be an os.SpawnOptions, got %s", fn, o.Kind)
 	}
 	var outMode, errMode string
-	for _, f := range o.Fields {
+	for _, f := range o.Fields() {
 		if f.Name != "stdout" && f.Name != "stderr" {
 			continue
 		}
 		if f.Value.Kind != interpreter.KindString {
 			return interpreter.Null(), fmt.Errorf("%s: os.SpawnOptions.%s must be string, got %s", fn, f.Name, f.Value.Kind)
 		}
-		if err := checkSpawnMode(fn, f.Name, f.Value.Str); err != nil {
+		if err := checkSpawnMode(fn, f.Name, f.Value.Str()); err != nil {
 			return interpreter.Null(), err
 		}
 		if f.Name == "stdout" {
-			outMode = f.Value.Str
+			outMode = f.Value.Str()
 		} else {
-			errMode = f.Value.Str
+			errMode = f.Value.Str()
 		}
 	}
 	return spawnProcess(fn, argv, outMode, errMode)
@@ -626,7 +626,7 @@ func waitProcess(ctx interpreter.BuiltinCtx, fnName string, args []interpreter.V
 		if args[1].Kind != interpreter.KindInt {
 			return interpreter.Null(), fmt.Errorf("%s: ms must be int, got %s", fnName, args[1].Kind)
 		}
-		ms = args[1].Int
+		ms = args[1].Int()
 		if ms < 0 || ms > maxTimeoutMillis {
 			return interpreter.Null(), fmt.Errorf("%s: ms must be 0 to %d, got %d", fnName, maxTimeoutMillis, ms)
 		}

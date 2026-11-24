@@ -121,13 +121,14 @@ func fitKNN(name string, args []interpreter.Value, regress bool) (interpreter.Va
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if args[2].Kind != interpreter.KindInt || args[2].Int < 1 {
+	if args[2].Kind != interpreter.KindInt || args[2].Int() < 1 {
 		return interpreter.Null(), fmt.Errorf("ml.%s: k must be a positive int", name)
 	}
-	k := int(args[2].Int)
-	if k > len(x) {
-		return interpreter.Null(), fmt.Errorf("ml.%s: k=%d exceeds the %d training rows", name, k, len(x))
+	// int64 compare before narrowing (32-bit int safety).
+	if args[2].Int() > int64(len(x)) {
+		return interpreter.Null(), fmt.Errorf("ml.%s: k=%d exceeds the %d training rows", name, args[2].Int(), len(x))
 	}
+	k := int(args[2].Int())
 	return storeModel(&knnModel{x: x, y: y, k: k, nf: len(x[0]), regress: regress}), nil
 }
 
@@ -330,10 +331,10 @@ func logisticRegressionFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 		}
 	}
 	if len(args) == 4 {
-		if args[3].Kind != interpreter.KindInt || args[3].Int < 1 || args[3].Int > maxLogisticEpochs {
+		if args[3].Kind != interpreter.KindInt || args[3].Int() < 1 || args[3].Int() > maxLogisticEpochs {
 			return interpreter.Null(), fmt.Errorf("ml.logisticRegression: epochs must be in [1, %d]", maxLogisticEpochs)
 		}
-		epochs = int(args[3].Int)
+		epochs = int(args[3].Int())
 	}
 	return fitLogistic("logisticRegression", x, y, lr, epochs)
 }

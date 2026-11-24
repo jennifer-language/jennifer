@@ -138,7 +138,7 @@ func takeStringArg(fnName string, args []Value, idx int, role string) (string, e
 	if args[idx].Kind != interpreter.KindString {
 		return "", fmt.Errorf("%s: %s must be string, got %s", fnName, role, args[idx].Kind)
 	}
-	return args[idx].Str, nil
+	return args[idx].Str(), nil
 }
 
 // osErr is the text of an os error for a message that already names the
@@ -295,7 +295,7 @@ func writeStringFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if args[1].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("fs.writeString: content must be string, got %s", args[1].Kind)
 	}
-	if err := writeCommon("fs.writeString", path, []byte(args[1].Str), os.O_WRONLY|os.O_CREATE|os.O_TRUNC); err != nil {
+	if err := writeCommon("fs.writeString", path, []byte(args[1].Str()), os.O_WRONLY|os.O_CREATE|os.O_TRUNC); err != nil {
 		return interpreter.Null(), err
 	}
 	return interpreter.Null(), nil
@@ -324,9 +324,9 @@ func writeNewFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	var payload []byte
 	switch args[1].Kind {
 	case interpreter.KindString:
-		payload = []byte(args[1].Str)
+		payload = []byte(args[1].Str())
 	case interpreter.KindBytes:
-		payload = args[1].Bytes
+		payload = args[1].Bytes()
 	default:
 		return interpreter.Null(), fmt.Errorf("fs.writeNew: content must be string or bytes, got %s", args[1].Kind)
 	}
@@ -347,7 +347,7 @@ func writeBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if args[1].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("fs.writeBytes: content must be bytes, got %s", args[1].Kind)
 	}
-	if err := writeCommon("fs.writeBytes", path, args[1].Bytes, os.O_WRONLY|os.O_CREATE|os.O_TRUNC); err != nil {
+	if err := writeCommon("fs.writeBytes", path, args[1].Bytes(), os.O_WRONLY|os.O_CREATE|os.O_TRUNC); err != nil {
 		return interpreter.Null(), err
 	}
 	return interpreter.Null(), nil
@@ -364,7 +364,7 @@ func appendStringFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if args[1].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("fs.appendString: content must be string, got %s", args[1].Kind)
 	}
-	if err := writeCommon("fs.appendString", path, []byte(args[1].Str), os.O_WRONLY|os.O_CREATE|os.O_APPEND); err != nil {
+	if err := writeCommon("fs.appendString", path, []byte(args[1].Str()), os.O_WRONLY|os.O_CREATE|os.O_APPEND); err != nil {
 		return interpreter.Null(), err
 	}
 	return interpreter.Null(), nil
@@ -381,7 +381,7 @@ func appendBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if args[1].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("fs.appendBytes: content must be bytes, got %s", args[1].Kind)
 	}
-	if err := writeCommon("fs.appendBytes", path, args[1].Bytes, os.O_WRONLY|os.O_CREATE|os.O_APPEND); err != nil {
+	if err := writeCommon("fs.appendBytes", path, args[1].Bytes(), os.O_WRONLY|os.O_CREATE|os.O_APPEND); err != nil {
 		return interpreter.Null(), err
 	}
 	return interpreter.Null(), nil
@@ -573,7 +573,7 @@ func chmodFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if args[1].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("fs.chmod: mode must be int, got %s", args[1].Kind)
 	}
-	mode := args[1].Int
+	mode := args[1].Int()
 	if mode < 0 || mode > 0o7777 {
 		return interpreter.Null(), fmt.Errorf("fs.chmod: mode %d out of range [0, 0o7777]", mode)
 	}
@@ -651,11 +651,11 @@ func chownFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if args[2].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("fs.chown: gid must be int, got %s", args[2].Kind)
 	}
-	uid, err := chownID("uid", args[1].Int)
+	uid, err := chownID("uid", args[1].Int())
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	gid, err := chownID("gid", args[2].Int)
+	gid, err := chownID("gid", args[2].Int())
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -922,7 +922,7 @@ func walkBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	results := make([]Value, len(entries))
 	for i, e := range entries {
 		st := makeStat(e.path, e.info)
-		fields := append([]interpreter.StructField(nil), st.Fields...)
+		fields := append([]interpreter.StructField(nil), st.Fields()...)
 		fields[0].Value = interpreter.BytesVal([]byte(e.path))
 		results[i] = interpreter.NamespacedStructVal(LibraryName, "StatBytes", fields)
 	}

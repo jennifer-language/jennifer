@@ -95,12 +95,12 @@ func TestQueryCursorAndAccessors(t *testing.T) {
 	}
 	// columns
 	cols, err := columnsFn(ctx(), []Value{rowsV})
-	if err != nil || cols.Kind != interpreter.KindList || len(cols.List) != 5 {
+	if err != nil || cols.Kind != interpreter.KindList || len(cols.List()) != 5 {
 		t.Fatalf("columns: %v (%+v)", err, cols)
 	}
 	// row 1
 	ok, err := nextFn(ctx(), []Value{rowsV})
-	if err != nil || !ok.Bool {
+	if err != nil || !ok.Bool() {
 		t.Fatalf("next 1: %v ok=%v", err, ok)
 	}
 	assertInt(t, rowsV, sv("id"), 1)
@@ -110,7 +110,7 @@ func TestQueryCursorAndAccessors(t *testing.T) {
 	assertFloat(t, rowsV, sv("active"), 1.0) // bool coerces like asInt does
 	// NULL column
 	nv, err := isNullFn(ctx(), []Value{rowsV, sv("note")})
-	if err != nil || !nv.Bool {
+	if err != nil || !nv.Bool() {
 		t.Errorf("isNull note (row1): %v %v", err, nv)
 	}
 	// asInt on NULL is an error, not a silent zero
@@ -122,17 +122,17 @@ func TestQueryCursorAndAccessors(t *testing.T) {
 
 	// row 2
 	ok, _ = nextFn(ctx(), []Value{rowsV})
-	if !ok.Bool {
+	if !ok.Bool() {
 		t.Fatal("next 2 should be true")
 	}
 	assertStr(t, rowsV, sv("name"), "bob")
 	bv, err := asBytesFn(ctx(), []Value{rowsV, sv("note")})
-	if err != nil || string(bv.Bytes) != "hi" {
-		t.Errorf("asBytes note (row2): %v %q", err, bv.Bytes)
+	if err != nil || string(bv.Bytes()) != "hi" {
+		t.Errorf("asBytes note (row2): %v %q", err, bv.Bytes())
 	}
 	// end
 	ok, _ = nextFn(ctx(), []Value{rowsV})
-	if ok.Bool {
+	if ok.Bool() {
 		t.Error("next 3 should be false (end)")
 	}
 	// exhaustion released the handle: the registry must not accumulate spent
@@ -154,16 +154,16 @@ func TestExecResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exec: %v", err)
 	}
-	if res.Kind != interpreter.KindStruct || res.StructName != "Result" {
+	if res.Kind != interpreter.KindStruct || res.StructName() != "Result" {
 		t.Fatalf("exec result shape: %+v", res)
 	}
 	var affected, lastId int64 = -99, -99
-	for _, f := range res.Fields {
+	for _, f := range res.Fields() {
 		switch f.Name {
 		case "affected":
-			affected = f.Value.Int
+			affected = f.Value.Int()
 		case "lastId":
-			lastId = f.Value.Int
+			lastId = f.Value.Int()
 		}
 	}
 	if affected != 1 || lastId != 42 {
@@ -174,7 +174,7 @@ func TestExecResult(t *testing.T) {
 func TestTransactionAndPrepared(t *testing.T) {
 	conn := mockConnValue(t)
 	tx, err := beginFn(ctx(), []Value{conn})
-	if err != nil || tx.StructName != "Tx" {
+	if err != nil || tx.StructName() != "Tx" {
 		t.Fatalf("begin: %v (%+v)", err, tx)
 	}
 	// exec on a Tx (querier dispatch)
@@ -190,7 +190,7 @@ func TestTransactionAndPrepared(t *testing.T) {
 	}
 	// prepared statement
 	st, err := prepareFn(ctx(), []Value{conn, sv("SELECT * FROM t WHERE id=?")})
-	if err != nil || st.StructName != "Statement" {
+	if err != nil || st.StructName() != "Statement" {
 		t.Fatalf("prepare: %v (%+v)", err, st)
 	}
 	rowsV, err := queryStmtFn(ctx(), []Value{st, interpreter.IntVal(1)})
@@ -251,29 +251,29 @@ func TestErrorsAndBinding(t *testing.T) {
 func assertInt(t *testing.T, rows, col Value, want int64) {
 	t.Helper()
 	v, err := asIntFn(ctx(), []Value{rows, col})
-	if err != nil || v.Int != want {
+	if err != nil || v.Int() != want {
 		t.Errorf("asInt(%v): got %v err=%v, want %d", col, v, err, want)
 	}
 }
 func assertStr(t *testing.T, rows, col Value, want string) {
 	t.Helper()
 	v, err := asStringFn(ctx(), []Value{rows, col})
-	if err != nil || v.Str != want {
-		t.Errorf("asString(%v): got %q err=%v, want %q", col, v.Str, err, want)
+	if err != nil || v.Str() != want {
+		t.Errorf("asString(%v): got %q err=%v, want %q", col, v.Str(), err, want)
 	}
 }
 func assertFloat(t *testing.T, rows, col Value, want float64) {
 	t.Helper()
 	v, err := asFloatFn(ctx(), []Value{rows, col})
-	if err != nil || v.Float != want {
-		t.Errorf("asFloat(%v): got %v err=%v, want %v", col, v.Float, err, want)
+	if err != nil || v.Float() != want {
+		t.Errorf("asFloat(%v): got %v err=%v, want %v", col, v.Float(), err, want)
 	}
 }
 func assertBool(t *testing.T, rows, col Value, want bool) {
 	t.Helper()
 	v, err := asBoolFn(ctx(), []Value{rows, col})
-	if err != nil || v.Bool != want {
-		t.Errorf("asBool(%v): got %v err=%v, want %v", col, v.Bool, err, want)
+	if err != nil || v.Bool() != want {
+		t.Errorf("asBool(%v): got %v err=%v, want %v", col, v.Bool(), err, want)
 	}
 }
 
@@ -284,7 +284,7 @@ func TestCursorExhaustedAccessorErrors(t *testing.T) {
 	rowsV, _ := queryFn(ctx(), []Value{conn, sv("SELECT * FROM t")})
 	for {
 		ok, _ := nextFn(ctx(), []Value{rowsV})
-		if !ok.Bool {
+		if !ok.Bool() {
 			break
 		}
 	}
@@ -313,7 +313,7 @@ func TestCursorConcurrentIsRaceFree(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 20; j++ {
-				if ok, _ := nextFn(ctx(), []Value{rowsV}); ok.Bool {
+				if ok, _ := nextFn(ctx(), []Value{rowsV}); ok.Bool() {
 					_, _ = asIntFn(ctx(), []Value{rowsV, sv("id")})
 				}
 			}

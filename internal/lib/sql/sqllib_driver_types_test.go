@@ -73,7 +73,7 @@ func typedRowsValue(t *testing.T) Value {
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if ok, err := nextFn(ctx(), []Value{rowsV}); err != nil || !ok.Bool {
+	if ok, err := nextFn(ctx(), []Value{rowsV}); err != nil || !ok.Bool() {
 		t.Fatalf("next: %v %v", ok, err)
 	}
 	return rowsV
@@ -112,7 +112,7 @@ func TestAccessorsDriverTypes(t *testing.T) {
 func TestBeginPrepareBoundedByQueryTimeout(t *testing.T) {
 	conn := mockConnValue(t)
 	mu.Lock()
-	conns[conn.Fields[0].Value.Int].db.SetMaxOpenConns(1)
+	conns[conn.Fields()[0].Value.Int()].db.SetMaxOpenConns(1)
 	mu.Unlock()
 	// The cursor is opened without a deadline (which would close it and free
 	// the connection), then the timeout is lowered for begin / prepare.
@@ -154,7 +154,7 @@ func TestBeginPrepareBoundedByQueryTimeout(t *testing.T) {
 func TestBeginReleasesConnection(t *testing.T) {
 	conn := mockConnValue(t)
 	mu.Lock()
-	conns[conn.Fields[0].Value.Int].db.SetMaxOpenConns(1)
+	conns[conn.Fields()[0].Value.Int()].db.SetMaxOpenConns(1)
 	mu.Unlock()
 	if _, err := setQueryTimeoutFn(ctx(), []Value{interpreter.IntVal(1000)}); err != nil {
 		t.Fatal(err)

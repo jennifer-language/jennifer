@@ -34,7 +34,7 @@ func TestErrorKinds(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return v.Bytes
+		return v.Bytes()
 	}
 	tarB, zipB, tgzB := packed("tar"), packed("zip"), packed("tar.gz")
 	unpack := func(format string, b []byte) func() error {

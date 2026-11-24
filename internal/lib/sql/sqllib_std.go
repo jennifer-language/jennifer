@@ -329,7 +329,7 @@ func toDriverArgs(fn string, params []Value) ([]interface{}, error) {
 	// the orm module needs) where the variadic call site has a fixed arity. The
 	// plain variadic form `sql.exec(conn, sql, a, b, c)` is unaffected.
 	if len(params) == 1 && params[0].Kind == interpreter.KindList {
-		params = params[0].List
+		params = params[0].List()
 	}
 	out := make([]interface{}, len(params))
 	for i, p := range params {
@@ -337,15 +337,15 @@ func toDriverArgs(fn string, params []Value) ([]interface{}, error) {
 		case interpreter.KindNull:
 			out[i] = nil
 		case interpreter.KindInt:
-			out[i] = p.Int
+			out[i] = p.Int()
 		case interpreter.KindFloat:
-			out[i] = p.Float
+			out[i] = p.Float()
 		case interpreter.KindString:
-			out[i] = p.Str
+			out[i] = p.Str()
 		case interpreter.KindBool:
-			out[i] = p.Bool
+			out[i] = p.Bool()
 		case interpreter.KindBytes:
-			out[i] = p.Bytes
+			out[i] = p.Bytes()
 		default:
 			return nil, fmt.Errorf("%s: parameter %d has type %s, which cannot bind to a placeholder (use int/float/string/bool/bytes/null)", fn, i+1, p.Kind)
 		}
@@ -370,12 +370,12 @@ func closedError(format string, a ...any) error {
 // resolveQuerier returns the Connection's pool or the Tx, and the connection
 // whose query timeout applies.
 func resolveQuerier(fn string, v Value) (querier, *connState, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName {
 		return nil, nil, fmt.Errorf("%s: first argument must be a sql.Connection or sql.Tx, got %s", fn, v.Kind)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	switch v.StructName {
+	switch v.StructName() {
 	case "Connection":
 		id, err := handleID(fn, v, "Connection")
 		if err != nil {
@@ -395,7 +395,7 @@ func resolveQuerier(fn string, v Value) (querier, *connState, error) {
 		}
 		return nil, nil, closedError("%s: sql.Tx id %d has been committed or rolled back", fn, id)
 	}
-	return nil, nil, fmt.Errorf("%s: first argument must be a sql.Connection or sql.Tx, got sql.%s", fn, v.StructName)
+	return nil, nil, fmt.Errorf("%s: first argument must be a sql.Connection or sql.Tx, got sql.%s", fn, v.StructName())
 }
 
 // resolveConn returns an open Connection's state.
@@ -424,21 +424,21 @@ type openOptions struct {
 // readOptions reads a sql.Options argument.
 func readOptions(fn string, v Value) (openOptions, error) {
 	var o openOptions
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "Options" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "Options" {
 		return o, fmt.Errorf("%s: options must be a sql.Options, got %s", fn, v.Kind)
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		switch f.Name {
 		case "allowInsecure":
 			if f.Value.Kind != interpreter.KindBool {
 				return o, fmt.Errorf("%s: sql.Options.allowInsecure must be bool, got %s", fn, f.Value.Kind)
 			}
-			o.allowInsecure = f.Value.Bool
+			o.allowInsecure = f.Value.Bool()
 		case "queryTimeoutMs":
 			if f.Value.Kind != interpreter.KindInt {
 				return o, fmt.Errorf("%s: sql.Options.queryTimeoutMs must be int, got %s", fn, f.Value.Kind)
 			}
-			o.queryTimeoutMs = f.Value.Int
+			o.queryTimeoutMs = f.Value.Int()
 		}
 	}
 	return o, nil
@@ -759,18 +759,20 @@ func (r *rowState) column(fn string, col Value) (interface{}, string, error) {
 	}
 	switch col.Kind {
 	case interpreter.KindInt:
-		i := int(col.Int)
-		if i < 0 || i >= len(r.cur) {
+		// int64 compare before narrowing: on a 32-bit int, 1<<32 would
+		// truncate to column 0.
+		if i := col.Int(); i < 0 || i >= int64(len(r.cur)) {
 			return nil, "", fmt.Errorf("%s: column index %d out of range (0..%d)", fn, i, len(r.cur)-1)
 		}
+		i := int(col.Int())
 		return r.cur[i], r.cols[i], nil
 	case interpreter.KindString:
 		for i, c := range r.cols {
-			if c == col.Str {
+			if c == col.Str() {
 				return r.cur[i], c, nil
 			}
 		}
-		return nil, "", fmt.Errorf("%s: no column named %q", fn, col.Str)
+		return nil, "", fmt.Errorf("%s: no column named %q", fn, col.Str())
 	}
 	return nil, "", fmt.Errorf("%s: column must be a name (string) or a 0-based index (int)", fn)
 }

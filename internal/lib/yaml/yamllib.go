@@ -89,7 +89,7 @@ func Install(in *interpreter.Interpreter) {
 		if args[0].Kind != interpreter.KindString {
 			return interpreter.Null(), fmt.Errorf("yaml.decode: argument must be string, got %s", args[0].Kind)
 		}
-		tree, err := decodeYaml(args[0].Str)
+		tree, err := decodeYaml(args[0].Str())
 		if err != nil {
 			return interpreter.Null(), err
 		}
@@ -112,7 +112,7 @@ func Install(in *interpreter.Interpreter) {
 		if args[0].Kind != interpreter.KindString {
 			return interpreter.Null(), fmt.Errorf("yaml.decodeAll: argument must be string, got %s", args[0].Kind)
 		}
-		docs, err := decodeAllYaml(args[0].Str)
+		docs, err := decodeAllYaml(args[0].Str())
 		if err != nil {
 			return interpreter.Null(), err
 		}
@@ -175,7 +175,7 @@ func decodeWithFn(args []interpreter.Value) (interpreter.Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	tree, err := decodeYamlCaps(args[0].Str, caps)
+	tree, err := decodeYamlCaps(args[0].Str(), caps)
 	if err != nil {
 		return interpreter.Null(), err
 	}

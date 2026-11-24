@@ -32,11 +32,11 @@ func errCall(t *testing.T, label string, fn listFn, args ...interpreter.Value) {
 
 func TestFirstAndLast(t *testing.T) {
 	xs := intList(10, 20, 30)
-	if v := okCall(t, firstFn, xs); v.Int != 10 {
-		t.Errorf("first = %d, want 10", v.Int)
+	if v := okCall(t, firstFn, xs); v.Int() != 10 {
+		t.Errorf("first = %d, want 10", v.Int())
 	}
-	if v := okCall(t, lastFn, xs); v.Int != 30 {
-		t.Errorf("last = %d, want 30", v.Int)
+	if v := okCall(t, lastFn, xs); v.Int() != 30 {
+		t.Errorf("last = %d, want 30", v.Int())
 	}
 	errCall(t, "first(empty)", firstFn, intList())
 	errCall(t, "last(empty)", lastFn, intList())
@@ -47,10 +47,10 @@ func TestFirstAndLast(t *testing.T) {
 func TestReverseIsNonMutating(t *testing.T) {
 	xs := intList(1, 2, 3)
 	rev := okCall(t, reverseFn, xs)
-	if len(rev.List) != 3 || rev.List[0].Int != 3 || rev.List[2].Int != 1 {
-		t.Errorf("reverse = %v, want [3 2 1]", rev.List)
+	if len(rev.List()) != 3 || rev.List()[0].Int() != 3 || rev.List()[2].Int() != 1 {
+		t.Errorf("reverse = %v, want [3 2 1]", rev.List())
 	}
-	if xs.List[0].Int != 1 {
+	if xs.List()[0].Int() != 1 {
 		t.Errorf("reverse mutated the input")
 	}
 	errCall(t, "reverse(non-list)", reverseFn, interpreter.IntVal(1))
@@ -60,11 +60,11 @@ func TestConcat(t *testing.T) {
 	a := intList(1, 2)
 	b := intList(3, 4)
 	c := okCall(t, concatFn, a, b)
-	if len(c.List) != 4 || c.List[0].Int != 1 || c.List[3].Int != 4 {
-		t.Errorf("concat = %v, want [1 2 3 4]", c.List)
+	if len(c.List()) != 4 || c.List()[0].Int() != 1 || c.List()[3].Int() != 4 {
+		t.Errorf("concat = %v, want [1 2 3 4]", c.List())
 	}
 	// Inputs unchanged.
-	if len(a.List) != 2 || len(b.List) != 2 {
+	if len(a.List()) != 2 || len(b.List()) != 2 {
 		t.Errorf("concat mutated an input")
 	}
 	errCall(t, "concat(list, non-list)", concatFn, a, interpreter.IntVal(1))

@@ -168,7 +168,7 @@ func TestBuildRefusesNonXMLChars(t *testing.T) {
 	text := "tab\tlf\ncr\rdel\x7f�\U0001F600"
 	el := call(t, setAttrFn, call(t, setTextFn, base, sval(text)), sval("k"), sval(text))
 	out := call(t, encodeOnly, el)
-	back := mustDecode(t, out.Str)
+	back := mustDecode(t, out.Str())
 	str := strGetter(t)
 	if got := str(textFn(noCtx, []interpreter.Value{back})); got != text {
 		t.Errorf("text round trip: %q", got)

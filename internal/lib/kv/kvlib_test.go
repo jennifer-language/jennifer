@@ -45,52 +45,52 @@ func TestSetGetIncr(t *testing.T) {
 	st := mustOpen(t, r)
 
 	call(t, r.setFn, st, str("a"), str("1"), iv(0))
-	if got := call(t, r.getFn, st, str("a")); got.Str != "1" {
-		t.Errorf("get a = %q, want 1", got.Str)
+	if got := call(t, r.getFn, st, str("a")); got.Str() != "1" {
+		t.Errorf("get a = %q, want 1", got.Str())
 	}
-	if got := call(t, r.hasFn, st, str("a")); !got.Bool {
+	if got := call(t, r.hasFn, st, str("a")); !got.Bool() {
 		t.Error("has a = false, want true")
 	}
-	if got := call(t, r.incrFn, st, str("a"), iv(5)); got.Int != 6 {
-		t.Errorf("incr a = %d, want 6", got.Int)
+	if got := call(t, r.incrFn, st, str("a"), iv(5)); got.Int() != 6 {
+		t.Errorf("incr a = %d, want 6", got.Int())
 	}
 	// add: existing -> false, new -> true
-	if got := call(t, r.addFn, st, str("a"), str("x"), iv(0)); got.Bool {
+	if got := call(t, r.addFn, st, str("a"), str("x"), iv(0)); got.Bool() {
 		t.Error("add existing = true, want false")
 	}
-	if got := call(t, r.addFn, st, str("b"), str("y"), iv(0)); !got.Bool {
+	if got := call(t, r.addFn, st, str("b"), str("y"), iv(0)); !got.Bool() {
 		t.Error("add new = false, want true")
 	}
 	// touch present vs absent
-	if got := call(t, r.touchFn, st, str("b"), iv(30)); !got.Bool {
+	if got := call(t, r.touchFn, st, str("b"), iv(30)); !got.Bool() {
 		t.Error("touch b = false, want true")
 	}
-	if got := call(t, r.touchFn, st, str("gone"), iv(30)); got.Bool {
+	if got := call(t, r.touchFn, st, str("gone"), iv(30)); got.Bool() {
 		t.Error("touch gone = true, want false")
 	}
 	// delete present then absent
-	if got := call(t, r.deleteFn, st, str("a")); !got.Bool {
+	if got := call(t, r.deleteFn, st, str("a")); !got.Bool() {
 		t.Error("delete a = false, want true")
 	}
-	if got := call(t, r.deleteFn, st, str("a")); got.Bool {
+	if got := call(t, r.deleteFn, st, str("a")); got.Bool() {
 		t.Error("delete a again = true, want false")
 	}
 	// get / incr on a missing key
-	if got := call(t, r.getFn, st, str("missing")); got.Str != "" {
-		t.Errorf("get missing = %q, want empty", got.Str)
+	if got := call(t, r.getFn, st, str("missing")); got.Str() != "" {
+		t.Errorf("get missing = %q, want empty", got.Str())
 	}
 	// M29.38: an absent key starts at 0 and is created; -1 is an ordinary count.
-	if got := call(t, r.incrFn, st, str("missing"), iv(5)); got.Int != 5 {
-		t.Errorf("incr missing by 5 = %d, want 5", got.Int)
+	if got := call(t, r.incrFn, st, str("missing"), iv(5)); got.Int() != 5 {
+		t.Errorf("incr missing by 5 = %d, want 5", got.Int())
 	}
-	if got := call(t, r.getFn, st, str("missing")); got.Str != "5" {
-		t.Errorf("get after incr of an absent key = %q, want 5", got.Str)
+	if got := call(t, r.getFn, st, str("missing")); got.Str() != "5" {
+		t.Errorf("get after incr of an absent key = %q, want 5", got.Str())
 	}
-	if got := call(t, r.incrFn, st, str("down"), iv(-1)); got.Int != -1 {
-		t.Errorf("incr absent by -1 = %d, want -1", got.Int)
+	if got := call(t, r.incrFn, st, str("down"), iv(-1)); got.Int() != -1 {
+		t.Errorf("incr absent by -1 = %d, want -1", got.Int())
 	}
-	if got := call(t, r.incrFn, st, str("down"), iv(-1)); got.Int != -2 {
-		t.Errorf("incr -1 by -1 = %d, want -2", got.Int)
+	if got := call(t, r.incrFn, st, str("down"), iv(-1)); got.Int() != -2 {
+		t.Errorf("incr -1 by -1 = %d, want -2", got.Int())
 	}
 }
 
@@ -105,16 +105,16 @@ func TestExpiryEvicts(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.data["exp"] = entry{value: "x", expires: time.Now().Add(-time.Second)}
-	if got := call(t, r.getFn, st, str("exp")); got.Str != "" {
-		t.Errorf("get expired = %q, want empty", got.Str)
+	if got := call(t, r.getFn, st, str("exp")); got.Str() != "" {
+		t.Errorf("get expired = %q, want empty", got.Str())
 	}
-	if got := call(t, r.hasFn, st, str("exp")); got.Bool {
+	if got := call(t, r.hasFn, st, str("exp")); got.Bool() {
 		t.Error("has expired = true, want false")
 	}
 	// a live TTL entry stays readable
 	s.data["live"] = entry{value: "ok", expires: time.Now().Add(time.Hour)}
-	if got := call(t, r.getFn, st, str("live")); got.Str != "ok" {
-		t.Errorf("get live = %q, want ok", got.Str)
+	if got := call(t, r.getFn, st, str("live")); got.Str() != "ok" {
+		t.Errorf("get live = %q, want ok", got.Str())
 	}
 }
 
@@ -125,8 +125,8 @@ func TestStoresIsolated(t *testing.T) {
 	a := mustOpen(t, r)
 	b := mustOpen(t, r)
 	call(t, r.setFn, a, str("k"), str("in-a"), iv(0))
-	if got := call(t, r.getFn, b, str("k")); got.Str != "" {
-		t.Errorf("store b saw store a's key: %q", got.Str)
+	if got := call(t, r.getFn, b, str("k")); got.Str() != "" {
+		t.Errorf("store b saw store a's key: %q", got.Str())
 	}
 	call(t, r.closeFn, a)
 	if _, err := r.getFn(ctx, []interpreter.Value{a, str("k")}); err == nil {
@@ -154,8 +154,8 @@ func TestIncrOverflowErrors(t *testing.T) {
 		t.Error("incr past MaxInt64 should error, not wrap")
 	}
 	// still readable and unchanged after the rejected overflow
-	if got := call(t, r.getFn, st, str("big")); got.Str != "9223372036854775807" {
-		t.Errorf("value changed after rejected overflow: %q", got.Str)
+	if got := call(t, r.getFn, st, str("big")); got.Str() != "9223372036854775807" {
+		t.Errorf("value changed after rejected overflow: %q", got.Str())
 	}
 }
 
@@ -178,11 +178,11 @@ func TestFilePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	if got := call(t, r2.getFn, st2, str("user")); got.Str != "ada" {
-		t.Errorf("persisted user = %q, want ada", got.Str)
+	if got := call(t, r2.getFn, st2, str("user")); got.Str() != "ada" {
+		t.Errorf("persisted user = %q, want ada", got.Str())
 	}
-	if got := call(t, r2.getFn, st2, str("n")); got.Str != "7" {
-		t.Errorf("persisted n = %q, want 7", got.Str)
+	if got := call(t, r2.getFn, st2, str("n")); got.Str() != "7" {
+		t.Errorf("persisted n = %q, want 7", got.Str())
 	}
 }
 
@@ -210,8 +210,8 @@ func TestActiveExpirySweep(t *testing.T) {
 			t.Fatalf("expired entry old%d survived the active sweep", i)
 		}
 	}
-	if got := call(t, r.getFn, st, str("live0")); got.Str != "v" {
-		t.Errorf("live entry evicted: %q", got.Str)
+	if got := call(t, r.getFn, st, str("live0")); got.Str() != "v" {
+		t.Errorf("live entry evicted: %q", got.Str())
 	}
 }
 
@@ -235,8 +235,8 @@ func TestConcurrentIncr(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if got := call(t, r.getFn, st, str("c")); got.Str != "4000" {
-		t.Errorf("concurrent incr total = %q, want 4000", got.Str)
+	if got := call(t, r.getFn, st, str("c")); got.Str() != "4000" {
+		t.Errorf("concurrent incr total = %q, want 4000", got.Str())
 	}
 }
 
@@ -341,13 +341,13 @@ func TestSetGetValue(t *testing.T) {
 
 	call(t, r.setValueFn, st, str("doc"), doc, iv(0))
 	got := call(t, r.getValueFn, st, str("doc"))
-	if got.Kind != interpreter.KindObject || got.StructNS != "json" || got.StructName != "Value" {
+	if got.Kind != interpreter.KindObject || got.StructNS() != "json" || got.StructName() != "Value" {
 		t.Fatalf("getValue = %v, want the json.Value", got)
 	}
-	if got.Obj != doc.Obj {
+	if got.Obj() != doc.Obj() {
 		t.Error("getValue copied the tree; it must share the stored one")
 	}
-	if !call(t, r.hasFn, st, str("doc")).Bool {
+	if !call(t, r.hasFn, st, str("doc")).Bool() {
 		t.Error("has(doc) = false for a value entry")
 	}
 
@@ -367,10 +367,10 @@ func TestSetGetValue(t *testing.T) {
 	// A value replaced by setValue is seen by later readers; delete removes it.
 	doc2 := interpreter.ObjectVal("json", "Value", interpreter.IntVal(2))
 	call(t, r.setValueFn, st, str("doc"), doc2, iv(0))
-	if call(t, r.getValueFn, st, str("doc")).Obj != doc2.Obj {
+	if call(t, r.getValueFn, st, str("doc")).Obj() != doc2.Obj() {
 		t.Error("getValue after a replace did not return the new value")
 	}
-	if !call(t, r.deleteFn, st, str("doc")).Bool || call(t, r.hasFn, st, str("doc")).Bool {
+	if !call(t, r.deleteFn, st, str("doc")).Bool() || call(t, r.hasFn, st, str("doc")).Bool() {
 		t.Error("delete of a value entry failed")
 	}
 
@@ -439,8 +439,8 @@ func TestFailedFlushLeavesMemoryUnchanged(t *testing.T) {
 		t.Helper()
 		want := map[string]string{"sess": "alice", "n": "1", "new": "", "added": ""}
 		for k, v := range want {
-			if got := call(t, reg.getFn, h, str(k)); got.Str != v {
-				t.Errorf("%s: %s = %q, want %q", label, k, got.Str, v)
+			if got := call(t, reg.getFn, h, str(k)); got.Str() != v {
+				t.Errorf("%s: %s = %q, want %q", label, k, got.Str(), v)
 			}
 		}
 	}
@@ -464,8 +464,8 @@ func TestKeys(t *testing.T) {
 	st := mustOpen(t, r)
 	names := func(v interpreter.Value) string {
 		out := ""
-		for _, e := range v.List {
-			out += e.Str + ","
+		for _, e := range v.List() {
+			out += e.Str() + ","
 		}
 		return out
 	}
@@ -511,7 +511,7 @@ func TestNegativeTTLIsAnError(t *testing.T) {
 			t.Errorf("%s with a negative ttl should error", name)
 		}
 	}
-	if got := call(t, r.hasFn, st, str("n")); got.Bool {
+	if got := call(t, r.hasFn, st, str("n")); got.Bool() {
 		t.Error("a refused add must not store the key")
 	}
 }
@@ -552,8 +552,8 @@ func TestOpenFileRefusesMalformedFiles(t *testing.T) {
 		r := &registry{stores: map[int64]*store{}}
 		st := call(t, r.openFileFn, str(path))
 		if content != "" {
-			if got := call(t, r.getFn, st, str("key")); got.Str != "value" {
-				t.Errorf("good file: get = %q, want value", got.Str)
+			if got := call(t, r.getFn, st, str("key")); got.Str() != "value" {
+				t.Errorf("good file: get = %q, want value", got.Str())
 			}
 		}
 	}

@@ -29,15 +29,15 @@ func Handle(ns, name string, id int64) Value {
 // HandleID pulls the integer id out of a `ns.name{...}` handle value, with a
 // uniform boundary error when the argument is the wrong kind of struct.
 func HandleID(fn string, v Value, ns, name string) (int64, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != ns || v.StructName != name {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != ns || v.StructName() != name {
 		return 0, fmt.Errorf("%s: argument must be a %s.%s, got %s", fn, ns, name, v.Kind)
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == "id" {
 			if f.Value.Kind != interpreter.KindInt {
 				return 0, fmt.Errorf("%s: %s.%s.id is not int", fn, ns, name)
 			}
-			return f.Value.Int, nil
+			return f.Value.Int(), nil
 		}
 	}
 	return 0, fmt.Errorf("%s: %s.%s has no id field", fn, ns, name)
@@ -78,7 +78,7 @@ func StringArg(fn string, args []Value, i int, name string) (string, error) {
 	if args[i].Kind != interpreter.KindString {
 		return "", fmt.Errorf("%s: %s must be string, got %s", fn, name, args[i].Kind)
 	}
-	return args[i].Str, nil
+	return args[i].Str(), nil
 }
 
 func IntArg(fn string, args []Value, i int, name string) (int64, error) {
@@ -88,7 +88,7 @@ func IntArg(fn string, args []Value, i int, name string) (int64, error) {
 	if args[i].Kind != interpreter.KindInt {
 		return 0, fmt.Errorf("%s: %s must be int, got %s", fn, name, args[i].Kind)
 	}
-	return args[i].Int, nil
+	return args[i].Int(), nil
 }
 
 func BytesArg(fn string, args []Value, i int, name string) ([]byte, error) {
@@ -98,5 +98,5 @@ func BytesArg(fn string, args []Value, i int, name string) ([]byte, error) {
 	if args[i].Kind != interpreter.KindBytes {
 		return nil, fmt.Errorf("%s: %s must be bytes, got %s", fn, name, args[i].Kind)
 	}
-	return args[i].Bytes, nil
+	return args[i].Bytes(), nil
 }

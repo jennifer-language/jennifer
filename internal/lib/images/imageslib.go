@@ -156,7 +156,7 @@ func oneImage(fn string, args []Value) (*imageValue, error) {
 
 func describe(v Value) string {
 	if v.Kind == interpreter.KindObject || v.Kind == interpreter.KindStruct {
-		return v.StructNS + "." + v.StructName
+		return v.StructNS() + "." + v.StructName()
 	}
 	return v.Kind.String()
 }
@@ -167,34 +167,34 @@ func intArg(fn string, v Value, what string) (int, error) {
 	}
 	// On a 32-bit int (jennifer-tiny) a value past the int range would
 	// truncate: create(4294967297, 1) made a 1x1 image.
-	if v.Int < math.MinInt || v.Int > math.MaxInt {
-		return 0, fmt.Errorf("%s: %s %d is out of range", fn, what, v.Int)
+	if v.Int() < math.MinInt || v.Int() > math.MaxInt {
+		return 0, fmt.Errorf("%s: %s %d is out of range", fn, what, v.Int())
 	}
-	return int(v.Int), nil
+	return int(v.Int()), nil
 }
 
 func stringArg(fn string, v Value, what string) (string, error) {
 	if v.Kind != interpreter.KindString {
 		return "", fmt.Errorf("%s: %s must be string, got %s", fn, what, describe(v))
 	}
-	return v.Str, nil
+	return v.Str(), nil
 }
 
 // colorArg reads an images.Color; a field outside 0..255 is an error.
 func colorArg(fn string, v Value) (color.NRGBA, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "Color" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "Color" {
 		return color.NRGBA{}, fmt.Errorf("%s: color must be an images.Color, got %s", fn, describe(v))
 	}
 	var c [4]uint8
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		idx := strings.Index("rgba", f.Name)
 		if len(f.Name) != 1 || idx < 0 {
 			continue
 		}
-		if f.Value.Kind != interpreter.KindInt || f.Value.Int < 0 || f.Value.Int > 255 {
+		if f.Value.Kind != interpreter.KindInt || f.Value.Int() < 0 || f.Value.Int() > 255 {
 			return color.NRGBA{}, fmt.Errorf("%s: images.Color.%s must be an int in 0..255", fn, f.Name)
 		}
-		c[idx] = uint8(f.Value.Int)
+		c[idx] = uint8(f.Value.Int())
 	}
 	return color.NRGBA{R: c[0], G: c[1], B: c[2], A: c[3]}, nil
 }
@@ -251,7 +251,7 @@ func decodeFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		}
 		limit = int64(n)
 	}
-	return decodeImage(ctx, fn, args[0].Bytes, limit)
+	return decodeImage(ctx, fn, args[0].Bytes(), limit)
 }
 
 // decodeWithFn implements `images.decodeWith(data, images.DecodeOptions) ->
@@ -266,25 +266,25 @@ func decodeWithFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("%s: data must be bytes, got %s", fn, describe(args[0]))
 	}
 	o := args[1]
-	if o.Kind != interpreter.KindStruct || o.StructNS != LibraryName || o.StructName != "DecodeOptions" {
+	if o.Kind != interpreter.KindStruct || o.StructNS() != LibraryName || o.StructName() != "DecodeOptions" {
 		return interpreter.Null(), fmt.Errorf("%s: options must be an images.DecodeOptions, got %s", fn, describe(o))
 	}
 	limit := int64(maxPixels)
-	for _, f := range o.Fields {
+	for _, f := range o.Fields() {
 		if f.Name != "maxPixels" {
 			continue
 		}
 		if f.Value.Kind != interpreter.KindInt {
 			return interpreter.Null(), fmt.Errorf("%s: maxPixels must be int, got %s", fn, describe(f.Value))
 		}
-		if f.Value.Int < 0 {
-			return interpreter.Null(), fmt.Errorf("%s: maxPixels must be 0 (the default), positive, or math.MAX_INT (no cap), got %d", fn, f.Value.Int)
+		if f.Value.Int() < 0 {
+			return interpreter.Null(), fmt.Errorf("%s: maxPixels must be 0 (the default), positive, or math.MAX_INT (no cap), got %d", fn, f.Value.Int())
 		}
-		if f.Value.Int > 0 {
-			limit = f.Value.Int
+		if f.Value.Int() > 0 {
+			limit = f.Value.Int()
 		}
 	}
-	return decodeImage(ctx, fn, args[0].Bytes, limit)
+	return decodeImage(ctx, fn, args[0].Bytes(), limit)
 }
 
 // decodeImage decodes data under the pixel cap limit, checked against the
@@ -333,7 +333,7 @@ func infoFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if args[0].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("%s: data must be bytes, got %s", fn, describe(args[0]))
 	}
-	cfg, format, err := image.DecodeConfig(bytes.NewReader(args[0].Bytes))
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(args[0].Bytes()))
 	if errors.Is(err, image.ErrFormat) {
 		return interpreter.Null(), dataerr.New(dataKind, "%s: not a PNG, JPEG or GIF image", fn)
 	}
@@ -458,11 +458,11 @@ func fromPixelsFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if len(args[2].Bytes) != len(img.Pix) {
+	if len(args[2].Bytes()) != len(img.Pix) {
 		return interpreter.Null(), fmt.Errorf("%s: a %dx%d image needs %d bytes (4 per pixel), got %d",
-			fn, w, h, len(img.Pix), len(args[2].Bytes))
+			fn, w, h, len(img.Pix), len(args[2].Bytes()))
 	}
-	copy(img.Pix, args[2].Bytes)
+	copy(img.Pix, args[2].Bytes())
 	return wrap(img, false), nil
 }
 

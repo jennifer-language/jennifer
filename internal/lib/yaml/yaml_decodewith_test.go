@@ -85,15 +85,15 @@ func TestAsBytes(t *testing.T) {
 	s := interpreter.StringVal
 	doc := mustYaml(t, "decode", s("bin: !!binary aGVsbG8=\nblock: !!binary |\n  aGVs\n  bG8=\ntext: aGVsbG8=\n"))
 	for _, ptr := range []string{"/bin", "/block"} {
-		if got := mustYaml(t, "typeOf", doc, s(ptr)).Str; got != "bytes" {
+		if got := mustYaml(t, "typeOf", doc, s(ptr)).Str(); got != "bytes" {
 			t.Errorf("typeOf(%s) = %q", ptr, got)
 		}
 		v := mustYaml(t, "asBytes", doc, s(ptr))
-		if v.Kind != interpreter.KindBytes || string(v.Bytes) != "hello" {
+		if v.Kind != interpreter.KindBytes || string(v.Bytes()) != "hello" {
 			t.Errorf("asBytes(%s) = %v", ptr, v)
 		}
 	}
-	if v := mustYaml(t, "asBytes", mustYaml(t, "get", doc, s("/bin"))); string(v.Bytes) != "hello" {
+	if v := mustYaml(t, "asBytes", mustYaml(t, "get", doc, s("/bin"))); string(v.Bytes()) != "hello" {
 		t.Errorf("asBytes(get(/bin)) = %v", v)
 	}
 	_, err := yamlCall(t, "asBytes", doc, s("/text"))
@@ -104,7 +104,7 @@ func TestAsBytes(t *testing.T) {
 	enc := mustYaml(t, "encode", interpreter.MapVal(parser.PrimitiveType(parser.TypeString), parser.PrimitiveType(parser.TypeBytes),
 		[]interpreter.MapEntry{{Key: s("b"), Value: interpreter.BytesVal([]byte{0, 1, 255})}}))
 	back := mustYaml(t, "asBytes", mustYaml(t, "decode", enc), s("/b"))
-	if string(back.Bytes) != "\x00\x01\xff" {
-		t.Errorf("round trip through %q = %v", enc.Str, back.Bytes)
+	if string(back.Bytes()) != "\x00\x01\xff" {
+		t.Errorf("round trip through %q = %v", enc.Str(), back.Bytes())
 	}
 }

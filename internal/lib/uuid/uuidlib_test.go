@@ -206,15 +206,15 @@ func TestGeneratorFns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("v4: %v", err)
 	}
-	if b, ok := parse(out.Str); !ok || b[6]>>4 != 4 {
-		t.Errorf("v4() produced %q (version %d), want a valid v4", out.Str, b[6]>>4)
+	if b, ok := parse(out.Str()); !ok || b[6]>>4 != 4 {
+		t.Errorf("v4() produced %q (version %d), want a valid v4", out.Str(), b[6]>>4)
 	}
 	out7, err := v7Fn(interpreter.BuiltinCtx{}, nil)
 	if err != nil {
 		t.Fatalf("v7: %v", err)
 	}
-	if b, ok := parse(out7.Str); !ok || b[6]>>4 != 7 {
-		t.Errorf("v7() produced %q (version %d), want a valid v7", out7.Str, b[6]>>4)
+	if b, ok := parse(out7.Str()); !ok || b[6]>>4 != 7 {
+		t.Errorf("v7() produced %q (version %d), want a valid v7", out7.Str(), b[6]>>4)
 	}
 	if _, err := v4Fn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("v4")}); err == nil {
 		t.Error("expected an arity error when v4 is given an argument")

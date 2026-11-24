@@ -41,20 +41,20 @@ func TestDeleteSingleCopy(t *testing.T) {
 // with its source.
 func TestDeleteResultLookups(t *testing.T) {
 	m := bigMap(100)
-	m.Map[5].Value = interpreter.Value{Kind: interpreter.KindList, List: []interpreter.Value{interpreter.IntVal(1)}}
+	m.Map()[5].Value = interpreter.GenericListVal([]interpreter.Value{interpreter.IntVal(1)})
 	out, err := deleteFn(interpreter.BuiltinCtx{}, []interpreter.Value{m, interpreter.StringVal("k3")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Map) != 99 || out.LookupKey(interpreter.StringVal("k3")) >= 0 {
-		t.Fatalf("k3 still present or wrong size %d", len(out.Map))
+	if len(out.Map()) != 99 || out.LookupKey(interpreter.StringVal("k3")) >= 0 {
+		t.Fatalf("k3 still present or wrong size %d", len(out.Map()))
 	}
 	for i := 0; i < 100; i++ {
 		if i == 3 {
 			continue
 		}
 		j := out.LookupKey(interpreter.StringVal(fmt.Sprintf("k%d", i)))
-		if j < 0 || out.Map[j].Value.Kind == interpreter.KindInt && out.Map[j].Value.Int != int64(i) {
+		if j < 0 || out.Map()[j].Value.Kind == interpreter.KindInt && out.Map()[j].Value.Int() != int64(i) {
 			t.Fatalf("k%d: index %d", i, j)
 		}
 	}
@@ -62,14 +62,14 @@ func TestDeleteResultLookups(t *testing.T) {
 	if j := out.LookupKey(interpreter.StringVal("new")); j != 99 {
 		t.Fatalf("inserted key at %d", j)
 	}
-	if j := out.LookupKey(interpreter.StringVal("k99")); j != 98 || out.Map[j].Value.Int != 99 {
+	if j := out.LookupKey(interpreter.StringVal("k99")); j != 98 || out.Map()[j].Value.Int() != 99 {
 		t.Fatalf("k99 after insert: %d", j)
 	}
-	out.Map[4].Value.List[0] = interpreter.IntVal(2) // k5 shifted to position 4
-	if m.Map[5].Value.List[0].Int != 1 {
+	out.Map()[4].Value.List()[0] = interpreter.IntVal(2) // k5 shifted to position 4
+	if m.Map()[5].Value.List()[0].Int() != 1 {
 		t.Fatal("result shares a nested list with its source")
 	}
-	if len(m.Map) != 100 {
+	if len(m.Map()) != 100 {
 		t.Fatal("source modified")
 	}
 }

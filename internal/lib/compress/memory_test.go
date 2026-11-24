@@ -54,14 +54,14 @@ func TestGzipUnpackPresized(t *testing.T) {
 	p := pack(t, str("gzip"), interpreter.BytesVal(make([]byte, size)))
 	var got interpreter.Value
 	n := allocBytes(func() { got = unpack(t, str("gzip"), p) })
-	if len(got.Bytes) != size {
-		t.Fatalf("unpacked %d bytes, want %d", len(got.Bytes), size)
+	if len(got.Bytes()) != size {
+		t.Fatalf("unpacked %d bytes, want %d", len(got.Bytes()), size)
 	}
 	if n > size*3/2 {
 		t.Errorf("unpack allocated %d bytes for a %d-byte result, want under 1.5x", n, size)
 	}
 	// A forged trailer only sizes the buffer: the data still decides.
-	forged := append([]byte(nil), pack(t, str("gzip"), b("short")).Bytes...)
+	forged := append([]byte(nil), pack(t, str("gzip"), b("short")).Bytes()...)
 	forged[len(forged)-4], forged[len(forged)-3] = 0xff, 0xff
 	if _, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("gzip"), interpreter.BytesVal(forged)}); err == nil {
 		t.Error("gzip with a forged size trailer: want gzip's size-mismatch error")

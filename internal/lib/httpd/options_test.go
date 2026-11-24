@@ -46,7 +46,7 @@ func TestListenWithTLS(t *testing.T) {
 	client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	}}
-	resp, err := client.Get("https://" + addr.Str + "/")
+	resp, err := client.Get("https://" + addr.Str() + "/")
 	if err != nil {
 		t.Fatalf("GET over TLS: %v", err)
 	}
@@ -99,10 +99,10 @@ func TestEtagOption(t *testing.T) {
 		{"serveFile plain", plain, plainAddr, func(req Value) {
 			_, _ = serveFileFn(noCtx, []Value{req, interpreter.StringVal(filepath.Join(dir, "index.html"))})
 		}, "", "/"},
-		{"serveFile etag", tagged, taggedAddr.Str, func(req Value) {
+		{"serveFile etag", tagged, taggedAddr.Str(), func(req Value) {
 			_, _ = serveFileFn(noCtx, []Value{req, interpreter.StringVal(filepath.Join(dir, "index.html"))})
 		}, wantTag, "/"},
-		{"serveDir etag", tagged, taggedAddr.Str, func(req Value) {
+		{"serveDir etag", tagged, taggedAddr.Str(), func(req Value) {
 			_, _ = serveDirFn(noCtx, []Value{req, interpreter.StringVal(dir)})
 		}, wantTag, "/a.txt"},
 	} {

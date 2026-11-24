@@ -350,37 +350,37 @@ func openWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	opts := args[1]
-	if opts.Kind != interpreter.KindStruct || opts.StructNS != LibraryName || opts.StructName != "Options" {
+	if opts.Kind != interpreter.KindStruct || opts.StructNS() != LibraryName || opts.StructName() != "Options" {
 		return interpreter.Null(), fmt.Errorf("serial.openWith: second argument must be a serial.Options, got %s", opts.Kind)
 	}
 	// An omitted field is its zero value in the struct literal: 0 / "" / false
 	// take the 9600 8N1 default, no flow control, exclusive.
 	baud, dataBits, stopBits := int64(9600), int64(8), int64(1)
 	parity, flow, shared := "none", "none", false
-	for _, f := range opts.Fields {
+	for _, f := range opts.Fields() {
 		switch f.Name {
 		case "baud":
-			if f.Value.Int != 0 {
-				baud = f.Value.Int
+			if f.Value.Int() != 0 {
+				baud = f.Value.Int()
 			}
 		case "dataBits":
-			if f.Value.Int != 0 {
-				dataBits = f.Value.Int
+			if f.Value.Int() != 0 {
+				dataBits = f.Value.Int()
 			}
 		case "parity":
-			if f.Value.Str != "" {
-				parity = f.Value.Str
+			if f.Value.Str() != "" {
+				parity = f.Value.Str()
 			}
 		case "stopBits":
-			if f.Value.Int != 0 {
-				stopBits = f.Value.Int
+			if f.Value.Int() != 0 {
+				stopBits = f.Value.Int()
 			}
 		case "flowControl":
-			if f.Value.Str != "" {
-				flow = f.Value.Str
+			if f.Value.Str() != "" {
+				flow = f.Value.Str()
 			}
 		case "shared":
-			shared = f.Value.Bool
+			shared = f.Value.Bool()
 		}
 	}
 	c, err := newLineConfig("serial.openWith", baud, dataBits, parity, stopBits, flow, shared)

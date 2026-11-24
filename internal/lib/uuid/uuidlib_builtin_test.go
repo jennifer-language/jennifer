@@ -31,11 +31,11 @@ func TestParseFnBuiltin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse(%q): %v", v4, err)
 	}
-	if got.Kind != interpreter.KindBytes || len(got.Bytes) != 16 {
+	if got.Kind != interpreter.KindBytes || len(got.Bytes()) != 16 {
 		t.Fatalf("parse: got %+v, want 16 bytes", got)
 	}
-	if got.Bytes[0] != 0x55 || got.Bytes[6] != 0x41 || got.Bytes[15] != 0x00 {
-		t.Errorf("parse decoded wrong bytes: % x", got.Bytes)
+	if got.Bytes()[0] != 0x55 || got.Bytes()[6] != 0x41 || got.Bytes()[15] != 0x00 {
+		t.Errorf("parse decoded wrong bytes: % x", got.Bytes())
 	}
 	// Errors: malformed string, wrong type, wrong arity.
 	for _, bad := range []string{"not-a-uuid", "550e8400e29b41d4a716446655440000", ""} {
@@ -66,8 +66,8 @@ func TestIsValidFnBuiltin(t *testing.T) {
 			t.Errorf("isValid(%q): %v", s, err)
 			continue
 		}
-		if got.Kind != interpreter.KindBool || got.Bool != want {
-			t.Errorf("isValid(%q) = %v, want %v", s, got.Bool, want)
+		if got.Kind != interpreter.KindBool || got.Bool() != want {
+			t.Errorf("isValid(%q) = %v, want %v", s, got.Bool(), want)
 		}
 	}
 	if _, err := isValidFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(1)}); err == nil {
@@ -87,8 +87,8 @@ func TestVersionFnBuiltin(t *testing.T) {
 			t.Errorf("version(%q): %v", s, err)
 			continue
 		}
-		if got.Kind != interpreter.KindInt || got.Int != want {
-			t.Errorf("version(%q) = %d, want %d", s, got.Int, want)
+		if got.Kind != interpreter.KindInt || got.Int() != want {
+			t.Errorf("version(%q) = %d, want %d", s, got.Int(), want)
 		}
 	}
 	// Errors: malformed input, wrong type.

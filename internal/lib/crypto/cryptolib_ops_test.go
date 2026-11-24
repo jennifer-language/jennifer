@@ -65,9 +65,9 @@ func opErr(t *testing.T, want string, fn opFn, args ...interpreter.Value) {
 }
 
 func opField(v interpreter.Value, name string) []byte {
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == name {
-			return f.Value.Bytes
+			return f.Value.Bytes()
 		}
 	}
 	return nil
@@ -93,11 +93,11 @@ func TestKatAESGCM(t *testing.T) {
 	}
 	for i, c := range cases {
 		key, nonce, pt, aad := opHex(t, c.key), opHex(t, c.nonce), opHex(t, c.pt), opHex(t, c.aad)
-		got := opCall(t, encryptFn, opStr("aes-gcm"), opBytes(pt), opBytes(key), opBytes(nonce), opBytes(aad)).Bytes
+		got := opCall(t, encryptFn, opStr("aes-gcm"), opBytes(pt), opBytes(key), opBytes(nonce), opBytes(aad)).Bytes()
 		if hex.EncodeToString(got) != c.want {
 			t.Errorf("case %d: encrypt = %x, want %s", i, got, c.want)
 		}
-		back := opCall(t, decryptFn, opStr("aes-gcm"), opBytes(got), opBytes(key), opBytes(nonce), opBytes(aad)).Bytes
+		back := opCall(t, decryptFn, opStr("aes-gcm"), opBytes(got), opBytes(key), opBytes(nonce), opBytes(aad)).Bytes()
 		if !bytes.Equal(back, pt) {
 			t.Errorf("case %d: decrypt round trip = %x, want %x", i, back, pt)
 		}
@@ -106,7 +106,7 @@ func TestKatAESGCM(t *testing.T) {
 
 func TestDecryptRejectsTamperingAndMismatch(t *testing.T) {
 	key, nonce, aad := bytes.Repeat([]byte{7}, 32), bytes.Repeat([]byte{9}, 12), []byte("header")
-	box := opCall(t, encryptFn, opStr("aes-gcm"), opBytes([]byte("secret")), opBytes(key), opBytes(nonce), opBytes(aad)).Bytes
+	box := opCall(t, encryptFn, opStr("aes-gcm"), opBytes([]byte("secret")), opBytes(key), opBytes(nonce), opBytes(aad)).Bytes()
 	const auth = "authentication failed"
 	flipped := append([]byte(nil), box...)
 	flipped[0] ^= 1
@@ -129,7 +129,7 @@ func TestOldEncryptLayoutOpens(t *testing.T) {
 	block, _ := aes.NewCipher(key)
 	gcm, _ := cipher.NewGCM(block)
 	old := gcm.Seal(append([]byte(nil), nonce...), nonce, []byte("forge token"), nil)
-	got := opCall(t, decryptFn, opStr("aes-gcm"), opBytes(old[12:]), opBytes(key), opBytes(old[:12]), opBytes(nil)).Bytes
+	got := opCall(t, decryptFn, opStr("aes-gcm"), opBytes(old[12:]), opBytes(key), opBytes(old[:12]), opBytes(nil)).Bytes()
 	if string(got) != "forge token" {
 		t.Errorf("old layout opened as %q", got)
 	}
@@ -194,11 +194,11 @@ func TestKatBlockModes(t *testing.T) {
 		if strings.HasPrefix(algo, "aes-ecb") {
 			ivArg = interpreter.Null()
 		}
-		got := opCall(t, blockEncryptFn, opStr(algo), opBytes(data), opBytes(key), ivArg).Bytes
+		got := opCall(t, blockEncryptFn, opStr(algo), opBytes(data), opBytes(key), ivArg).Bytes()
 		if hex.EncodeToString(got) != wantHex {
 			t.Errorf("%s: blockEncrypt = %x, want %s", name, got, wantHex)
 		}
-		back := opCall(t, blockDecryptFn, opStr(algo), opBytes(got), opBytes(key), ivArg).Bytes
+		back := opCall(t, blockDecryptFn, opStr(algo), opBytes(got), opBytes(key), ivArg).Bytes()
 		if !bytes.Equal(back, data) {
 			t.Errorf("%s: blockDecrypt round trip = %q, want %q", name, back, data)
 		}
@@ -216,13 +216,13 @@ func TestBlockModeErrors(t *testing.T) {
 	opErr(t, `key must be 16, 24 or 32 bytes`, blockEncryptFn, opStr("aes-cfb"), opBytes([]byte("x")), opBytes(k[:10]), opBytes(iv))
 	opErr(t, `unknown algorithm "aes-cbc"`, blockEncryptFn, opStr("aes-cbc"), opBytes(make([]byte, 16)), opBytes(k), opBytes(iv))
 	// A padding that does not check out is an error, never silently trimmed.
-	good := opCall(t, blockEncryptFn, opStr("aes-ecb-nopad"), opBytes(append(bytes.Repeat([]byte("A"), 13), 3, 3, 4)), opBytes(k), null).Bytes
+	good := opCall(t, blockEncryptFn, opStr("aes-ecb-nopad"), opBytes(append(bytes.Repeat([]byte("A"), 13), 3, 3, 4)), opBytes(k), null).Bytes()
 	opErr(t, "bad padding", blockDecryptFn, opStr("aes-ecb-pkcs7"), opBytes(good), opBytes(k), null)
-	zero := opCall(t, blockEncryptFn, opStr("aes-ecb-nopad"), opBytes(make([]byte, 16)), opBytes(k), null).Bytes
+	zero := opCall(t, blockEncryptFn, opStr("aes-ecb-nopad"), opBytes(make([]byte, 16)), opBytes(k), null).Bytes()
 	opErr(t, "bad padding", blockDecryptFn, opStr("aes-ecb-pkcs7"), opBytes(zero), opBytes(k), null)
 	opErr(t, "bad padding", blockDecryptFn, opStr("aes-ecb-pkcs7"), opBytes(nil), opBytes(k), null)
 	// A full block of padding is added when the input is already aligned.
-	full := opCall(t, blockEncryptFn, opStr("aes-ecb-pkcs7"), opBytes(make([]byte, 16)), opBytes(k), null).Bytes
+	full := opCall(t, blockEncryptFn, opStr("aes-ecb-pkcs7"), opBytes(make([]byte, 16)), opBytes(k), null).Bytes()
 	if len(full) != 32 {
 		t.Errorf("pkcs7 of 16 bytes is %d bytes, want 32", len(full))
 	}
@@ -235,9 +235,9 @@ func TestEncryptThenMacRecipe(t *testing.T) {
 	// layer's part: a flipped ciphertext bit decrypts to garbage or a padding
 	// error, which is why the MAC must be checked first.
 	k, iv := bytes.Repeat([]byte{3}, 32), bytes.Repeat([]byte{4}, 16)
-	ct := opCall(t, blockEncryptFn, opStr("aes-cbc-pkcs7"), opBytes([]byte("attack at dawn")), opBytes(k), opBytes(iv)).Bytes
+	ct := opCall(t, blockEncryptFn, opStr("aes-cbc-pkcs7"), opBytes([]byte("attack at dawn")), opBytes(k), opBytes(iv)).Bytes()
 	ct[len(ct)-1] ^= 0x01
-	if v, err := blockDecryptFn(interpreter.BuiltinCtx{}, []interpreter.Value{opStr("aes-cbc-pkcs7"), opBytes(ct), opBytes(k), opBytes(iv)}); err == nil && string(v.Bytes) == "attack at dawn" {
+	if v, err := blockDecryptFn(interpreter.BuiltinCtx{}, []interpreter.Value{opStr("aes-cbc-pkcs7"), opBytes(ct), opBytes(k), opBytes(iv)}); err == nil && string(v.Bytes()) == "attack at dawn" {
 		t.Error("a tampered CBC ciphertext decrypted to the original plaintext")
 	}
 }
@@ -250,17 +250,17 @@ func TestKatEd25519(t *testing.T) {
 	pub := opHex(t, "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
 	want := "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
 	priv := append(append([]byte(nil), seed...), pub...)
-	sig := opCall(t, signFn, opStr("ed25519"), opBytes(nil), opBytes(priv)).Bytes
+	sig := opCall(t, signFn, opStr("ed25519"), opBytes(nil), opBytes(priv)).Bytes()
 	if hex.EncodeToString(sig) != want {
 		t.Errorf("ed25519 sign = %x", sig)
 	}
-	if !opCall(t, verifyFn, opStr("ed25519"), opBytes(nil), opBytes(sig), opBytes(pub)).Bool {
+	if !opCall(t, verifyFn, opStr("ed25519"), opBytes(nil), opBytes(sig), opBytes(pub)).Bool() {
 		t.Error("ed25519 verify of the RFC vector is false")
 	}
-	if opCall(t, verifyFn, opStr("ed25519"), opBytes([]byte("x")), opBytes(sig), opBytes(pub)).Bool {
+	if opCall(t, verifyFn, opStr("ed25519"), opBytes([]byte("x")), opBytes(sig), opBytes(pub)).Bool() {
 		t.Error("ed25519 verify of another message is true")
 	}
-	if got := opCall(t, publicKeyFn, opStr("ed25519"), opBytes(priv)).Bytes; !bytes.Equal(got, pub) {
+	if got := opCall(t, publicKeyFn, opStr("ed25519"), opBytes(priv)).Bytes(); !bytes.Equal(got, pub) {
 		t.Errorf("publicKey(ed25519) = %x", got)
 	}
 	bad := append([]byte(nil), priv...)
@@ -275,17 +275,17 @@ func TestKatRSASignatures(t *testing.T) {
 		algo := "rsa-" + h
 		// PKCS#1 v1.5 is deterministic: Go must produce OpenSSL's exact bytes.
 		want := opFile(t, "rsa-"+h+".sig")
-		got := opCall(t, signFn, opStr(algo), opBytes(msg), opBytes(priv)).Bytes
+		got := opCall(t, signFn, opStr(algo), opBytes(msg), opBytes(priv)).Bytes()
 		if !bytes.Equal(got, want) {
 			t.Errorf("%s: signature differs from openssl dgst -sign", algo)
 		}
-		if !opCall(t, verifyFn, opStr(algo), opBytes(msg), opBytes(want), opBytes(pub)).Bool {
+		if !opCall(t, verifyFn, opStr(algo), opBytes(msg), opBytes(want), opBytes(pub)).Bool() {
 			t.Errorf("%s: openssl signature does not verify", algo)
 		}
 	}
 	// The hash is part of the name: a sha256 signature does not verify as sha384.
 	sig := opFile(t, "rsa-sha256.sig")
-	if opCall(t, verifyFn, opStr("rsa-sha384"), opBytes(msg), opBytes(sig), opBytes(pub)).Bool {
+	if opCall(t, verifyFn, opStr("rsa-sha384"), opBytes(msg), opBytes(sig), opBytes(pub)).Bool() {
 		t.Error("rsa-sha256 signature verified as rsa-sha384")
 	}
 }
@@ -297,17 +297,17 @@ func TestKatECDSASignatures(t *testing.T) {
 		algo := "ecdsa-" + c.hash
 		priv, pub := opFile(t, c.key+".pem"), opFile(t, c.key+".pub")
 		node := opFile(t, "ecdsa-"+c.key+"-"+c.hash+".sig")
-		if !opCall(t, verifyFn, opStr(algo), opBytes(msg), opBytes(node), opBytes(pub)).Bool {
+		if !opCall(t, verifyFn, opStr(algo), opBytes(msg), opBytes(node), opBytes(pub)).Bool() {
 			t.Errorf("%s/%s: Node's R||S signature does not verify", c.key, algo)
 		}
-		own := opCall(t, signFn, opStr(algo), opBytes(msg), opBytes(priv)).Bytes
+		own := opCall(t, signFn, opStr(algo), opBytes(msg), opBytes(priv)).Bytes()
 		if len(own) != len(node) {
 			t.Errorf("%s/%s: signature is %d bytes, Node's %d", c.key, algo, len(own), len(node))
 		}
-		if !opCall(t, verifyFn, opStr(algo), opBytes(msg), opBytes(own), opBytes(pub)).Bool {
+		if !opCall(t, verifyFn, opStr(algo), opBytes(msg), opBytes(own), opBytes(pub)).Bool() {
 			t.Errorf("%s/%s: own signature does not verify", c.key, algo)
 		}
-		if opCall(t, verifyFn, opStr(algo), opBytes(msg), opBytes(own[:10]), opBytes(pub)).Bool {
+		if opCall(t, verifyFn, opStr(algo), opBytes(msg), opBytes(own[:10]), opBytes(pub)).Bool() {
 			t.Errorf("%s/%s: a truncated signature verified", c.key, algo)
 		}
 	}
@@ -332,7 +332,7 @@ func TestKeypairForms(t *testing.T) {
 		if bytes.HasPrefix(priv, []byte("-----")) || len(pub) == 0 {
 			t.Errorf("%s: want raw bytes", algo)
 		}
-		if got := opCall(t, publicKeyFn, opStr(algo), opBytes(priv)).Bytes; !bytes.Equal(got, pub) {
+		if got := opCall(t, publicKeyFn, opStr(algo), opBytes(priv)).Bytes(); !bytes.Equal(got, pub) {
 			t.Errorf("%s: publicKey(private) differs from keypair's public", algo)
 		}
 	}
@@ -345,14 +345,14 @@ func TestKeypairForms(t *testing.T) {
 		if !bytes.HasPrefix(priv, []byte(c.privHead)) || !bytes.HasPrefix(pub, []byte("-----BEGIN PUBLIC KEY-----")) {
 			t.Errorf("%s: private %q / public %q", c.algo, priv[:30], pub[:26])
 		}
-		if got := opCall(t, publicKeyFn, opStr(c.algo), opBytes(priv)).Bytes; !bytes.Equal(got, pub) {
+		if got := opCall(t, publicKeyFn, opStr(c.algo), opBytes(priv)).Bytes(); !bytes.Equal(got, pub) {
 			t.Errorf("%s: publicKey(private) differs from keypair's public", c.algo)
 		}
 	}
 	// A generated key signs, and the matching public key verifies.
 	kp := opCall(t, keypairFn, opStr("p384"))
-	sig := opCall(t, signFn, opStr("ecdsa-sha384"), opBytes([]byte("m")), opBytes(opField(kp, "private"))).Bytes
-	if !opCall(t, verifyFn, opStr("ecdsa-sha384"), opBytes([]byte("m")), opBytes(sig), opBytes(opField(kp, "public"))).Bool {
+	sig := opCall(t, signFn, opStr("ecdsa-sha384"), opBytes([]byte("m")), opBytes(opField(kp, "private"))).Bytes()
+	if !opCall(t, verifyFn, opStr("ecdsa-sha384"), opBytes([]byte("m")), opBytes(sig), opBytes(opField(kp, "public"))).Bool() {
 		t.Error("p384 keypair does not sign and verify")
 	}
 	// publicKey checks the key matches the algorithm's size or curve.
@@ -371,13 +371,13 @@ func TestKatX25519(t *testing.T) {
 	bobPriv := opHex(t, "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb")
 	bobPub := opHex(t, "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f")
 	want := "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742"
-	if got := opCall(t, agreeFn, opStr("x25519"), opBytes(alicePriv), opBytes(bobPub)).Bytes; hex.EncodeToString(got) != want {
+	if got := opCall(t, agreeFn, opStr("x25519"), opBytes(alicePriv), opBytes(bobPub)).Bytes(); hex.EncodeToString(got) != want {
 		t.Errorf("alice's secret = %x", got)
 	}
-	if got := opCall(t, agreeFn, opStr("x25519"), opBytes(bobPriv), opBytes(alicePub)).Bytes; hex.EncodeToString(got) != want {
+	if got := opCall(t, agreeFn, opStr("x25519"), opBytes(bobPriv), opBytes(alicePub)).Bytes(); hex.EncodeToString(got) != want {
 		t.Errorf("bob's secret = %x", got)
 	}
-	if got := opCall(t, publicKeyFn, opStr("x25519"), opBytes(alicePriv)).Bytes; !bytes.Equal(got, alicePub) {
+	if got := opCall(t, publicKeyFn, opStr("x25519"), opBytes(alicePriv)).Bytes(); !bytes.Equal(got, alicePub) {
 		t.Errorf("publicKey(x25519) = %x", got)
 	}
 	opErr(t, "low-order point", agreeFn, opStr("x25519"), opBytes(alicePriv), opBytes(make([]byte, 32)))
@@ -392,7 +392,7 @@ func TestMLKEMRoundTrip(t *testing.T) {
 	if len(ct) != 1088 || len(secret) != 32 {
 		t.Fatalf("ciphertext %d bytes, secret %d", len(ct), len(secret))
 	}
-	got := opCall(t, decapsulateFn, opStr("mlkem768"), opBytes(ct), opBytes(opField(kp, "private"))).Bytes
+	got := opCall(t, decapsulateFn, opStr("mlkem768"), opBytes(ct), opBytes(opField(kp, "private"))).Bytes()
 	if !bytes.Equal(got, secret) {
 		t.Error("decapsulated secret differs")
 	}
@@ -408,13 +408,13 @@ func TestKatRSAOAEP(t *testing.T) {
 	for _, h := range []string{"sha1", "sha256"} {
 		algo := "rsa-oaep-" + h
 		// Node (OpenSSL) wrapped it; Go unwraps it.
-		got := opCall(t, unwrapFn, opStr(algo), opBytes(opFile(t, "oaep-"+h+".bin")), opBytes(priv)).Bytes
+		got := opCall(t, unwrapFn, opStr(algo), opBytes(opFile(t, "oaep-"+h+".bin")), opBytes(priv)).Bytes()
 		if string(got) != plain {
 			t.Errorf("%s: unwrap of Node's ciphertext = %q", algo, got)
 		}
 		// Round trip through Go.
-		ct := opCall(t, wrapFn, opStr(algo), opBytes([]byte(plain)), opBytes(pub)).Bytes
-		if back := opCall(t, unwrapFn, opStr(algo), opBytes(ct), opBytes(priv)).Bytes; string(back) != plain {
+		ct := opCall(t, wrapFn, opStr(algo), opBytes([]byte(plain)), opBytes(pub)).Bytes()
+		if back := opCall(t, unwrapFn, opStr(algo), opBytes(ct), opBytes(priv)).Bytes(); string(back) != plain {
 			t.Errorf("%s: round trip = %q", algo, back)
 		}
 	}

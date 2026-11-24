@@ -19,15 +19,15 @@ func TestStdinInvalidUTF8(t *testing.T) {
 
 	resetInputForTest()
 	ctx := stdinCtx(strings.NewReader("ok\nab\xffc\nnext\n"))
-	if v, err := callReadLine(in, ctx, nil); err != nil || v.Str != "ok" {
-		t.Fatalf("first line: %q %v", v.Str, err)
+	if v, err := callReadLine(in, ctx, nil); err != nil || v.Str() != "ok" {
+		t.Fatalf("first line: %q %v", v.Str(), err)
 	}
 	if _, err := callReadLine(in, ctx, nil); err == nil || err.Error() != "io.readLine: invalid UTF-8 at byte 2" {
 		t.Fatalf("readLine: %v", err)
 	}
 	// The bad line is consumed; the next read continues after it.
-	if v, err := callReadLine(in, ctx, nil); err != nil || v.Str != "next" {
-		t.Fatalf("after bad line: %q %v", v.Str, err)
+	if v, err := callReadLine(in, ctx, nil); err != nil || v.Str() != "next" {
+		t.Fatalf("after bad line: %q %v", v.Str(), err)
 	}
 
 	resetInputForTest()
@@ -45,7 +45,7 @@ func TestStdinInvalidUTF8(t *testing.T) {
 
 	// Valid multi-byte input and a genuine U+FFFD pass.
 	resetInputForTest()
-	if v, err := callReadLines(in, stdinCtx(strings.NewReader("é€\n�\n"))); err != nil || len(v.List) != 2 {
+	if v, err := callReadLines(in, stdinCtx(strings.NewReader("é€\n�\n"))); err != nil || len(v.List()) != 2 {
 		t.Fatalf("valid input: %v", err)
 	}
 }

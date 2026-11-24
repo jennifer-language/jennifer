@@ -68,11 +68,11 @@ func keysFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if err := requireMap("keys", args[0], "argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	out := make([]interpreter.Value, len(args[0].Map))
-	for i, e := range args[0].Map {
+	out := make([]interpreter.Value, len(args[0].Map()))
+	for i, e := range args[0].Map() {
 		out[i] = e.Key.Copy()
 	}
-	return interpreter.Value{Kind: interpreter.KindList, List: out}, nil
+	return interpreter.GenericListVal(out), nil
 }
 
 // valuesFn returns the map's values as a list, in insertion order.
@@ -83,11 +83,11 @@ func valuesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if err := requireMap("values", args[0], "argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	out := make([]interpreter.Value, len(args[0].Map))
-	for i, e := range args[0].Map {
+	out := make([]interpreter.Value, len(args[0].Map()))
+	for i, e := range args[0].Map() {
 		out[i] = e.Value.Copy()
 	}
-	return interpreter.Value{Kind: interpreter.KindList, List: out}, nil
+	return interpreter.GenericListVal(out), nil
 }
 
 // deleteFn returns a new map without the entry for `key`. Missing key
@@ -107,12 +107,12 @@ func deleteFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	// indexed use, or the linear fallback). Copy() would deep-copy all entries
 	// and build an index only to discard both.
 	if i := args[0].LookupKey(args[1]); i >= 0 {
-		src := args[0].Map
+		src := args[0].Map()
 		out := args[0]
-		out.Map = make([]interpreter.MapEntry, 0, len(src)-1)
+		out.SetMap(make([]interpreter.MapEntry, 0, len(src)-1))
 		for j, e := range src {
 			if j != i {
-				out.Map = append(out.Map, interpreter.MapEntry{Key: e.Key.Copy(), Value: e.Value.Copy()})
+				out.SetMap(append(out.Map(), interpreter.MapEntry{Key: e.Key.Copy(), Value: e.Value.Copy()}))
 			}
 		}
 		out.DropMapIndex()
@@ -135,10 +135,10 @@ func withoutFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if args[1].Kind != interpreter.KindList {
 		return interpreter.Null(), fmt.Errorf("maps.without: second argument must be a list, got %s", args[1].Kind)
 	}
-	src := args[0].Map
+	src := args[0].Map()
 	drop := make([]bool, len(src))
 	n := 0
-	for _, k := range args[1].List {
+	for _, k := range args[1].List() {
 		i := args[0].LookupKey(k)
 		if i < 0 {
 			return interpreter.Null(), fmt.Errorf("maps.without: map has no entry for key %s", k.Display())
@@ -149,10 +149,10 @@ func withoutFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 		}
 	}
 	out := args[0]
-	out.Map = make([]interpreter.MapEntry, 0, len(src)-n)
+	out.SetMap(make([]interpreter.MapEntry, 0, len(src)-n))
 	for j, e := range src {
 		if !drop[j] {
-			out.Map = append(out.Map, interpreter.MapEntry{Key: e.Key.Copy(), Value: e.Value.Copy()})
+			out.SetMap(append(out.Map(), interpreter.MapEntry{Key: e.Key.Copy(), Value: e.Value.Copy()}))
 		}
 	}
 	out.DropMapIndex()
@@ -175,7 +175,7 @@ func mergeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	out := args[0].Copy()
 	// Index-aware upsert keeps merge O(A+B) instead of O(A*B) (a linear scan
 	// of `out` per entry of `b`).
-	for _, be := range args[1].Map {
+	for _, be := range args[1].Map() {
 		out.UpsertKey(be.Key.Copy(), be.Value.Copy())
 	}
 	return out, nil

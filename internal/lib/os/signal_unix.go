@@ -149,7 +149,7 @@ func signalNameArg(fnName string, args []interpreter.Value) (string, error) {
 	if args[0].Kind != interpreter.KindString {
 		return "", fmt.Errorf("%s: signal name must be string, got %s", fnName, args[0].Kind)
 	}
-	return args[0].Str, nil
+	return args[0].Str(), nil
 }
 
 func unknownSignal(fnName, name string) error {

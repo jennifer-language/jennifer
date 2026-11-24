@@ -72,7 +72,7 @@ func deriveKeyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("%s: algo must be string, got %s", verb, args[0].Kind)
 	}
-	algo := args[0].Str
+	algo := args[0].Str()
 	spec, ok := kdfSpecs[algo]
 	if algo == "hkdf-md5" || algo == "pbkdf2-md5" {
 		return interpreter.Null(), fmt.Errorf("%s: %q: %s", verb, algo, md5KDF)
@@ -88,19 +88,19 @@ func deriveKeyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 		return interpreter.Null(), fmt.Errorf("%s: length must be int, got %s", fn, args[3].Kind)
 	}
 	pv := args[4]
-	if pv.Kind != interpreter.KindStruct || pv.StructNS != LibraryName || pv.StructName != "KdfParams" {
+	if pv.Kind != interpreter.KindStruct || pv.StructNS() != LibraryName || pv.StructName() != "KdfParams" {
 		return interpreter.Null(), fmt.Errorf("%s: params must be a crypto.KdfParams, got %s", fn, pv.Kind)
 	}
 	params := map[string]interpreter.Value{}
-	for _, f := range pv.Fields {
+	for _, f := range pv.Fields() {
 		params[f.Name] = f.Value
 	}
 	isSet := func(name string) bool {
 		v := params[name]
 		if v.Kind == interpreter.KindBytes {
-			return len(v.Bytes) > 0
+			return len(v.Bytes()) > 0
 		}
-		return v.Kind == interpreter.KindInt && v.Int != 0
+		return v.Kind == interpreter.KindInt && v.Int() != 0
 	}
 	takes := map[string]bool{}
 	for _, n := range spec.required {

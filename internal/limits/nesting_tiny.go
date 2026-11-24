@@ -43,18 +43,19 @@ const MaxCopyChainBytes = 64 << 20
 // MaxRangeElements caps range-literal materialisation for jennifer-tiny, whose
 // heap is far smaller than the default binary's. It turns the same otherwise
 // uncatchable "makeslice: cap out of range" panic (or an oversized allocation)
-// on `0..n` into a positioned, catchable error. 1<<20 (~1M ints) stays modest
-// on a constrained target while covering any realistic materialised range;
-// larger spans should use the lazy `for (def i in 0..n)` form, which allocates
-// nothing. See the std-build note for the full rationale.
-const MaxRangeElements = 1 << 20
+// on `0..n` into a positioned, catchable error. 1<<22 (~4.2M ints, ~192 MiB of
+// Value) is a quarter of the default binary's cap; a list that large is past
+// the memory a small target has, but the cap is about turning the panic into
+// an error, not about fitting. Larger spans should use the lazy
+// `for (def i in 0..n)` form, which allocates nothing. See the std-build note for the full rationale.
+const MaxRangeElements = 1 << 22
 
 // MaxChannelCapacity caps a single channel.make buffer on jennifer-tiny, whose
-// heap is far smaller than the default binary's, so the ceiling is lower: 1<<16
-// elements of a ~272-byte Value is ~17 MiB, generous for a constrained target yet
+// heap is far smaller than the default binary's, so the ceiling is lower: 1<<18
+// elements of a 48-byte Value is ~12 MiB, generous for a constrained target yet
 // well below an allocation that would exhaust it. A larger capacity is a catchable
 // error. See the std-build note for the full rationale.
-const MaxChannelCapacity = 1 << 16
+const MaxChannelCapacity = 1 << 18
 
 // MaxDecodedNodes caps how many value nodes one decode of untrusted text may
 // materialise on jennifer-tiny, shared by the json / xml / toml decoders and the
@@ -68,13 +69,14 @@ const MaxDecodedNodes = 1 << 18
 // MaxMatrixElements caps how many elements a single `linalg` vector or matrix may
 // hold on jennifer-tiny, whose heap is far smaller than the default binary's, so
 // the ceiling is lower. Like its std sibling it is enforced at both the
-// constructors and the readers, and sized in 272-byte Value cells (a `linalg`
-// value is always fully materialised, like a channel buffer): 1<<16 elements is
-// ~17 MiB of Value, matching MaxChannelCapacity's tiny budget, generous for a
-// constrained target yet well below an allocation that would exhaust it. A larger
+// constructors and the readers, and sized in 48-byte Value cells (a `linalg`
+// value is always fully materialised, like a channel buffer): 1<<18 elements is
+// ~12 MiB of Value (a 512x512 matrix), matching MaxChannelCapacity's tiny
+// budget, generous for a constrained target yet well below an allocation that
+// would exhaust it. A larger
 // vector or matrix is a catchable error. See the std-build note for the full
 // rationale.
-const MaxMatrixElements = 1 << 16
+const MaxMatrixElements = 1 << 18
 
 // MaxTokens caps how many tokens a single source file lexes into on
 // jennifer-tiny, whose heap is far smaller than the default binary's, so the

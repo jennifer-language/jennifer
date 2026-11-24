@@ -32,7 +32,7 @@ func strGetter(t *testing.T) func(interpreter.Value, error) string {
 		if v.Kind != interpreter.KindString {
 			t.Fatalf("expected string, got %s", v.Kind)
 		}
-		return v.Str
+		return v.Str()
 	}
 }
 
@@ -44,8 +44,8 @@ func TestDecodeAndAccess(t *testing.T) {
 		t.Errorf("root tag = %q", got)
 	}
 	all, err := findAllFn(noCtx, []interpreter.Value{rv, interpreter.StringVal("book")})
-	if err != nil || len(all.List) != 2 {
-		t.Fatalf("findAll book = %d elems, %v", len(all.List), err)
+	if err != nil || len(all.List()) != 2 {
+		t.Fatalf("findAll book = %d elems, %v", len(all.List()), err)
 	}
 	// book[2] via index path, then its attr and title text.
 	bk, err := getFn(noCtx, []interpreter.Value{rv, interpreter.StringVal("book[2]")})
@@ -60,19 +60,19 @@ func TestDecodeAndAccess(t *testing.T) {
 		t.Errorf("book[2] title = %q", got)
 	}
 	// has / children / attrs.
-	if h, _ := hasFn(noCtx, []interpreter.Value{rv, interpreter.StringVal("book/title")}); !h.Bool {
+	if h, _ := hasFn(noCtx, []interpreter.Value{rv, interpreter.StringVal("book/title")}); !h.Bool() {
 		t.Error("has book/title should be true")
 	}
-	if h, _ := hasFn(noCtx, []interpreter.Value{rv, interpreter.StringVal("book/author")}); h.Bool {
+	if h, _ := hasFn(noCtx, []interpreter.Value{rv, interpreter.StringVal("book/author")}); h.Bool() {
 		t.Error("has book/author should be false")
 	}
 	kids, _ := childrenFn(noCtx, []interpreter.Value{rv})
-	if len(kids.List) != 2 {
-		t.Errorf("children = %d, want 2", len(kids.List))
+	if len(kids.List()) != 2 {
+		t.Errorf("children = %d, want 2", len(kids.List()))
 	}
 	attrs, _ := attrsFn(noCtx, []interpreter.Value{mustGet(t, rv, "book[1]")})
-	if len(attrs.List) != 2 || attrs.List[0].Str != "id" || attrs.List[1].Str != "lang" {
-		t.Errorf("book[1] attrs = %v, want [id lang]", attrs.List)
+	if len(attrs.List()) != 2 || attrs.List()[0].Str() != "id" || attrs.List()[1].Str() != "lang" {
+		t.Errorf("book[1] attrs = %v, want [id lang]", attrs.List())
 	}
 }
 
@@ -111,13 +111,13 @@ func TestSelfClosingAndMixed(t *testing.T) {
 		t.Errorf("mixed text = %q", got)
 	}
 	kids, _ := childrenFn(noCtx, []interpreter.Value{rv})
-	if len(kids.List) != 2 { // <b> and <br/>
-		t.Errorf("mixed element children = %d, want 2", len(kids.List))
+	if len(kids.List()) != 2 { // <b> and <br/>
+		t.Errorf("mixed element children = %d, want 2", len(kids.List()))
 	}
 	// self-closing <br/> has no children.
-	brk, _ := childrenFn(noCtx, []interpreter.Value{kids.List[1]})
-	if len(brk.List) != 0 {
-		t.Errorf("<br/> children = %d, want 0", len(brk.List))
+	brk, _ := childrenFn(noCtx, []interpreter.Value{kids.List()[1]})
+	if len(brk.List()) != 0 {
+		t.Errorf("<br/> children = %d, want 0", len(brk.List()))
 	}
 }
 
@@ -201,13 +201,13 @@ func TestPathDialect(t *testing.T) {
 	rv := mustDecode(t, `<r><a><x>1</x><x>2</x></a><a><y>3</y></a></r>`)
 	// wildcard: any child of r.
 	all, _ := findAllFn(noCtx, []interpreter.Value{rv, interpreter.StringVal("*")})
-	if len(all.List) != 2 {
-		t.Errorf("* = %d, want 2", len(all.List))
+	if len(all.List()) != 2 {
+		t.Errorf("* = %d, want 2", len(all.List()))
 	}
 	// duplicated element children across siblings: a/x matches both x under the first a.
 	xs, _ := findAllFn(noCtx, []interpreter.Value{rv, interpreter.StringVal("a/x")})
-	if len(xs.List) != 2 {
-		t.Errorf("a/x = %d, want 2", len(xs.List))
+	if len(xs.List()) != 2 {
+		t.Errorf("a/x = %d, want 2", len(xs.List()))
 	}
 	if got := str(textFn(noCtx, []interpreter.Value{mustGet(t, rv, "a[1]/x[2]")})); got != "2" {
 		t.Errorf("a[1]/x[2] = %q", got)

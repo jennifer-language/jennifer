@@ -169,24 +169,24 @@ func makeDuration(nanos int64) interpreter.Value {
 // shape are plain Go errors; the interpreter positions them at the
 // call site.
 func extractTime(fnName string, v interpreter.Value) (int64, int64, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "Time" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "Time" {
 		return 0, 0, fmt.Errorf("%s: argument must be a time.Time, got %s", fnName, v.Kind)
 	}
 	var nanos, offset int64
 	var sawNanos, sawOffset bool
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		switch f.Name {
 		case "nanos":
 			if f.Value.Kind != interpreter.KindInt {
 				return 0, 0, fmt.Errorf("%s: time.Time.nanos is not int (got %s)", fnName, f.Value.Kind)
 			}
-			nanos = f.Value.Int
+			nanos = f.Value.Int()
 			sawNanos = true
 		case "offset":
 			if f.Value.Kind != interpreter.KindInt {
 				return 0, 0, fmt.Errorf("%s: time.Time.offset is not int (got %s)", fnName, f.Value.Kind)
 			}
-			offset = f.Value.Int
+			offset = f.Value.Int()
 			sawOffset = true
 		}
 	}
@@ -203,7 +203,7 @@ func extractTime(fnName string, v interpreter.Value) (int64, int64, error) {
 
 // extractDuration pulls nanos out of a `time.Duration` Value.
 func extractDuration(fnName string, v interpreter.Value) (int64, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "Duration" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "Duration" {
 		hint := ""
 		if v.Kind == interpreter.KindInt {
 			// The common trap: `seconds` / `milliseconds` are accessors
@@ -214,12 +214,12 @@ func extractDuration(fnName string, v interpreter.Value) (int64, error) {
 		}
 		return 0, fmt.Errorf("%s: argument must be a time.Duration, got %s%s", fnName, v.Kind, hint)
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == "nanos" {
 			if f.Value.Kind != interpreter.KindInt {
 				return 0, fmt.Errorf("%s: time.Duration.nanos is not int (got %s)", fnName, f.Value.Kind)
 			}
-			return f.Value.Int, nil
+			return f.Value.Int(), nil
 		}
 	}
 	return 0, fmt.Errorf("%s: time.Duration has no nanos field", fnName)
@@ -255,7 +255,7 @@ func intArg(fnName, paramName string, args []interpreter.Value) (int64, error) {
 	if args[0].Kind != interpreter.KindInt {
 		return 0, fmt.Errorf("%s: %s must be int, got %s", fnName, paramName, args[0].Kind)
 	}
-	return args[0].Int, nil
+	return args[0].Int(), nil
 }
 
 func fromUnixFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {

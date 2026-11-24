@@ -106,10 +106,10 @@ func polynomialFeaturesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if args[1].Kind != interpreter.KindInt || args[1].Int < 1 || args[1].Int > maxPolyDegree {
+	if args[1].Kind != interpreter.KindInt || args[1].Int() < 1 || args[1].Int() > maxPolyDegree {
 		return interpreter.Null(), fmt.Errorf("ml.polynomialFeatures: degree must be in [1, %d]", maxPolyDegree)
 	}
-	degree := int(args[1].Int)
+	degree := int(args[1].Int())
 	d := len(x[0])
 	// Output width = C(d+degree, degree) (all monomials incl. the bias). Reject
 	// a tiny input that would explode into a huge matrix - both by column count
@@ -222,15 +222,18 @@ func kFoldFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("ml.kFold: nSamples and k must be ints")
 	}
-	n, k := int(args[0].Int), int(args[1].Int)
-	if k < 2 || k > n {
-		return interpreter.Null(), fmt.Errorf("ml.kFold: k must be in [2, nSamples] (got k=%d, n=%d)", k, n)
+	// Checked as int64 and narrowed only after the cap: on a 32-bit int,
+	// nSamples 1<<32 would truncate to 0 and fail the wrong check.
+	n64, k64 := args[0].Int(), args[1].Int()
+	if k64 < 2 || k64 > n64 {
+		return interpreter.Null(), fmt.Errorf("ml.kFold: k must be in [2, nSamples] (got k=%d, n=%d)", k64, n64)
 	}
 	// kFold takes bare ints, so bound nSamples*k (the total index storage) to
 	// stop two small arguments from allocating a huge result.
-	if cells, ok := limits.MulInt64(args[0].Int, args[1].Int); !ok || cells > maxFoldWork {
-		return interpreter.Null(), limits.Capf("ml.kFold: nSamples*k exceeds the %d-index limit (got %d and %d)", maxFoldWork, args[0].Int, args[1].Int)
+	if cells, ok := limits.MulInt64(n64, k64); !ok || cells > maxFoldWork {
+		return interpreter.Null(), limits.Capf("ml.kFold: nSamples*k exceeds the %d-index limit (got %d and %d)", maxFoldWork, n64, k64)
 	}
+	n, k := int(n64), int(k64)
 	// Contiguous folds over 0..n-1 (shuffle the data yourself with
 	// trainTestSplit-style logic if you need randomized folds).
 	folds := make([]interpreter.Value, k)

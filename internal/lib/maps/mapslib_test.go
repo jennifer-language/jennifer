@@ -18,7 +18,7 @@ func mapOf(pairs ...interpreter.Value) interpreter.Value {
 	for i := 0; i < len(pairs); i += 2 {
 		entries = append(entries, interpreter.MapEntry{Key: pairs[i], Value: pairs[i+1]})
 	}
-	return interpreter.Value{Kind: interpreter.KindMap, Map: entries}
+	return interpreter.GenericMapVal(entries)
 }
 
 func TestKeysAndValuesPreserveInsertionOrder(t *testing.T) {
@@ -28,11 +28,11 @@ func TestKeysAndValuesPreserveInsertionOrder(t *testing.T) {
 		interpreter.StringVal("c"), interpreter.IntVal(3),
 	)
 	keys, _ := keysFn(interpreter.BuiltinCtx{}, []interpreter.Value{m})
-	if got := []string{keys.List[0].Str, keys.List[1].Str, keys.List[2].Str}; !(got[0] == "b" && got[1] == "a" && got[2] == "c") {
+	if got := []string{keys.List()[0].Str(), keys.List()[1].Str(), keys.List()[2].Str()}; !(got[0] == "b" && got[1] == "a" && got[2] == "c") {
 		t.Errorf("keys out of order: %v", got)
 	}
 	vals, _ := valuesFn(interpreter.BuiltinCtx{}, []interpreter.Value{m})
-	if got := []int64{vals.List[0].Int, vals.List[1].Int, vals.List[2].Int}; !(got[0] == 2 && got[1] == 1 && got[2] == 3) {
+	if got := []int64{vals.List()[0].Int(), vals.List()[1].Int(), vals.List()[2].Int()}; !(got[0] == 2 && got[1] == 1 && got[2] == 3) {
 		t.Errorf("values out of order: %v", got)
 	}
 }
@@ -40,8 +40,8 @@ func TestKeysAndValuesPreserveInsertionOrder(t *testing.T) {
 func TestDeleteIsNonMutating(t *testing.T) {
 	m := mapOf(interpreter.StringVal("x"), interpreter.IntVal(1))
 	_, _ = deleteFn(interpreter.BuiltinCtx{}, []interpreter.Value{m, interpreter.StringVal("x")})
-	if len(m.Map) != 1 {
-		t.Errorf("input mutated, len=%d", len(m.Map))
+	if len(m.Map()) != 1 {
+		t.Errorf("input mutated, len=%d", len(m.Map()))
 	}
 }
 
@@ -66,10 +66,10 @@ func TestMergeOverlaysBOverA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if len(out.Map) != 3 {
-		t.Fatalf("len=%d", len(out.Map))
+	if len(out.Map()) != 3 {
+		t.Fatalf("len=%d", len(out.Map()))
 	}
-	if out.Map[0].Value.Int != 1 || out.Map[1].Value.Int != 99 || out.Map[2].Value.Int != 3 {
-		t.Errorf("got %+v", out.Map)
+	if out.Map()[0].Value.Int() != 1 || out.Map()[1].Value.Int() != 99 || out.Map()[2].Value.Int() != 3 {
+		t.Errorf("got %+v", out.Map())
 	}
 }

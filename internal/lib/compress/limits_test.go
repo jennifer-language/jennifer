@@ -16,8 +16,8 @@ func TestUnpackMaxInt64Cap(t *testing.T) {
 	for _, algo := range []string{"gzip", "zlib", "deflate"} {
 		p := pack(t, str(algo), b("compress me, please"))
 		got := unpack(t, str(algo), p, interpreter.IntVal(math.MaxInt64))
-		if string(got.Bytes) != "compress me, please" {
-			t.Fatalf("%s: got %q", algo, got.Bytes)
+		if string(got.Bytes()) != "compress me, please" {
+			t.Fatalf("%s: got %q", algo, got.Bytes())
 		}
 	}
 }

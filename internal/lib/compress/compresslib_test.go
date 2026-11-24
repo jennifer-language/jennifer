@@ -39,8 +39,8 @@ func TestRoundTripAll(t *testing.T) {
 			t.Fatalf("%s: pack result is %s, want bytes", algo, comp.Kind)
 		}
 		dec := unpack(t, str(algo), comp)
-		if string(dec.Bytes) != data {
-			t.Errorf("%s round-trip: got %q", algo, dec.Bytes)
+		if string(dec.Bytes()) != data {
+			t.Errorf("%s round-trip: got %q", algo, dec.Bytes())
 		}
 	}
 }
@@ -54,16 +54,16 @@ func TestPackReusesWritersCleanly(t *testing.T) {
 		for _, level := range []string{"fast", "default", "best"} {
 			want := make([][]byte, len(inputs))
 			for i, in := range inputs {
-				want[i] = pack(t, str(algo), b(in), str(level)).Bytes
+				want[i] = pack(t, str(algo), b(in), str(level)).Bytes()
 			}
 			for round := 0; round < 3; round++ {
 				for i, in := range inputs {
 					got := pack(t, str(algo), b(in), str(level))
-					if string(got.Bytes) != string(want[i]) {
+					if string(got.Bytes()) != string(want[i]) {
 						t.Fatalf("%s/%s round %d input %d: output differs from the first pack", algo, level, round, i)
 					}
-					if dec := unpack(t, str(algo), got); string(dec.Bytes) != in {
-						t.Fatalf("%s/%s round %d input %d: round-trip got %q", algo, level, round, i, dec.Bytes)
+					if dec := unpack(t, str(algo), got); string(dec.Bytes()) != in {
+						t.Fatalf("%s/%s round %d input %d: round-trip got %q", algo, level, round, i, dec.Bytes())
 					}
 				}
 			}
@@ -84,7 +84,7 @@ func TestPackConcurrent(t *testing.T) {
 					return
 				}
 				out, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("deflate"), v})
-				if err != nil || string(out.Bytes) != data {
+				if err != nil || string(out.Bytes()) != data {
 					done <- "round-trip mismatch"
 					return
 				}
@@ -102,11 +102,11 @@ func TestPackConcurrent(t *testing.T) {
 func TestGzipMagicAndShrinks(t *testing.T) {
 	data := strings.Repeat("abcabcabc", 300)
 	out := pack(t, str("gzip"), b(data))
-	if len(out.Bytes) < 2 || out.Bytes[0] != 0x1f || out.Bytes[1] != 0x8b {
-		t.Errorf("gzip output missing magic 1f 8b: %x", out.Bytes)
+	if len(out.Bytes()) < 2 || out.Bytes()[0] != 0x1f || out.Bytes()[1] != 0x8b {
+		t.Errorf("gzip output missing magic 1f 8b: %x", out.Bytes())
 	}
-	if len(out.Bytes) >= len(data) {
-		t.Errorf("compressible data did not shrink: %d -> %d", len(data), len(out.Bytes))
+	if len(out.Bytes()) >= len(data) {
+		t.Errorf("compressible data did not shrink: %d -> %d", len(data), len(out.Bytes()))
 	}
 }
 
@@ -114,8 +114,8 @@ func TestLevels(t *testing.T) {
 	data := strings.Repeat("abcabc", 400)
 	fast := pack(t, str("gzip"), b(data), str("fast"))
 	best := pack(t, str("gzip"), b(data), str("best"))
-	if len(best.Bytes) > len(fast.Bytes) {
-		t.Errorf("best (%d) should not exceed fast (%d)", len(best.Bytes), len(fast.Bytes))
+	if len(best.Bytes()) > len(fast.Bytes()) {
+		t.Errorf("best (%d) should not exceed fast (%d)", len(best.Bytes()), len(fast.Bytes()))
 	}
 	if _, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("gzip"), b(data), str("turbo")}); err == nil {
 		t.Error("expected an error for an unknown level")
@@ -137,8 +137,8 @@ func TestStreamingMatchesOneShot(t *testing.T) {
 		t.Fatal(err)
 	}
 	dec := unpack(t, str("gzip"), out)
-	if string(dec.Bytes) != "hello world" {
-		t.Errorf("streamed content = %q, want %q", dec.Bytes, "hello world")
+	if string(dec.Bytes()) != "hello world" {
+		t.Errorf("streamed content = %q, want %q", dec.Bytes(), "hello world")
 	}
 	// finalize consumes the handle: a second finalize / update is kind
 	// "closed", a discard does nothing (M29.46).
@@ -212,7 +212,7 @@ func TestUnpackMaxBytes(t *testing.T) {
 	data := strings.Repeat("a", 1000)
 	for _, algo := range []string{"gzip", "zlib", "deflate"} {
 		comp := pack(t, str(algo), b(data))
-		if got := unpack(t, str(algo), comp, interpreter.IntVal(1000)); string(got.Bytes) != data {
+		if got := unpack(t, str(algo), comp, interpreter.IntVal(1000)); string(got.Bytes()) != data {
 			t.Errorf("%s: output at exactly maxBytes should be returned whole", algo)
 		}
 		_, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{str(algo), comp, interpreter.IntVal(999)})
@@ -236,9 +236,9 @@ func TestUnpackMaxBytes(t *testing.T) {
 }
 
 func errorField(v interpreter.Value, name string) string {
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == name {
-			return f.Value.Str
+			return f.Value.Str()
 		}
 	}
 	return ""

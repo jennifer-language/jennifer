@@ -521,7 +521,7 @@ func binomialArgs(name string, args []interpreter.Value) (k, n int64, p float64,
 	if !ok {
 		return 0, 0, 0, fmt.Errorf("stats.%s: p must be int or float, got %s", name, args[2].Kind)
 	}
-	k, n = args[0].Int, args[1].Int
+	k, n = args[0].Int(), args[1].Int()
 	if n < 0 {
 		return 0, 0, 0, fmt.Errorf("stats.%s: n must be non-negative, got %d", name, n)
 	}
@@ -574,7 +574,7 @@ func poissonArgs(name string, args []interpreter.Value) (k int64, lambda float64
 	if lf <= 0 {
 		return 0, 0, fmt.Errorf("stats.%s: lambda must be positive, got %s", name, interpreter.DisplayFloat(lf))
 	}
-	return args[0].Int, lf, nil
+	return args[0].Int(), lf, nil
 }
 
 // boolFloat maps a bool to the float 1.0 / 0.0 (a degenerate pmf spike).

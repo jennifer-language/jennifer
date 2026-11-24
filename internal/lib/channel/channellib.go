@@ -50,10 +50,10 @@ func extractChannel(fnName string, v interpreter.Value) (*interpreter.ChannelSta
 	if v.Kind != interpreter.KindChannel {
 		return nil, fmt.Errorf("%s: argument must be a channel, got %s", fnName, v.Kind)
 	}
-	if v.Chan == nil {
+	if v.Chan() == nil {
 		return nil, fmt.Errorf("%s: channel has no state (uninitialized; use channel.make)", fnName)
 	}
-	return v.Chan, nil
+	return v.Chan(), nil
 }
 
 // makeFn: channel.make(capacity) -> a fresh channel. capacity 0 is unbuffered
@@ -66,12 +66,12 @@ func makeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (retVal interpre
 	if args[0].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("channel.make: capacity must be int, got %s", args[0].Kind)
 	}
-	capacity := args[0].Int
+	capacity := args[0].Int()
 	if capacity < 0 {
 		return interpreter.Null(), fmt.Errorf("channel.make: capacity must be >= 0, got %d", capacity)
 	}
 	// Cap the buffer a single channel can allocate. A buffered `chan Value`
-	// commits its whole buffer eagerly (~272 bytes per slot), so an unbounded
+	// commits its whole buffer eagerly (48 bytes per slot), so an unbounded
 	// capacity is a multi-gigabyte allocation that OOM-kills the process before Go
 	// even reaches its makechan "size out of range" panic - a fatal, unrecoverable
 	// failure. Bounding it here turns that into a catchable error, the same class
@@ -158,10 +158,10 @@ func timeoutMillis(fn string, v interpreter.Value) (int64, error) {
 	if v.Kind != interpreter.KindInt {
 		return 0, fmt.Errorf("%s: ms must be int, got %s", fn, v.Kind)
 	}
-	if v.Int < 0 || v.Int > maxTimeoutMillis {
-		return 0, fmt.Errorf("%s: ms must be 0 to %d, got %d", fn, maxTimeoutMillis, v.Int)
+	if v.Int() < 0 || v.Int() > maxTimeoutMillis {
+		return 0, fmt.Errorf("%s: ms must be 0 to %d, got %d", fn, maxTimeoutMillis, v.Int())
 	}
-	return v.Int, nil
+	return v.Int(), nil
 }
 
 // recvTimeoutFn: channel.recvTimeout(ch, ms) -> T. channel.recv bounded by a
@@ -243,8 +243,8 @@ func selectList(fn string, v interpreter.Value) ([]*interpreter.ChannelState, er
 	if v.Kind != interpreter.KindList {
 		return nil, fmt.Errorf("%s: argument must be a list of channel, got %s", fn, v.Kind)
 	}
-	states := make([]*interpreter.ChannelState, 0, len(v.List))
-	for i, e := range v.List {
+	states := make([]*interpreter.ChannelState, 0, len(v.List()))
+	for i, e := range v.List() {
 		s, err := extractChannel(fmt.Sprintf("%s: element %d", fn, i), e)
 		if err != nil {
 			return nil, err

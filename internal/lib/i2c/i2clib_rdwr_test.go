@@ -65,12 +65,12 @@ func errKind(err error) (string, string) {
 		return "runtime", err.Error()
 	}
 	var kind, msg string
-	for _, f := range sig.Value.Fields {
+	for _, f := range sig.Value.Fields() {
 		switch f.Name {
 		case "kind":
-			kind = f.Value.Str
+			kind = f.Value.Str()
 		case "message":
-			msg = f.Value.Str
+			msg = f.Value.Str()
 		}
 	}
 	return kind, msg
@@ -100,8 +100,8 @@ func TestWriteReadOneCombinedTransfer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(v.Bytes) != "abc" || calls != 1 {
-		t.Errorf("got %q after %d calls", v.Bytes, calls)
+	if string(v.Bytes()) != "abc" || calls != 1 {
+		t.Errorf("got %q after %d calls", v.Bytes(), calls)
 	}
 }
 

@@ -16,7 +16,7 @@ func strList(keys ...string) interpreter.Value {
 	for i, k := range keys {
 		out[i] = interpreter.StringVal(k)
 	}
-	return interpreter.Value{Kind: interpreter.KindList, List: out}
+	return interpreter.GenericListVal(out)
 }
 
 // TestWithout: removes every listed key, keeps the others in order, leaves
@@ -31,18 +31,18 @@ func TestWithout(t *testing.T) {
 	if got := out.Display(); got != `{"b": 2, "d": 4}` {
 		t.Fatalf("got %s", got)
 	}
-	if len(m.Map) != 4 {
+	if len(m.Map()) != 4 {
 		t.Fatalf("source changed: %s", m.Display())
 	}
 	if out.LookupKey(interpreter.StringVal("d")) != 1 || out.LookupKey(interpreter.StringVal("a")) >= 0 {
 		t.Fatalf("lookups on result")
 	}
 	empty, err := withoutFn(interpreter.BuiltinCtx{}, []interpreter.Value{m, strList()})
-	if err != nil || len(empty.Map) != 4 {
+	if err != nil || len(empty.Map()) != 4 {
 		t.Fatalf("no keys: %v %v", empty.Display(), err)
 	}
 	all, err := withoutFn(interpreter.BuiltinCtx{}, []interpreter.Value{m, strList("a", "b", "c", "d")})
-	if err != nil || len(all.Map) != 0 {
+	if err != nil || len(all.Map()) != 0 {
 		t.Fatalf("all keys: %v %v", all.Display(), err)
 	}
 }
@@ -87,7 +87,7 @@ func TestWithoutSingleCopy(t *testing.T) {
 	if allocs > float64(len(keys)+10) {
 		t.Fatalf("without on 20000 entries: %.0f allocations", allocs)
 	}
-	if len(out.Map) != 19000 {
-		t.Fatalf("result has %d entries", len(out.Map))
+	if len(out.Map()) != 19000 {
+		t.Fatalf("result has %d entries", len(out.Map()))
 	}
 }

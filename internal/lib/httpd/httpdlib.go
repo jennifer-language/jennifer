@@ -121,15 +121,15 @@ func makeRequest(id int64) Value {
 // extractID pulls the integer id out of a namespaced-struct value, with a
 // boundary error naming what the caller passed.
 func extractID(fnName, wantStruct string, v Value) (int64, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != wantStruct {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != wantStruct {
 		return 0, fmt.Errorf("%s: argument must be a httpd.%s, got %s", fnName, wantStruct, v.Kind)
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == "id" {
 			if f.Value.Kind != interpreter.KindInt {
 				return 0, fmt.Errorf("%s: httpd.%s.id is not int (got %s)", fnName, wantStruct, f.Value.Kind)
 			}
-			return f.Value.Int, nil
+			return f.Value.Int(), nil
 		}
 	}
 	return 0, fmt.Errorf("%s: httpd.%s has no id field", fnName, wantStruct)
@@ -140,7 +140,7 @@ func takeStringArg(fnName string, args []Value, idx int, role string) (string, e
 	if args[idx].Kind != interpreter.KindString {
 		return "", fmt.Errorf("%s: %s must be string, got %s", fnName, role, args[idx].Kind)
 	}
-	return args[idx].Str, nil
+	return args[idx].Str(), nil
 }
 
 // takeIntArg pulls a positional int argument.
@@ -148,7 +148,7 @@ func takeIntArg(fnName string, args []Value, idx int, role string) (int64, error
 	if args[idx].Kind != interpreter.KindInt {
 		return 0, fmt.Errorf("%s: %s must be int, got %s", fnName, role, args[idx].Kind)
 	}
-	return args[idx].Int, nil
+	return args[idx].Int(), nil
 }
 
 // takeBytesArg pulls a positional bytes argument.
@@ -156,7 +156,7 @@ func takeBytesArg(fnName string, args []Value, idx int, role string) ([]byte, er
 	if args[idx].Kind != interpreter.KindBytes {
 		return nil, fmt.Errorf("%s: %s must be bytes, got %s", fnName, role, args[idx].Kind)
 	}
-	return args[idx].Bytes, nil
+	return args[idx].Bytes(), nil
 }
 
 // serverOpts is an httpd.Options as written: each field exactly as the caller
@@ -172,10 +172,10 @@ type serverOpts struct {
 // takeOptionsArg reads an httpd.Options struct value into serverOpts.
 func takeOptionsArg(fnName string, v Value) (serverOpts, error) {
 	var o serverOpts
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "Options" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "Options" {
 		return o, fmt.Errorf("%s: options must be a httpd.Options, got %s", fnName, v.Kind)
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		switch f.Name {
 		case "dirListing", "followSymlinks", "etag":
 			if f.Value.Kind != interpreter.KindBool {
@@ -183,11 +183,11 @@ func takeOptionsArg(fnName string, v Value) (serverOpts, error) {
 			}
 			switch f.Name {
 			case "dirListing":
-				o.dirListing = f.Value.Bool
+				o.dirListing = f.Value.Bool()
 			case "followSymlinks":
-				o.followSymlinks = f.Value.Bool
+				o.followSymlinks = f.Value.Bool()
 			default:
-				o.etag = f.Value.Bool
+				o.etag = f.Value.Bool()
 			}
 			continue
 		case "certPem", "keyPem":
@@ -198,9 +198,9 @@ func takeOptionsArg(fnName string, v Value) (serverOpts, error) {
 				return o, fmt.Errorf("%s: httpd.Options.%s must be bytes, got %s", fnName, f.Name, f.Value.Kind)
 			}
 			if f.Name == "certPem" {
-				o.certPem = f.Value.Bytes
+				o.certPem = f.Value.Bytes()
 			} else {
-				o.keyPem = f.Value.Bytes
+				o.keyPem = f.Value.Bytes()
 			}
 			continue
 		}
@@ -224,7 +224,7 @@ func takeOptionsArg(fnName string, v Value) (serverOpts, error) {
 		if f.Value.Kind != interpreter.KindInt {
 			return o, fmt.Errorf("%s: httpd.Options.%s must be int, got %s", fnName, f.Name, f.Value.Kind)
 		}
-		*dst = f.Value.Int
+		*dst = f.Value.Int()
 	}
 	return o, nil
 }
@@ -233,14 +233,14 @@ func takeOptionsArg(fnName string, v Value) (serverOpts, error) {
 func takeBodyArg(fnName string, v Value) ([]byte, error) {
 	switch v.Kind {
 	case interpreter.KindString:
-		return []byte(v.Str), nil
+		return []byte(v.Str()), nil
 	case interpreter.KindBytes:
 		// Copy at the boundary: the socket write happens later, on the
 		// handler goroutine, after respond has returned - handing it the
 		// caller's backing would let a post-respond `$buf[i] = ...`
 		// mutation race the write.
-		out := make([]byte, len(v.Bytes))
-		copy(out, v.Bytes)
+		out := make([]byte, len(v.Bytes()))
+		copy(out, v.Bytes())
 		return out, nil
 	default:
 		return nil, fmt.Errorf("%s: body must be string or bytes, got %s", fnName, v.Kind)

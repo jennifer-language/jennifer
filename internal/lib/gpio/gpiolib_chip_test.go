@@ -71,11 +71,11 @@ func TestChipHandle(t *testing.T) {
 	call(setupFn, a, iv(17), sv("out"))
 	call(setupFn, b, iv(17), sv("out"))
 	call(writeFn, a, iv(17), iv(1))
-	if v := call(readFn, a, iv(17)); v.Int != 1 {
-		t.Errorf("read a/17 = %d, want 1", v.Int)
+	if v := call(readFn, a, iv(17)); v.Int() != 1 {
+		t.Errorf("read a/17 = %d, want 1", v.Int())
 	}
-	if v := call(readFn, b, iv(17)); v.Int != 0 {
-		t.Errorf("read b/17 = %d, want 0 (a separate line)", v.Int)
+	if v := call(readFn, b, iv(17)); v.Int() != 0 {
+		t.Errorf("read b/17 = %d, want 0 (a separate line)", v.Int())
 	}
 	call(releaseFn, b, iv(17))
 	if _, err := readFn(ctx, []Value{b, iv(17)}); err == nil || !strings.Contains(err.Error(), "not set up") {

@@ -32,7 +32,7 @@ import (
 func errKind(err error) string {
 	var es *interpreter.ErrorSignal
 	if errors.As(err, &es) {
-		return field(es.Value, "kind").Str
+		return field(es.Value, "kind").Str()
 	}
 	if err == nil {
 		return ""
@@ -41,7 +41,7 @@ func errKind(err error) string {
 }
 
 func field(v Value, name string) Value {
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == name {
 			return f.Value
 		}
@@ -254,17 +254,17 @@ func TestTransportFailureIsNetError(t *testing.T) {
 			continue
 		}
 		v := thrown(t, err)
-		if v.StructNS != "net" || v.StructName != "NetError" {
-			t.Errorf("%s: thrown %s.%s, want net.NetError", c.driver, v.StructNS, v.StructName)
+		if v.StructNS() != "net" || v.StructName() != "NetError" {
+			t.Errorf("%s: thrown %s.%s, want net.NetError", c.driver, v.StructNS(), v.StructName())
 		}
-		if r := field(v, "reason").Str; r != "refused" {
-			t.Errorf("%s: reason %q, want refused (%s)", c.driver, r, field(v, "message").Str)
+		if r := field(v, "reason").Str(); r != "refused" {
+			t.Errorf("%s: reason %q, want refused (%s)", c.driver, r, field(v, "message").Str())
 		}
-		if op := field(v, "op").Str; op != "connect" {
+		if op := field(v, "op").Str(); op != "connect" {
 			t.Errorf("%s: op %q, want connect", c.driver, op)
 		}
-		if strings.Contains(field(v, "message").Str, "s3cr3t") {
-			t.Errorf("%s: message leaks the password: %s", c.driver, field(v, "message").Str)
+		if strings.Contains(field(v, "message").Str(), "s3cr3t") {
+			t.Errorf("%s: message leaks the password: %s", c.driver, field(v, "message").Str())
 		}
 	}
 }
@@ -336,14 +336,14 @@ func TestDbFailureMapping(t *testing.T) {
 	} {
 		err := dbFailure(ctx(), "sql.exec", "read", c.err, time.Second)
 		v := thrown(t, err)
-		if v.StructNS != "sql" || v.StructName != "SqlError" || field(v, "kind").Str != "sql" {
-			t.Errorf("%s: thrown %s.%s kind %q", c.name, v.StructNS, v.StructName, field(v, "kind").Str)
+		if v.StructNS() != "sql" || v.StructName() != "SqlError" || field(v, "kind").Str() != "sql" {
+			t.Errorf("%s: thrown %s.%s kind %q", c.name, v.StructNS(), v.StructName(), field(v, "kind").Str())
 		}
-		if field(v, "code").Int != c.code || field(v, "sqlState").Str != c.state {
-			t.Errorf("%s: code %d sqlState %q, want %d %q", c.name, field(v, "code").Int, field(v, "sqlState").Str, c.code, c.state)
+		if field(v, "code").Int() != c.code || field(v, "sqlState").Str() != c.state {
+			t.Errorf("%s: code %d sqlState %q, want %d %q", c.name, field(v, "code").Int(), field(v, "sqlState").Str(), c.code, c.state)
 		}
-		if !strings.HasPrefix(field(v, "message").Str, "sql.exec: ") {
-			t.Errorf("%s: message %q", c.name, field(v, "message").Str)
+		if !strings.HasPrefix(field(v, "message").Str(), "sql.exec: ") {
+			t.Errorf("%s: message %q", c.name, field(v, "message").Str())
 		}
 	}
 
@@ -369,12 +369,12 @@ func TestDbFailureMapping(t *testing.T) {
 	} {
 		err := dbFailure(ctx(), "sql.query", "read", c.err, time.Second)
 		v := thrown(t, err)
-		if v.StructNS != "net" || v.StructName != "NetError" || field(v, "kind").Str != "net" {
-			t.Errorf("%s: thrown %s.%s", c.name, v.StructNS, v.StructName)
+		if v.StructNS() != "net" || v.StructName() != "NetError" || field(v, "kind").Str() != "net" {
+			t.Errorf("%s: thrown %s.%s", c.name, v.StructNS(), v.StructName())
 			continue
 		}
-		if field(v, "op").Str != c.op || field(v, "reason").Str != c.reason {
-			t.Errorf("%s: op %q reason %q, want %q %q", c.name, field(v, "op").Str, field(v, "reason").Str, c.op, c.reason)
+		if field(v, "op").Str() != c.op || field(v, "reason").Str() != c.reason {
+			t.Errorf("%s: op %q reason %q, want %q %q", c.name, field(v, "op").Str(), field(v, "reason").Str(), c.op, c.reason)
 		}
 	}
 
@@ -442,7 +442,7 @@ func TestAccessorDataErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := nextFn(ctx(), []Value{rowsV}); err != nil || !ok.Bool {
+	if ok, err := nextFn(ctx(), []Value{rowsV}); err != nil || !ok.Bool() {
 		t.Fatalf("next: %v", err)
 	}
 	sqlErr := func(name string, err error, want string) {
@@ -452,10 +452,10 @@ func TestAccessorDataErrors(t *testing.T) {
 			return
 		}
 		v := thrown(t, err)
-		if v.StructName != "SqlError" || field(v, "code").Int != 0 || field(v, "sqlState").Str != "" {
-			t.Errorf("%s: %s{code %d, sqlState %q}", name, v.StructName, field(v, "code").Int, field(v, "sqlState").Str)
+		if v.StructName() != "SqlError" || field(v, "code").Int() != 0 || field(v, "sqlState").Str() != "" {
+			t.Errorf("%s: %s{code %d, sqlState %q}", name, v.StructName(), field(v, "code").Int(), field(v, "sqlState").Str())
 		}
-		if msg := field(v, "message").Str; !strings.Contains(msg, want) {
+		if msg := field(v, "message").Str(); !strings.Contains(msg, want) {
 			t.Errorf("%s: message %q, want it to contain %q", name, msg, want)
 		}
 	}
@@ -464,7 +464,7 @@ func TestAccessorDataErrors(t *testing.T) {
 	_, err = asStringFn(ctx(), []Value{rowsV, interpreter.IntVal(1)})
 	sqlErr("asString badstr", err, `column "badstr" is not valid UTF-8 (byte offset 1)`)
 	assertStr(t, rowsV, sv("ok"), "hé�")
-	if b, err := asBytesFn(ctx(), []Value{rowsV, sv("bad")}); err != nil || len(b.Bytes) != 4 {
+	if b, err := asBytesFn(ctx(), []Value{rowsV, sv("bad")}); err != nil || len(b.Bytes()) != 4 {
 		t.Errorf("asBytes bad: %v %v", b, err)
 	}
 

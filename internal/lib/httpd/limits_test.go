@@ -30,10 +30,10 @@ func TestContentLengthMaxInt64(t *testing.T) {
 	handled := make(chan int, 1)
 	serveOnce(srvV, func(req Value) {
 		b, _ := bodyFn(noCtx, []Value{req})
-		handled <- len(b.Bytes)
+		handled <- len(b.Bytes())
 		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("ok")})
 	})
-	c, err := net.Dial("tcp", addrV.Str)
+	c, err := net.Dial("tcp", addrV.Str())
 	if err != nil {
 		t.Fatal(err)
 	}

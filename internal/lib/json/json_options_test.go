@@ -30,7 +30,7 @@ func encWith(t *testing.T, v, o interpreter.Value) string {
 	if err != nil {
 		t.Fatalf("encodeWith: %v", err)
 	}
-	return out.Str
+	return out.Str()
 }
 
 // sample mixes a Jennifer map (unsorted keys), a struct, a json.Value, HTML
@@ -58,8 +58,8 @@ func TestEncodeWithDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := encWith(t, v, opts(2, false, false, false)); got != pretty.Str {
-		t.Errorf("indent 2 = %s\nencodePretty = %s", got, pretty.Str)
+	if got := encWith(t, v, opts(2, false, false, false)); got != pretty.Str() {
+		t.Errorf("indent 2 = %s\nencodePretty = %s", got, pretty.Str())
 	}
 }
 
@@ -218,7 +218,7 @@ func TestMergePatchValues(t *testing.T) {
 		t.Errorf("merged = %s", got)
 	}
 	for _, k := range []string{"/kb", "/kt", "/kr", "/new"} {
-		if !call(t, hasFn, out, ptr(k)).Bool {
+		if !call(t, hasFn, out, ptr(k)).Bool() {
 			t.Errorf("has(%s) = false after merge", k)
 		}
 	}

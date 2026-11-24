@@ -84,7 +84,7 @@ func raise(ctx interpreter.BuiltinCtx, fn string, err error) error {
 
 func describe(v Value) string {
 	if v.Kind == interpreter.KindObject || v.Kind == interpreter.KindStruct {
-		return v.StructNS + "." + v.StructName
+		return v.StructNS() + "." + v.StructName()
 	}
 	return v.Kind.String()
 }
@@ -97,9 +97,9 @@ func operand(ctx interpreter.BuiltinCtx, fn string, v Value) (dec, error) {
 	}
 	switch v.Kind {
 	case interpreter.KindInt:
-		return fromInt(v.Int), nil
+		return fromInt(v.Int()), nil
 	case interpreter.KindString:
-		d, err := parse(v.Str)
+		d, err := parse(v.Str())
 		if err != nil {
 			return dec{}, raise(ctx, fn, err)
 		}
@@ -114,9 +114,9 @@ func modeArg(fn string, v Value) (mode, error) {
 	if v.Kind != interpreter.KindString {
 		return 0, fmt.Errorf("decimal.%s: rounding mode must be a string, got %s", fn, describe(v))
 	}
-	m, ok := modeNames[v.Str]
+	m, ok := modeNames[v.Str()]
 	if !ok {
-		return 0, fmt.Errorf("decimal.%s: unknown rounding mode %q; known: %s", fn, v.Str, modeList)
+		return 0, fmt.Errorf("decimal.%s: unknown rounding mode %q; known: %s", fn, v.Str(), modeList)
 	}
 	return m, nil
 }
@@ -125,10 +125,10 @@ func scaleArg(fn string, v Value) (int, error) {
 	if v.Kind != interpreter.KindInt {
 		return 0, fmt.Errorf("decimal.%s: scale must be int, got %s", fn, describe(v))
 	}
-	if v.Int < 0 || v.Int > maxDigits {
-		return 0, fmt.Errorf("decimal.%s: scale must be in 0..%d, got %d", fn, maxDigits, v.Int)
+	if v.Int() < 0 || v.Int() > maxDigits {
+		return 0, fmt.Errorf("decimal.%s: scale must be in 0..%d, got %d", fn, maxDigits, v.Int())
 	}
-	return int(v.Int), nil
+	return int(v.Int()), nil
 }
 
 // --- builtins ---------------------------------------------------------------
@@ -139,7 +139,7 @@ func fromFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("decimal.from expects 1 argument (string, int or float), got %d", len(args))
 	}
 	if args[0].Kind == interpreter.KindFloat {
-		d, err := fromFloat(args[0].Float)
+		d, err := fromFloat(args[0].Float())
 		if err != nil {
 			return interpreter.Null(), raise(ctx, "from", err)
 		}
@@ -269,13 +269,13 @@ func powFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if args[1].Kind != interpreter.KindInt || args[1].Int < 0 {
+	if args[1].Kind != interpreter.KindInt || args[1].Int() < 0 {
 		return interpreter.Null(), fmt.Errorf("decimal.pow: the exponent must be an int >= 0")
 	}
-	if args[1].Int > maxDigits*4 {
+	if args[1].Int() > maxDigits*4 {
 		return interpreter.Null(), raise(ctx, "pow", errLimit)
 	}
-	r, err := pow(d, int(args[1].Int))
+	r, err := pow(d, int(args[1].Int()))
 	if err != nil {
 		return interpreter.Null(), raise(ctx, "pow", err)
 	}
@@ -288,7 +288,7 @@ func sumFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("decimal.sum expects 1 argument, a list of decimals")
 	}
 	total := fromInt(0)
-	for _, v := range args[0].List {
+	for _, v := range args[0].List() {
 		d, err := operand(ctx, "sum", v)
 		if err != nil {
 			return interpreter.Null(), err

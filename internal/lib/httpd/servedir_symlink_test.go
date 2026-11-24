@@ -64,7 +64,7 @@ func TestServeDirSymlinks(t *testing.T) {
 			}
 		})
 		addrV, _ := addressFn(noCtx, []Value{srv})
-		return addrV.Str
+		return addrV.Str()
 	}
 	get := func(addr, p string) (int, string, string) {
 		resp, err := http.Get("http://" + addr + p)

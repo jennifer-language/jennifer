@@ -105,7 +105,7 @@ func makeWatcher(id int64) Value {
 
 // isWatcher reports whether v is an fs.Watcher value (for polymorphic fs.close).
 func isWatcher(v Value) bool {
-	return v.Kind == interpreter.KindStruct && v.StructNS == LibraryName && v.StructName == "Watcher"
+	return v.Kind == interpreter.KindStruct && v.StructNS() == LibraryName && v.StructName() == "Watcher"
 }
 
 // extractWatcherID pulls the integer id out of an `fs.Watcher{...}` value.
@@ -113,12 +113,12 @@ func extractWatcherID(fnName string, v Value) (int64, error) {
 	if !isWatcher(v) {
 		return 0, fmt.Errorf("%s: argument must be an fs.Watcher, got %s", fnName, v.Kind)
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == "id" {
 			if f.Value.Kind != interpreter.KindInt {
 				return 0, fmt.Errorf("%s: fs.Watcher.id is not int (got %s)", fnName, f.Value.Kind)
 			}
-			return f.Value.Int, nil
+			return f.Value.Int(), nil
 		}
 	}
 	return 0, fmt.Errorf("%s: fs.Watcher has no id field", fnName)
@@ -149,7 +149,7 @@ func watchFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if args[1].Kind != interpreter.KindInt {
 			return interpreter.Null(), fmt.Errorf("fs.watch: intervalMs must be int, got %s", args[1].Kind)
 		}
-		intervalMs, err = checkWatchInterval("fs.watch", args[1].Int)
+		intervalMs, err = checkWatchInterval("fs.watch", args[1].Int())
 		if err != nil {
 			return interpreter.Null(), err
 		}
@@ -170,19 +170,19 @@ func watchWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	o := args[1]
-	if o.Kind != interpreter.KindStruct || o.StructNS != LibraryName || o.StructName != "WatchOptions" {
+	if o.Kind != interpreter.KindStruct || o.StructNS() != LibraryName || o.StructName() != "WatchOptions" {
 		return interpreter.Null(), fmt.Errorf("%s: options must be an fs.WatchOptions, got %s", fn, o.Kind)
 	}
 	intervalMs := int64(defaultWatchIntervalMs)
-	for _, f := range o.Fields {
+	for _, f := range o.Fields() {
 		if f.Name != "intervalMs" {
 			continue
 		}
 		if f.Value.Kind != interpreter.KindInt {
 			return interpreter.Null(), fmt.Errorf("%s: fs.WatchOptions.intervalMs must be int, got %s", fn, f.Value.Kind)
 		}
-		if f.Value.Int != 0 {
-			intervalMs, err = checkWatchInterval(fn, f.Value.Int)
+		if f.Value.Int() != 0 {
+			intervalMs, err = checkWatchInterval(fn, f.Value.Int())
 			if err != nil {
 				return interpreter.Null(), err
 			}

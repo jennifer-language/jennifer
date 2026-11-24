@@ -60,7 +60,7 @@ func toCodepointFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpre
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("convert.toCodepoint: argument must be string, got %s", args[0].Kind)
 	}
-	s := args[0].Str
+	s := args[0].Str()
 	if utf8.RuneCountInString(s) != 1 {
 		return interpreter.Null(), fmt.Errorf("convert.toCodepoint: argument must be exactly one code point, got %q", s)
 	}
@@ -83,7 +83,7 @@ func fromCodepointFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interp
 	if args[0].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("convert.fromCodepoint: argument must be int, got %s", args[0].Kind)
 	}
-	n := args[0].Int
+	n := args[0].Int()
 	if n < 0 || n > utf8.MaxRune || (n >= 0xD800 && n <= 0xDFFF) {
 		return interpreter.Null(), fmt.Errorf("convert.fromCodepoint: %d is not a valid Unicode code point", n)
 	}
@@ -122,21 +122,21 @@ func toIntFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		if args[1].Kind != interpreter.KindInt {
 			return interpreter.Null(), fmt.Errorf("convert.toInt: radix must be int, got %s", args[1].Kind)
 		}
-		radix := args[1].Int
+		radix := args[1].Int()
 		switch radix {
 		case 2, 8, 10, 16:
 		default:
 			return interpreter.Null(), fmt.Errorf("convert.toInt: radix must be 2, 8, 10, or 16, got %d", radix)
 		}
-		n, err := strconv.ParseInt(v.Str, int(radix), 64)
+		n, err := strconv.ParseInt(v.Str(), int(radix), 64)
 		if err != nil {
 			// A 0x / 0o / 0b prefix is never accepted under an explicit radix (its
 			// letter is not a digit in the base), so the parse fails rather than
 			// misreads - point the caller at the fix instead of a bare "invalid".
-			if hasBasePrefix(v.Str) {
-				return interpreter.Null(), dataerr.New(dataKind, "convert.toInt: %q (radix %d): a 0x / 0o / 0b prefix is not accepted; pass the bare digits", v.Str, radix)
+			if hasBasePrefix(v.Str()) {
+				return interpreter.Null(), dataerr.New(dataKind, "convert.toInt: %q (radix %d): a 0x / 0o / 0b prefix is not accepted; pass the bare digits", v.Str(), radix)
 			}
-			return interpreter.Null(), dataerr.New(dataKind, "convert.toInt: %q is not a valid base-%d integer", v.Str, radix)
+			return interpreter.Null(), dataerr.New(dataKind, "convert.toInt: %q is not a valid base-%d integer", v.Str(), radix)
 		}
 		return interpreter.IntVal(n), nil
 	}
@@ -147,7 +147,7 @@ func toIntFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		// Truncate toward zero, but reject the values int64 cannot hold - a
 		// bare int64(f) is platform-defined garbage for NaN / Inf / out of
 		// range, which contradicts convert's canonical-only contract.
-		f := v.Float
+		f := v.Float()
 		if math.IsNaN(f) {
 			return interpreter.Null(), fmt.Errorf("convert.toInt: value is not a number")
 		}
@@ -156,18 +156,18 @@ func toIntFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		}
 		return interpreter.IntVal(int64(f)), nil
 	case interpreter.KindString:
-		n, err := strconv.ParseInt(v.Str, 10, 64)
+		n, err := strconv.ParseInt(v.Str(), 10, 64)
 		if err != nil {
 			// The one-arg form is decimal only, so a 0x / 0o / 0b number lands here;
 			// point at the radix form rather than a bare "invalid".
-			if hasBasePrefix(v.Str) {
-				return interpreter.Null(), dataerr.New(dataKind, "convert.toInt: %q is not a decimal integer; for a 0x / 0o / 0b number use convert.toInt(s, radix) with the bare digits", v.Str)
+			if hasBasePrefix(v.Str()) {
+				return interpreter.Null(), dataerr.New(dataKind, "convert.toInt: %q is not a decimal integer; for a 0x / 0o / 0b number use convert.toInt(s, radix) with the bare digits", v.Str())
 			}
-			return interpreter.Null(), dataerr.New(dataKind, "convert.toInt: %q is not a valid integer", v.Str)
+			return interpreter.Null(), dataerr.New(dataKind, "convert.toInt: %q is not a valid integer", v.Str())
 		}
 		return interpreter.IntVal(n), nil
 	case interpreter.KindBool:
-		if v.Bool {
+		if v.Bool() {
 			return interpreter.IntVal(1), nil
 		}
 		return interpreter.IntVal(0), nil
@@ -239,7 +239,7 @@ func toFloatFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	v := args[0]
 	switch v.Kind {
 	case interpreter.KindInt:
-		return interpreter.FloatVal(float64(v.Int)), nil
+		return interpreter.FloatVal(float64(v.Int())), nil
 	case interpreter.KindFloat:
 		return v, nil
 	case interpreter.KindString:
@@ -247,19 +247,19 @@ func toFloatFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 		// "NaN" / "Inf" / "Infinity"; accept only the decimal form, as toInt
 		// accepts only decimal digits. Jennifer's float model forbids NaN and
 		// Infinity (the numeric stdlib assumes they cannot exist).
-		if !isDecimalFloat(v.Str) {
-			return interpreter.Null(), dataerr.New(dataKind, "convert.toFloat: %q is not a valid float", v.Str)
+		if !isDecimalFloat(v.Str()) {
+			return interpreter.Null(), dataerr.New(dataKind, "convert.toFloat: %q is not a valid float", v.Str())
 		}
-		f, err := strconv.ParseFloat(v.Str, 64)
+		f, err := strconv.ParseFloat(v.Str(), 64)
 		if err != nil {
-			return interpreter.Null(), dataerr.New(dataKind, "convert.toFloat: %q is not a valid float", v.Str)
+			return interpreter.Null(), dataerr.New(dataKind, "convert.toFloat: %q is not a valid float", v.Str())
 		}
 		if math.IsNaN(f) || math.IsInf(f, 0) {
-			return interpreter.Null(), dataerr.New(dataKind, "convert.toFloat: %q: NaN and Infinity are not representable", v.Str)
+			return interpreter.Null(), dataerr.New(dataKind, "convert.toFloat: %q: NaN and Infinity are not representable", v.Str())
 		}
 		return interpreter.FloatVal(f), nil
 	case interpreter.KindBool:
-		if v.Bool {
+		if v.Bool() {
 			return interpreter.FloatVal(1.0), nil
 		}
 		return interpreter.FloatVal(0.0), nil
@@ -305,29 +305,29 @@ func toBoolFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	case interpreter.KindBool:
 		return v, nil
 	case interpreter.KindInt:
-		switch v.Int {
+		switch v.Int() {
 		case 0:
 			return interpreter.BoolVal(false), nil
 		case 1:
 			return interpreter.BoolVal(true), nil
 		}
-		return interpreter.Null(), fmt.Errorf("convert.toBool: %d: only 0 and 1 are accepted (use `$x != 0` for truthiness)", v.Int)
+		return interpreter.Null(), fmt.Errorf("convert.toBool: %d: only 0 and 1 are accepted (use `$x != 0` for truthiness)", v.Int())
 	case interpreter.KindFloat:
-		switch v.Float {
+		switch v.Float() {
 		case 0:
 			return interpreter.BoolVal(false), nil
 		case 1:
 			return interpreter.BoolVal(true), nil
 		}
-		return interpreter.Null(), fmt.Errorf("convert.toBool: %s: only 0.0 and 1.0 are accepted (use `$x != 0.0` for truthiness)", interpreter.DisplayFloat(v.Float))
+		return interpreter.Null(), fmt.Errorf("convert.toBool: %s: only 0.0 and 1.0 are accepted (use `$x != 0.0` for truthiness)", interpreter.DisplayFloat(v.Float()))
 	case interpreter.KindString:
-		switch v.Str {
+		switch v.Str() {
 		case "true":
 			return interpreter.BoolVal(true), nil
 		case "false":
 			return interpreter.BoolVal(false), nil
 		}
-		return interpreter.Null(), dataerr.New(dataKind, "convert.toBool: %q: only \"true\" or \"false\" are accepted", v.Str)
+		return interpreter.Null(), dataerr.New(dataKind, "convert.toBool: %q: only \"true\" or \"false\" are accepted", v.Str())
 	}
 	return interpreter.Null(), fmt.Errorf("convert.toBool: cannot convert %s to bool", v.Kind)
 }
@@ -353,7 +353,7 @@ func objectTypeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpret
 	if v.Kind != interpreter.KindObject {
 		return interpreter.Null(), fmt.Errorf("convert.objectType: argument must be an object (convert.typeOf == \"object\"), got %s", v.Kind)
 	}
-	return interpreter.StringVal(v.StructNS + "." + v.StructName), nil
+	return interpreter.StringVal(v.StructNS() + "." + v.StructName()), nil
 }
 
 // utf8Valid reports whether b is valid UTF-8, rejecting overlong encodings,

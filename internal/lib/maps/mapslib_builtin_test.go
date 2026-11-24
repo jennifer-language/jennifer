@@ -27,11 +27,11 @@ func strIntMap(pairs ...[2]interface{}) interpreter.Value {
 func TestHasFn(t *testing.T) {
 	m := strIntMap([2]interface{}{"a", 1}, [2]interface{}{"b", 2})
 	present, err := hasFn(interpreter.BuiltinCtx{}, []interpreter.Value{m, interpreter.StringVal("a")})
-	if err != nil || present.Kind != interpreter.KindBool || !present.Bool {
+	if err != nil || present.Kind != interpreter.KindBool || !present.Bool() {
 		t.Errorf("has(m, \"a\") = %+v, err %v; want true", present, err)
 	}
 	absent, _ := hasFn(interpreter.BuiltinCtx{}, []interpreter.Value{m, interpreter.StringVal("z")})
-	if absent.Bool {
+	if absent.Bool() {
 		t.Error("has(m, \"z\") should be false")
 	}
 	// Errors: arity, non-map first argument.
@@ -89,15 +89,15 @@ func TestMergeAndDeleteResults(t *testing.T) {
 		t.Fatalf("merge: %v", err)
 	}
 	// b overlays a: a=1, b=20 (overwritten), c=3 (appended). Insertion order kept.
-	if len(merged.Map) != 3 {
-		t.Fatalf("merged has %d entries, want 3", len(merged.Map))
+	if len(merged.Map()) != 3 {
+		t.Fatalf("merged has %d entries, want 3", len(merged.Map()))
 	}
-	if merged.Map[0].Value.Int != 1 || merged.Map[1].Value.Int != 20 || merged.Map[2].Value.Int != 3 {
+	if merged.Map()[0].Value.Int() != 1 || merged.Map()[1].Value.Int() != 20 || merged.Map()[2].Value.Int() != 3 {
 		t.Errorf("merge values = %d/%d/%d, want 1/20/3",
-			merged.Map[0].Value.Int, merged.Map[1].Value.Int, merged.Map[2].Value.Int)
+			merged.Map()[0].Value.Int(), merged.Map()[1].Value.Int(), merged.Map()[2].Value.Int())
 	}
 	// The inputs are untouched (non-mutating).
-	if a.Map[1].Value.Int != 2 {
+	if a.Map()[1].Value.Int() != 2 {
 		t.Error("merge mutated its first argument")
 	}
 
@@ -105,10 +105,10 @@ func TestMergeAndDeleteResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if len(del.Map) != 1 || del.Map[0].Key.Str != "b" {
-		t.Errorf("delete(a) left %+v, want just b", del.Map)
+	if len(del.Map()) != 1 || del.Map()[0].Key.Str() != "b" {
+		t.Errorf("delete(a) left %+v, want just b", del.Map())
 	}
-	if len(a.Map) != 2 {
+	if len(a.Map()) != 2 {
 		t.Error("delete mutated its input")
 	}
 }

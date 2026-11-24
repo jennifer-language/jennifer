@@ -183,9 +183,9 @@ var b64 = base64.RawStdEncoding
 func passwordBytes(v interpreter.Value) ([]byte, bool) {
 	switch v.Kind {
 	case interpreter.KindBytes:
-		return v.Bytes, true
+		return v.Bytes(), true
 	case interpreter.KindString:
-		return []byte(v.Str), true
+		return []byte(v.Str()), true
 	}
 	return nil, false
 }
@@ -201,7 +201,7 @@ func hashPasswordFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpr
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("crypto.hashPassword: password must be bytes, got %s", args[1].Kind)
 	}
-	algo := args[0].Str
+	algo := args[0].Str()
 	switch algo {
 	case "argon2id":
 		salt, err := randomBytes("hashPassword", argonSalt)
@@ -244,7 +244,7 @@ func verifyPasswordFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (inter
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("crypto.verifyPassword: password must be bytes, got %s", args[0].Kind)
 	}
-	stored := args[1].Str
+	stored := args[1].Str()
 	switch {
 	case strings.HasPrefix(stored, "$argon2id$"):
 		ok, err := verifyArgon2id(pw, stored)
@@ -405,7 +405,7 @@ func kdfInts(fn, shape string, args []interpreter.Value) ([]int64, error) {
 		if args[2+i].Kind != interpreter.KindInt {
 			return nil, fmt.Errorf("%s: argument %d must be int %s", fn, 3+i, shape)
 		}
-		out[i] = args[2+i].Int
+		out[i] = args[2+i].Int()
 	}
 	if out[3] < 1 {
 		return nil, fmt.Errorf("%s: keyLen must be at least 1, got %d", fn, out[3])
@@ -413,8 +413,8 @@ func kdfInts(fn, shape string, args []interpreter.Value) ([]int64, error) {
 	if out[3] > maxKeyLen {
 		return nil, limits.Capf("%s: keyLen %d exceeds the %d-byte limit", fn, out[3], maxKeyLen)
 	}
-	if len(args[1].Bytes) < minSaltLen {
-		return nil, fmt.Errorf("%s: the salt must be at least %d bytes, got %d", fn, minSaltLen, len(args[1].Bytes))
+	if len(args[1].Bytes()) < minSaltLen {
+		return nil, fmt.Errorf("%s: the salt must be at least %d bytes, got %d", fn, minSaltLen, len(args[1].Bytes()))
 	}
 	return out, nil
 }
@@ -434,7 +434,7 @@ func argon2idCore(fn string, args []interpreter.Value) (interpreter.Value, error
 		return interpreter.Null(), limits.Capf("%s: time up to %d, threads up to %d, memoryKiB up to %d; got %d, %d, %d", fn,
 			maxArgonTime, maxArgonThreads, maxArgonMemory, t, lanes, m)
 	}
-	return interpreter.BytesVal(argon2.IDKey(args[0].Bytes, args[1].Bytes, uint32(t), uint32(m), uint8(lanes), uint32(n[3]))), nil
+	return interpreter.BytesVal(argon2.IDKey(args[0].Bytes(), args[1].Bytes(), uint32(t), uint32(m), uint8(lanes), uint32(n[3]))), nil
 }
 
 // scryptCore is scrypt with fn, the name its messages give (crypto.deriveKey reuses it).
@@ -454,7 +454,7 @@ func scryptCore(fn string, args []interpreter.Value) (interpreter.Value, error) 
 	if err := scryptBounds(ln, r, p); err != nil {
 		return interpreter.Null(), fmt.Errorf("%s: %w", fn, err)
 	}
-	key, err := scrypt.Key(args[0].Bytes, args[1].Bytes, int(n), int(r), int(p), int(v[3]))
+	key, err := scrypt.Key(args[0].Bytes(), args[1].Bytes(), int(n), int(r), int(p), int(v[3]))
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("%s: %v", fn, err)
 	}

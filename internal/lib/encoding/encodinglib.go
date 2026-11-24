@@ -73,7 +73,7 @@ func isAsciiFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if args[0].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("encoding.isAscii: argument must be bytes, got %s", args[0].Kind)
 	}
-	for _, by := range args[0].Bytes {
+	for _, by := range args[0].Bytes() {
 		if by >= 0x80 {
 			return interpreter.BoolVal(false), nil
 		}
@@ -90,7 +90,7 @@ func lenBytesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("encoding.lenBytes: argument must be string, got %s", args[0].Kind)
 	}
-	return interpreter.IntVal(int64(len(args[0].Str))), nil
+	return interpreter.IntVal(int64(len(args[0].Str()))), nil
 }
 
 // lenRunesFn returns the rune count of UTF-8 encoded bytes; errors
@@ -102,10 +102,10 @@ func lenRunesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	if args[0].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("encoding.lenRunes: argument must be bytes, got %s", args[0].Kind)
 	}
-	if !utf8.Valid(args[0].Bytes) {
+	if !utf8.Valid(args[0].Bytes()) {
 		return interpreter.Null(), dataerr.New(dataKind, "encoding.lenRunes: input is not valid UTF-8")
 	}
-	return interpreter.IntVal(int64(utf8.RuneCount(args[0].Bytes))), nil
+	return interpreter.IntVal(int64(utf8.RuneCount(args[0].Bytes()))), nil
 }
 
 // ----- binary-to-text encodings (toText / fromText) -----------------
@@ -453,7 +453,7 @@ func toTextFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if args[1].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("encoding.toText: second argument must be bytes, got %s", args[1].Kind)
 	}
-	out, err := textEncode(args[0].Str, args[1].Bytes)
+	out, err := textEncode(args[0].Str(), args[1].Bytes())
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("encoding.toText: %v", err)
 	}
@@ -471,7 +471,7 @@ func fromTextFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	if args[1].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("encoding.fromText: second argument must be string, got %s", args[1].Kind)
 	}
-	out, err := textDecode(args[0].Str, args[1].Str)
+	out, err := textDecode(args[0].Str(), args[1].Str())
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("encoding.fromText: %w", err)
 	}
@@ -491,12 +491,12 @@ func encodeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if args[1].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("encoding.encode: second argument must be string, got %s", args[1].Kind)
 	}
-	c, ok := lookupCodec(args[0].Str)
+	c, ok := lookupCodec(args[0].Str())
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("encoding.encode: unknown codec %q; known: %s",
-			args[0].Str, knownCodecList())
+			args[0].Str(), knownCodecList())
 	}
-	out, err := c.encodeFn(args[1].Str)
+	out, err := c.encodeFn(args[1].Str())
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("encoding.encode (%s): %v", c.canonical, err)
 	}
@@ -514,12 +514,12 @@ func decodeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if args[1].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("encoding.decode: second argument must be bytes, got %s", args[1].Kind)
 	}
-	c, ok := lookupCodec(args[0].Str)
+	c, ok := lookupCodec(args[0].Str())
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("encoding.decode: unknown codec %q; known: %s",
-			args[0].Str, knownCodecList())
+			args[0].Str(), knownCodecList())
 	}
-	out, err := c.decodeFn(args[1].Bytes)
+	out, err := c.decodeFn(args[1].Bytes())
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("encoding.decode (%s): %w", c.canonical, dataerr.Wrap(dataKind, err))
 	}

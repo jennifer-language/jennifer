@@ -34,10 +34,10 @@ func asStringsFn(args []interpreter.Value) (interpreter.Value, error) {
 func TestAsStringsReadsList(t *testing.T) {
 	d := doc(t, `{"tags": ["a", "é", ""], "e": []}`)
 	got, err := numbersCall(asStringsFn, d, ptr("/tags"))
-	if err != nil || len(got.List) != 3 || got.List[1].Str != "é" || got.ElemTyp.Kind != parser.TypeString {
+	if err != nil || len(got.List()) != 3 || got.List()[1].Str() != "é" || got.ElemTyp().Kind != parser.TypeString {
 		t.Fatalf("asStrings = %v, %v", got, err)
 	}
-	if e, err := numbersCall(asStringsFn, d, ptr("/e")); err != nil || len(e.List) != 0 {
+	if e, err := numbersCall(asStringsFn, d, ptr("/e")); err != nil || len(e.List()) != 0 {
 		t.Errorf("empty list: %v, %v", e, err)
 	}
 	for _, bad := range []string{`["a", 1]`, `[null]`, `{"a": "b"}`, `"s"`} {
@@ -53,23 +53,23 @@ func TestAsFloatsReadsList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Kind != interpreter.KindList || got.ElemTyp.Kind != parser.TypeFloat {
+	if got.Kind != interpreter.KindList || got.ElemTyp().Kind != parser.TypeFloat {
 		t.Fatalf("asFloats returned %s, want a list of float", got.Kind)
 	}
 	want := []float64{1, -2.5, 300, 0}
-	if len(got.List) != len(want) {
-		t.Fatalf("len = %d, want %d", len(got.List), len(want))
+	if len(got.List()) != len(want) {
+		t.Fatalf("len = %d, want %d", len(got.List()), len(want))
 	}
 	for i, w := range want {
-		if got.List[i].Kind != interpreter.KindFloat || got.List[i].Float != w {
-			t.Errorf("[%d] = %v, want float %v", i, got.List[i], w)
+		if got.List()[i].Kind != interpreter.KindFloat || got.List()[i].Float() != w {
+			t.Errorf("[%d] = %v, want float %v", i, got.List()[i], w)
 		}
 	}
 	// an empty list, and the node itself with no pointer
-	if e, err := numbersCall(asFloatsFn, d, ptr("/e")); err != nil || len(e.List) != 0 || e.ElemTyp.Kind != parser.TypeFloat {
+	if e, err := numbersCall(asFloatsFn, d, ptr("/e")); err != nil || len(e.List()) != 0 || e.ElemTyp().Kind != parser.TypeFloat {
 		t.Errorf("empty asFloats = %v, %v", e, err)
 	}
-	if e, err := numbersCall(asFloatsFn, doc(t, `[7]`)); err != nil || len(e.List) != 1 || e.List[0].Float != 7 {
+	if e, err := numbersCall(asFloatsFn, doc(t, `[7]`)); err != nil || len(e.List()) != 1 || e.List()[0].Float() != 7 {
 		t.Errorf("asFloats without pointer = %v, %v", e, err)
 	}
 }
@@ -80,16 +80,16 @@ func TestAsIntsReadsList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Kind != interpreter.KindList || got.ElemTyp.Kind != parser.TypeInt {
+	if got.Kind != interpreter.KindList || got.ElemTyp().Kind != parser.TypeInt {
 		t.Fatalf("asInts returned %s, want a list of int", got.Kind)
 	}
 	want := []int64{0, 1, -9223372036854775808, 42}
 	for i, w := range want {
-		if got.List[i].Kind != interpreter.KindInt || got.List[i].Int != w {
-			t.Errorf("[%d] = %v, want int %d", i, got.List[i], w)
+		if got.List()[i].Kind != interpreter.KindInt || got.List()[i].Int() != w {
+			t.Errorf("[%d] = %v, want int %d", i, got.List()[i], w)
 		}
 	}
-	if e, err := numbersCall(asIntsFn, d, ptr("/e")); err != nil || len(e.List) != 0 || e.ElemTyp.Kind != parser.TypeInt {
+	if e, err := numbersCall(asIntsFn, d, ptr("/e")); err != nil || len(e.List()) != 0 || e.ElemTyp().Kind != parser.TypeInt {
 		t.Errorf("empty asInts = %v, %v", e, err)
 	}
 }
@@ -156,13 +156,13 @@ func TestAsFloatsMatchesLoop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.List) != n {
-		t.Fatalf("len = %d, want %d", len(got.List), n)
+	if len(got.List()) != n {
+		t.Fatalf("len = %d, want %d", len(got.List()), n)
 	}
 	for i := 0; i < n; i += 9973 {
 		one := call(t, asFloatFn, d, ptr(fmt.Sprintf("/%d", i)))
-		if got.List[i].Float != one.Float {
-			t.Fatalf("[%d] = %v, asFloat = %v", i, got.List[i].Float, one.Float)
+		if got.List()[i].Float() != one.Float() {
+			t.Fatalf("[%d] = %v, asFloat = %v", i, got.List()[i].Float(), one.Float())
 		}
 	}
 }

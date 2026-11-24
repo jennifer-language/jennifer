@@ -146,8 +146,8 @@ func TestSprintfReturnsString(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Kind != interpreter.KindString || v.Str != "1+2=3" {
-		t.Errorf("got %s(%q), want String(%q)", v.Kind, v.Str, "1+2=3")
+	if v.Kind != interpreter.KindString || v.Str() != "1+2=3" {
+		t.Errorf("got %s(%q), want String(%q)", v.Kind, v.Str(), "1+2=3")
 	}
 }
 
@@ -419,7 +419,7 @@ func listOfInts(xs ...int64) interpreter.Value {
 	for _, x := range xs {
 		list = append(list, interpreter.IntVal(x))
 	}
-	v := interpreter.Value{Kind: interpreter.KindList, List: list}
+	v := interpreter.GenericListVal(list)
 	return v
 }
 
@@ -469,14 +469,14 @@ func TestPrintfAggregateElementModifiers(t *testing.T) {
 	in := interpreter.New()
 	Install(in)
 	list := func(vs ...interpreter.Value) interpreter.Value {
-		return interpreter.Value{Kind: interpreter.KindList, List: vs}
+		return interpreter.GenericListVal(vs)
 	}
 	f, i, s, b := interpreter.FloatVal, interpreter.IntVal, interpreter.StringVal, interpreter.BoolVal
 	matrix := list(list(f(0.6000000000000001), f(-0.7000000000000001)), list(f(-0.2), f(0.4)))
-	strMap := interpreter.Value{Kind: interpreter.KindMap, Map: []interpreter.MapEntry{
+	strMap := interpreter.GenericMapVal([]interpreter.MapEntry{
 		{Key: s("a"), Value: s("x\ty")},
 		{Key: s("b"), Value: s("z")},
-	}}
+	})
 	cases := []struct {
 		name string
 		args []interpreter.Value

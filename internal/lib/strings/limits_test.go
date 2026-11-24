@@ -33,7 +33,7 @@ func TestReplaceCap(t *testing.T) {
 		t.Fatal("empty old should error")
 	}
 	// Shrinking and in-range results still work.
-	if got := callFn(t, in, "replace", sv("aXbXc"), sv("X"), sv("")).Str; got != "abc" {
+	if got := callFn(t, in, "replace", sv("aXbXc"), sv("X"), sv("")).Str(); got != "abc" {
 		t.Fatalf("shrink: %q", got)
 	}
 }

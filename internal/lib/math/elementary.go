@@ -119,15 +119,15 @@ func signFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	switch v.Kind {
 	case interpreter.KindInt:
 		switch {
-		case v.Int < 0:
+		case v.Int() < 0:
 			return interpreter.IntVal(-1), nil
-		case v.Int > 0:
+		case v.Int() > 0:
 			return interpreter.IntVal(1), nil
 		default:
 			return interpreter.IntVal(0), nil
 		}
 	case interpreter.KindFloat:
-		f := v.Float
+		f := v.Float()
 		if math.IsNaN(f) {
 			return interpreter.Null(), fmt.Errorf("math.sign: argument is not a number")
 		}
@@ -156,7 +156,7 @@ func truncFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if v.Kind != interpreter.KindFloat {
 		return interpreter.Null(), fmt.Errorf("math.trunc: requires int or float, got %s", v.Kind)
 	}
-	return floatToInt("math.trunc", math.Trunc(v.Float))
+	return floatToInt("math.trunc", math.Trunc(v.Float()))
 }
 
 // factorialFn returns n! as an int, rejecting a negative n and an overflow
@@ -168,7 +168,7 @@ func factorialFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if args[0].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("math.factorial: requires an int, got %s", args[0].Kind)
 	}
-	n := args[0].Int
+	n := args[0].Int()
 	if n < 0 {
 		return interpreter.Null(), fmt.Errorf("math.factorial(%d): undefined for a negative argument", n)
 	}
@@ -193,7 +193,7 @@ func combFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("math.comb: requires int operands, got %s and %s", args[0].Kind, args[1].Kind)
 	}
-	n, k := args[0].Int, args[1].Int
+	n, k := args[0].Int(), args[1].Int()
 	if n < 0 || k < 0 {
 		return interpreter.Null(), fmt.Errorf("math.comb(%d, %d): requires non-negative arguments", n, k)
 	}
@@ -218,7 +218,7 @@ func combFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 		ii := i / g
 		result /= ii // exact: gcd(num, ii) == 1 and ii divides result*num
 		if result > math.MaxInt64/num {
-			return interpreter.Null(), fmt.Errorf("math.comb(%d, %d): result overflows an int", args[0].Int, args[1].Int)
+			return interpreter.Null(), fmt.Errorf("math.comb(%d, %d): result overflows an int", args[0].Int(), args[1].Int())
 		}
 		result *= num
 	}
@@ -234,7 +234,7 @@ func permFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("math.perm: requires int operands, got %s and %s", args[0].Kind, args[1].Kind)
 	}
-	n, k := args[0].Int, args[1].Int
+	n, k := args[0].Int(), args[1].Int()
 	if n < 0 || k < 0 {
 		return interpreter.Null(), fmt.Errorf("math.perm(%d, %d): requires non-negative arguments", n, k)
 	}
@@ -279,9 +279,9 @@ func gcdFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("math.gcd: requires int operands, got %s and %s", args[0].Kind, args[1].Kind)
 	}
-	g := gcdU(absU(args[0].Int), absU(args[1].Int))
+	g := gcdU(absU(args[0].Int()), absU(args[1].Int()))
 	if g > math.MaxInt64 {
-		return interpreter.Null(), fmt.Errorf("math.gcd(%d, %d): result overflows an int", args[0].Int, args[1].Int)
+		return interpreter.Null(), fmt.Errorf("math.gcd(%d, %d): result overflows an int", args[0].Int(), args[1].Int())
 	}
 	return interpreter.IntVal(int64(g)), nil
 }
@@ -296,7 +296,7 @@ func lcmFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("math.lcm: requires int operands, got %s and %s", args[0].Kind, args[1].Kind)
 	}
-	a, b := args[0].Int, args[1].Int
+	a, b := args[0].Int(), args[1].Int()
 	if a == 0 || b == 0 {
 		return interpreter.IntVal(0), nil
 	}

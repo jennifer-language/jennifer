@@ -39,7 +39,7 @@ func TestTimedOutKeyThenReadLine(t *testing.T) {
 	}
 	go func() { _, _ = w.Write([]byte("hello\nZ")) }()
 	v, err := ioCall(t, "readLine", ctx)
-	if err != nil || v.Str != "hello" {
+	if err != nil || v.Str() != "hello" {
 		t.Fatalf("io.readLine after a timed-out key read = %v, %v; want \"hello\"", v, err)
 	}
 	if got := readTimeout(t, ctx, 2000); got != 'Z' {
@@ -47,13 +47,13 @@ func TestTimedOutKeyThenReadLine(t *testing.T) {
 	}
 	// io.readBytes and term reads interleave byte for byte.
 	go func() { _, _ = w.Write([]byte("abc")) }()
-	if v, err := readByteFn(ctx, nil); err != nil || v.Int != 'a' {
+	if v, err := readByteFn(ctx, nil); err != nil || v.Int() != 'a' {
 		t.Fatalf("readByte = %v, %v; want 'a'", v, err)
 	}
-	if v, err := ioCall(t, "readBytes", ctx, interpreter.IntVal(1)); err != nil || string(v.Bytes) != "b" {
+	if v, err := ioCall(t, "readBytes", ctx, interpreter.IntVal(1)); err != nil || string(v.Bytes()) != "b" {
 		t.Fatalf("io.readBytes(1) = %v, %v; want b", v, err)
 	}
-	if v, err := ioCall(t, "readChars", ctx, interpreter.IntVal(1)); err != nil || v.Str != "c" {
+	if v, err := ioCall(t, "readChars", ctx, interpreter.IntVal(1)); err != nil || v.Str() != "c" {
 		t.Fatalf("io.readChars(1) = %v, %v; want c", v, err)
 	}
 }
@@ -62,13 +62,13 @@ func TestTimedOutKeyThenReadLine(t *testing.T) {
 func TestEofPeekThenKey(t *testing.T) {
 	ResetForTest()
 	ctx := interpreter.BuiltinCtx{In: strings.NewReader("q"), Out: &bytes.Buffer{}}
-	if v, err := ioCall(t, "eof", ctx); err != nil || v.Bool {
+	if v, err := ioCall(t, "eof", ctx); err != nil || v.Bool() {
 		t.Fatalf("io.eof = %v, %v; want false", v, err)
 	}
-	if v, err := readByteFn(ctx, nil); err != nil || v.Int != 'q' {
+	if v, err := readByteFn(ctx, nil); err != nil || v.Int() != 'q' {
 		t.Fatalf("readByte after io.eof = %v, %v; want 'q'", v, err)
 	}
-	if v, err := ioCall(t, "eof", ctx); err != nil || !v.Bool {
+	if v, err := ioCall(t, "eof", ctx); err != nil || !v.Bool() {
 		t.Fatalf("io.eof at end = %v, %v; want true", v, err)
 	}
 }
@@ -83,7 +83,7 @@ func TestEOFReachesBothReaders(t *testing.T) {
 		t.Fatalf("idle timed read = %d, want timeout", got)
 	}
 	_ = w.Close()
-	if v, err := ioCall(t, "eof", ctx); err != nil || !v.Bool {
+	if v, err := ioCall(t, "eof", ctx); err != nil || !v.Bool() {
 		t.Errorf("io.eof after close = %v, %v; want true", v, err)
 	}
 	if _, err := ioCall(t, "readLine", ctx); err == nil || !strings.Contains(err.Error(), "end of input") {
@@ -102,7 +102,7 @@ func TestEOFReachesBothReaders(t *testing.T) {
 	if got := readOne(t, ctx); got != gotClosed {
 		t.Errorf("term.readByte on empty input = %d", got)
 	}
-	if v, err := ioCall(t, "readLines", ctx); err != nil || len(v.List) != 0 {
+	if v, err := ioCall(t, "readLines", ctx); err != nil || len(v.List()) != 0 {
 		t.Errorf("io.readLines after term EOF = %v, %v; want []", v, err)
 	}
 }

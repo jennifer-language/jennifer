@@ -87,7 +87,7 @@ func formatArgs(fn string, args []interpreter.Value) (string, error) {
 		return "", fmt.Errorf("%s: expects at least 1 argument", fn)
 	}
 	if args[0].Kind == interpreter.KindString {
-		s, err := formatString(args[0].Str, args[1:])
+		s, err := formatString(args[0].Str(), args[1:])
 		if err != nil {
 			return "", fmt.Errorf("%s: %w", fn, err)
 		}

@@ -79,18 +79,18 @@ func absFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	v := args[0]
 	switch v.Kind {
 	case interpreter.KindInt:
-		if v.Int == math.MinInt64 {
+		if v.Int() == math.MinInt64 {
 			// -MinInt64 overflows back to MinInt64 (still negative); the true
 			// magnitude does not fit in a signed int64, so error rather than
 			// return a wrong (negative) result.
-			return interpreter.Null(), fmt.Errorf("math.abs: |%d| does not fit in an int", v.Int)
+			return interpreter.Null(), fmt.Errorf("math.abs: |%d| does not fit in an int", v.Int())
 		}
-		if v.Int < 0 {
-			return interpreter.IntVal(-v.Int), nil
+		if v.Int() < 0 {
+			return interpreter.IntVal(-v.Int()), nil
 		}
 		return v, nil
 	case interpreter.KindFloat:
-		return interpreter.FloatVal(math.Abs(v.Float)), nil
+		return interpreter.FloatVal(math.Abs(v.Float())), nil
 	}
 	return interpreter.Null(), fmt.Errorf("math.abs: requires int or float, got %s", v.Kind)
 }
@@ -118,12 +118,12 @@ func cmpPick(a, b interpreter.Value, wantSmaller bool, name string) (interpreter
 	// Same-int fast path keeps the int type.
 	if a.Kind == interpreter.KindInt && b.Kind == interpreter.KindInt {
 		if wantSmaller {
-			if a.Int <= b.Int {
+			if a.Int() <= b.Int() {
 				return a, nil
 			}
 			return b, nil
 		}
-		if a.Int >= b.Int {
+		if a.Int() >= b.Int() {
 			return a, nil
 		}
 		return b, nil
@@ -207,7 +207,7 @@ func floorFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if v.Kind != interpreter.KindFloat {
 		return interpreter.Null(), fmt.Errorf("math.floor: requires int or float, got %s", v.Kind)
 	}
-	return floatToInt("math.floor", math.Floor(v.Float))
+	return floatToInt("math.floor", math.Floor(v.Float()))
 }
 
 // ceilFn rounds toward positive infinity. Accepts int (identity) or float
@@ -223,7 +223,7 @@ func ceilFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if v.Kind != interpreter.KindFloat {
 		return interpreter.Null(), fmt.Errorf("math.ceil: requires int or float, got %s", v.Kind)
 	}
-	return floatToInt("math.ceil", math.Ceil(v.Float))
+	return floatToInt("math.ceil", math.Ceil(v.Float()))
 }
 
 // roundFn rounds half-away-from-zero (Go's math.Round). Accepts int
@@ -239,7 +239,7 @@ func roundFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if v.Kind != interpreter.KindFloat {
 		return interpreter.Null(), fmt.Errorf("math.round: requires int or float, got %s", v.Kind)
 	}
-	return floatToInt("math.round", math.Round(v.Float))
+	return floatToInt("math.round", math.Round(v.Float()))
 }
 
 // Non-crypto pseudo-random helpers. Shared seeded source; protected with a
@@ -282,7 +282,7 @@ func randIntFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("math.randInt: requires int operands, got %s and %s", args[0].Kind, args[1].Kind)
 	}
-	lo, hi := args[0].Int, args[1].Int
+	lo, hi := args[0].Int(), args[1].Int()
 	if lo > hi {
 		return interpreter.Null(), fmt.Errorf("math.randInt(%d, %d): lo must be <= hi", lo, hi)
 	}
@@ -321,7 +321,7 @@ func randSeedFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	}
 	randMu.Lock()
 	defer randMu.Unlock()
-	randSrc = mathrand.New(mathrand.NewSource(args[0].Int))
+	randSrc = mathrand.New(mathrand.NewSource(args[0].Int()))
 	return interpreter.Null(), nil
 }
 

@@ -105,7 +105,7 @@ func nodeAt(fnName string, args []interpreter.Value) (*elem, error) {
 		if args[1].Kind != interpreter.KindString {
 			return nil, fmt.Errorf("%s: pointer must be string, got %s", fnName, args[1].Kind)
 		}
-		ptr = args[1].Str
+		ptr = args[1].Str()
 	}
 	return resolvePointer(fnName, node, ptr)
 }
@@ -154,7 +154,7 @@ func decodeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if args[0].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("asn1.decode: argument must be bytes, got %s", args[0].Kind)
 	}
-	elem, err := decodeTree(args[0].Bytes)
+	elem, err := decodeTree(args[0].Bytes())
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -175,7 +175,7 @@ func decodeWithFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpret
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	elem, err := decodeTreeCaps(fn, args[0].Bytes, caps)
+	elem, err := decodeTreeCaps(fn, args[0].Bytes(), caps)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -250,7 +250,7 @@ func hasFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	if args[1].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("asn1.has: pointer must be string, got %s", args[1].Kind)
 	}
-	_, rerr := resolvePointer("asn1.has", node, args[1].Str)
+	_, rerr := resolvePointer("asn1.has", node, args[1].Str())
 	return interpreter.BoolVal(rerr == nil), nil
 }
 
@@ -365,7 +365,7 @@ func oneInt(fnName string, args []interpreter.Value) (int64, error) {
 	if args[0].Kind != interpreter.KindInt {
 		return 0, fmt.Errorf("%s: argument must be int, got %s", fnName, args[0].Kind)
 	}
-	return args[0].Int, nil
+	return args[0].Int(), nil
 }
 
 func integerFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
@@ -389,7 +389,7 @@ func booleanFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 		return interpreter.Null(), fmt.Errorf("asn1.boolean expects 1 bool argument")
 	}
 	b := byte(0)
-	if args[0].Bool {
+	if args[0].Bool() {
 		b = 0xff
 	}
 	return wrap(makeElem(classUniversal, tagBoolean, false, []byte{b}, nil)), nil
@@ -409,7 +409,7 @@ func oneBytes(fnName string, args []interpreter.Value) ([]byte, error) {
 	if args[0].Kind != interpreter.KindBytes {
 		return nil, fmt.Errorf("%s: argument must be bytes, got %s", fnName, args[0].Kind)
 	}
-	return append([]byte(nil), args[0].Bytes...), nil
+	return append([]byte(nil), args[0].Bytes()...), nil
 }
 
 func octetStringFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
@@ -427,7 +427,7 @@ func oneString(fnName string, args []interpreter.Value) (string, error) {
 	if args[0].Kind != interpreter.KindString {
 		return "", fmt.Errorf("%s: argument must be string, got %s", fnName, args[0].Kind)
 	}
-	return args[0].Str, nil
+	return args[0].Str(), nil
 }
 
 func utf8StringFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
@@ -490,8 +490,8 @@ func childElems(fnName string, v interpreter.Value) ([]*elem, error) {
 	if v.Kind != interpreter.KindList {
 		return nil, fmt.Errorf("%s: argument must be a list of asn1.Value, got %s", fnName, v.Kind)
 	}
-	out := make([]*elem, len(v.List))
-	for i, e := range v.List {
+	out := make([]*elem, len(v.List()))
+	for i, e := range v.List() {
 		elem, err := takeElem(fnName, e)
 		if err != nil {
 			return nil, fmt.Errorf("%s: element %d is not an asn1.Value", fnName, i)
@@ -529,18 +529,18 @@ func classAndTag(fnName string, args []interpreter.Value) (int, int, *elem, erro
 	if args[0].Kind != interpreter.KindString {
 		return 0, 0, nil, fmt.Errorf("%s: class must be a string, got %s", fnName, args[0].Kind)
 	}
-	class, err := className(args[0].Str)
+	class, err := className(args[0].Str())
 	if err != nil {
 		return 0, 0, nil, fmt.Errorf("%s: %v", fnName, err)
 	}
-	if args[1].Kind != interpreter.KindInt || args[1].Int < 0 || args[1].Int > maxTagNumber {
+	if args[1].Kind != interpreter.KindInt || args[1].Int() < 0 || args[1].Int() > maxTagNumber {
 		return 0, 0, nil, fmt.Errorf("%s: tagNumber must be between 0 and %d", fnName, maxTagNumber)
 	}
 	inner, err := takeElem(fnName, args[2])
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	return class, int(args[1].Int), inner, nil
+	return class, int(args[1].Int()), inner, nil
 }
 
 // taggedFn wraps a value in an EXPLICIT [class tagNumber] constructed element -

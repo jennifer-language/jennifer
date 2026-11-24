@@ -21,7 +21,7 @@ func stringList(elems ...string) interpreter.Value {
 	for i, e := range elems {
 		list[i] = interpreter.StringVal(e)
 	}
-	return interpreter.Value{Kind: interpreter.KindList, List: list}
+	return interpreter.GenericListVal(list)
 }
 
 func skipIfNotLinux(t *testing.T) {
@@ -37,22 +37,22 @@ func TestRunCapturesStdoutAndExitZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Kind != interpreter.KindStruct || v.StructNS != "os" || v.StructName != "Result" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != "os" || v.StructName() != "Result" {
 		t.Fatalf("not os.Result: %+v", v)
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		switch f.Name {
 		case "exitCode":
-			if f.Value.Int != 0 {
-				t.Errorf("exit code = %d, want 0", f.Value.Int)
+			if f.Value.Int() != 0 {
+				t.Errorf("exit code = %d, want 0", f.Value.Int())
 			}
 		case "stdout":
-			if !strings.Contains(f.Value.Str, "hello") {
-				t.Errorf("stdout = %q", f.Value.Str)
+			if !strings.Contains(f.Value.Str(), "hello") {
+				t.Errorf("stdout = %q", f.Value.Str())
 			}
 		case "stderr":
-			if f.Value.Str != "" {
-				t.Errorf("stderr = %q, want empty", f.Value.Str)
+			if f.Value.Str() != "" {
+				t.Errorf("stderr = %q, want empty", f.Value.Str())
 			}
 		}
 	}
@@ -66,9 +66,9 @@ func TestRunNonZeroExitIsValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	for _, f := range v.Fields {
-		if f.Name == "exitCode" && f.Value.Int != 7 {
-			t.Errorf("exit code = %d, want 7", f.Value.Int)
+	for _, f := range v.Fields() {
+		if f.Name == "exitCode" && f.Value.Int() != 7 {
+			t.Errorf("exit code = %d, want 7", f.Value.Int())
 		}
 	}
 }
@@ -77,12 +77,12 @@ func TestRunNonZeroExitIsValue(t *testing.T) {
 func resultStdout(v interpreter.Value) (string, int64) {
 	var out string
 	var code int64
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		switch f.Name {
 		case "stdout":
-			out = f.Value.Str
+			out = f.Value.Str()
 		case "exitCode":
-			code = f.Value.Int
+			code = f.Value.Int()
 		}
 	}
 	return out, code
@@ -182,15 +182,15 @@ func TestRunSeparatesStdoutFromStderr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		switch f.Name {
 		case "stdout":
-			if !strings.Contains(f.Value.Str, "out") || strings.Contains(f.Value.Str, "err") {
-				t.Errorf("stdout = %q", f.Value.Str)
+			if !strings.Contains(f.Value.Str(), "out") || strings.Contains(f.Value.Str(), "err") {
+				t.Errorf("stdout = %q", f.Value.Str())
 			}
 		case "stderr":
-			if !strings.Contains(f.Value.Str, "err") || strings.Contains(f.Value.Str, "out") {
-				t.Errorf("stderr = %q", f.Value.Str)
+			if !strings.Contains(f.Value.Str(), "err") || strings.Contains(f.Value.Str(), "out") {
+				t.Errorf("stderr = %q", f.Value.Str())
 			}
 		}
 	}
@@ -222,22 +222,22 @@ func TestSpawnWaitRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spawn err: %v", err)
 	}
-	if p.StructNS != "os" || p.StructName != "Process" {
+	if p.StructNS() != "os" || p.StructName() != "Process" {
 		t.Fatalf("not os.Process: %+v", p)
 	}
 	r, err := waitFn(interpreter.BuiltinCtx{}, []interpreter.Value{p})
 	if err != nil {
 		t.Fatalf("wait err: %v", err)
 	}
-	for _, f := range r.Fields {
+	for _, f := range r.Fields() {
 		switch f.Name {
 		case "exitCode":
-			if f.Value.Int != 0 {
-				t.Errorf("exit = %d", f.Value.Int)
+			if f.Value.Int() != 0 {
+				t.Errorf("exit = %d", f.Value.Int())
 			}
 		case "stdout":
-			if !strings.Contains(f.Value.Str, "spawned") {
-				t.Errorf("stdout = %q", f.Value.Str)
+			if !strings.Contains(f.Value.Str(), "spawned") {
+				t.Errorf("stdout = %q", f.Value.Str())
 			}
 		}
 	}
@@ -280,9 +280,9 @@ func TestSpawnHandlesAreDistinctAndOwnTheirProcess(t *testing.T) {
 		t.Errorf("first handle not stable after a second spawn: %+v vs %+v", r1, r1b)
 	}
 	stdoutOf := func(r interpreter.Value) string {
-		for _, f := range r.Fields {
+		for _, f := range r.Fields() {
 			if f.Name == "stdout" {
-				return f.Value.Str
+				return f.Value.Str()
 			}
 		}
 		return ""
@@ -327,7 +327,7 @@ func TestReleaseDropsFinishedHandle(t *testing.T) {
 		t.Fatalf("wait err: %v", err)
 	}
 	rel, err := releaseFn(interpreter.BuiltinCtx{}, []interpreter.Value{p})
-	if err != nil || rel.Kind != interpreter.KindBool || !rel.Bool {
+	if err != nil || rel.Kind != interpreter.KindBool || !rel.Bool() {
 		t.Fatalf("release = %+v, err %v; want true", rel, err)
 	}
 	// The handle is gone now; wait on it errors.
@@ -335,7 +335,7 @@ func TestReleaseDropsFinishedHandle(t *testing.T) {
 		t.Error("wait on a released handle should error")
 	}
 	// Releasing an unknown handle just returns false.
-	if rel, err := releaseFn(interpreter.BuiltinCtx{}, []interpreter.Value{p}); err != nil || rel.Bool {
+	if rel, err := releaseFn(interpreter.BuiltinCtx{}, []interpreter.Value{p}); err != nil || rel.Bool() {
 		t.Errorf("release of a released handle = %+v, err %v; want false", rel, err)
 	}
 }
@@ -367,7 +367,7 @@ func TestPollBeforeAndAfterExit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("poll err: %v", err)
 	}
-	if v.Bool {
+	if v.Bool() {
 		t.Logf("poll returned true immediately - scheduling raced; the process completed before we polled")
 	}
 	if _, err := waitFn(interpreter.BuiltinCtx{}, []interpreter.Value{p}); err != nil {
@@ -377,7 +377,7 @@ func TestPollBeforeAndAfterExit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("poll-after err: %v", err)
 	}
-	if !v.Bool {
+	if !v.Bool() {
 		t.Error("poll after wait should be true")
 	}
 }
@@ -417,10 +417,10 @@ func TestWaitOnUnknownHandleErrors(t *testing.T) {
 }
 
 func TestRunRejectsNonStringArgv(t *testing.T) {
-	bad := interpreter.Value{Kind: interpreter.KindList, List: []interpreter.Value{
+	bad := interpreter.GenericListVal([]interpreter.Value{
 		interpreter.StringVal("/bin/echo"),
 		interpreter.IntVal(42),
-	}}
+	})
 	_, err := runFn(interpreter.BuiltinCtx{}, []interpreter.Value{bad})
 	if err == nil || !strings.Contains(err.Error(), "argv[1]") {
 		t.Errorf("got %v", err)
@@ -462,22 +462,22 @@ func optsMap(kv ...string) interpreter.Value {
 			Value: interpreter.StringVal(kv[i+1]),
 		})
 	}
-	return interpreter.Value{Kind: interpreter.KindMap, Map: entries}
+	return interpreter.GenericMapVal(entries)
 }
 
 func fieldInt(v interpreter.Value, name string) (int64, bool) {
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == name {
-			return f.Value.Int, f.Value.Kind == interpreter.KindInt
+			return f.Value.Int(), f.Value.Kind == interpreter.KindInt
 		}
 	}
 	return 0, false
 }
 
 func resultField(v interpreter.Value, name string) string {
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == name {
-			return f.Value.Str
+			return f.Value.Str()
 		}
 	}
 	return ""

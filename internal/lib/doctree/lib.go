@@ -150,13 +150,13 @@ func (l *Lib) toNode(v interpreter.Value, keepBytes bool, depth int) (Node, erro
 	case interpreter.KindNull:
 		return Null(), nil
 	case interpreter.KindBool:
-		return Bool(v.Bool), nil
+		return Bool(v.Bool()), nil
 	case interpreter.KindInt:
-		return Int(v.Int), nil
+		return Int(v.Int()), nil
 	case interpreter.KindFloat:
-		return Float(v.Float), nil
+		return Float(v.Float()), nil
 	case interpreter.KindString:
-		return String(v.Str), nil
+		return String(v.Str()), nil
 	case interpreter.KindObject:
 		if n, ok := l.AsNode(v); ok {
 			if n.ExceedsDepth(limits.MaxNestingDepth - depth) {
@@ -164,18 +164,18 @@ func (l *Lib) toNode(v interpreter.Value, keepBytes bool, depth int) (Node, erro
 			}
 			return n, nil
 		}
-		return Node{}, fmt.Errorf("cannot convert an opaque %s.%s to a %s", v.StructNS, v.StructName, l.TypeName())
+		return Node{}, fmt.Errorf("cannot convert an opaque %s.%s to a %s", v.StructNS(), v.StructName(), l.TypeName())
 	case interpreter.KindBytes:
 		if keepBytes {
-			return Bytes(v.Bytes), nil
+			return Bytes(v.Bytes()), nil
 		}
-		return String(base64.StdEncoding.EncodeToString(v.Bytes)), nil
+		return String(base64.StdEncoding.EncodeToString(v.Bytes())), nil
 	case interpreter.KindList:
 		if depth >= limits.MaxNestingDepth {
 			return Node{}, errTooDeep()
 		}
-		out := make([]Node, len(v.List))
-		for i, e := range v.List {
+		out := make([]Node, len(v.List()))
+		for i, e := range v.List() {
 			n, err := l.toNode(e, keepBytes, depth+1)
 			if err != nil {
 				return Node{}, err
@@ -187,9 +187,9 @@ func (l *Lib) toNode(v interpreter.Value, keepBytes bool, depth int) (Node, erro
 		if depth >= limits.MaxNestingDepth {
 			return Node{}, errTooDeep()
 		}
-		keys := make([]string, len(v.Map))
-		elems := make([]Node, len(v.Map))
-		for i, e := range v.Map {
+		keys := make([]string, len(v.Map()))
+		elems := make([]Node, len(v.Map()))
+		for i, e := range v.Map() {
 			if e.Key.Kind != interpreter.KindString {
 				return Node{}, fmt.Errorf("map key must be string, got %s", e.Key.Kind)
 			}
@@ -197,7 +197,7 @@ func (l *Lib) toNode(v interpreter.Value, keepBytes bool, depth int) (Node, erro
 			if err != nil {
 				return Node{}, err
 			}
-			keys[i], elems[i] = e.Key.Str, n
+			keys[i], elems[i] = e.Key.Str(), n
 		}
 		return Map(keys, elems), nil
 	case interpreter.KindStruct:
@@ -209,9 +209,9 @@ func (l *Lib) toNode(v interpreter.Value, keepBytes bool, depth int) (Node, erro
 		if depth >= limits.MaxNestingDepth {
 			return Node{}, errTooDeep()
 		}
-		keys := make([]string, len(v.Fields))
-		elems := make([]Node, len(v.Fields))
-		for i, f := range v.Fields {
+		keys := make([]string, len(v.Fields()))
+		elems := make([]Node, len(v.Fields()))
+		for i, f := range v.Fields() {
 			n, err := l.toNode(f.Value, keepBytes, depth+1)
 			if err != nil {
 				return Node{}, err
@@ -223,22 +223,22 @@ func (l *Lib) toNode(v interpreter.Value, keepBytes bool, depth int) (Node, erro
 		// Externally tagged, as json.encode writes an enum: a payload-less
 		// variant is its name, a payloaded one a single-key map
 		// {Variant: {fields}}.
-		if len(v.Fields) == 0 {
-			return String(v.Variant), nil
+		if len(v.Fields()) == 0 {
+			return String(v.Variant()), nil
 		}
 		if depth+1 >= limits.MaxNestingDepth {
 			return Node{}, errTooDeep()
 		}
-		keys := make([]string, len(v.Fields))
-		elems := make([]Node, len(v.Fields))
-		for i, f := range v.Fields {
+		keys := make([]string, len(v.Fields()))
+		elems := make([]Node, len(v.Fields()))
+		for i, f := range v.Fields() {
 			n, err := l.toNode(f.Value, keepBytes, depth+2)
 			if err != nil {
 				return Node{}, err
 			}
 			keys[i], elems[i] = f.Name, n
 		}
-		return Map([]string{v.Variant}, []Node{Map(keys, elems)}), nil
+		return Map([]string{v.Variant()}, []Node{Map(keys, elems)}), nil
 	default:
 		return Node{}, fmt.Errorf("cannot convert a %s value to a %s", v.Kind, l.TypeName())
 	}
@@ -252,15 +252,15 @@ func errTooDeep() error {
 // TimeParts reads a `time.Time` struct's (nanos, offset), or reports that v is
 // not one.
 func TimeParts(v interpreter.Value) (nanos, offset int64, ok bool) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != "time" || v.StructName != "Time" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != "time" || v.StructName() != "Time" {
 		return 0, 0, false
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		switch f.Name {
 		case "nanos":
-			nanos = f.Value.Int
+			nanos = f.Value.Int()
 		case "offset":
-			offset = f.Value.Int
+			offset = f.Value.Int()
 		}
 	}
 	return nanos, offset, true
@@ -364,7 +364,7 @@ func (l *Lib) nodeAt(fnName string, args []interpreter.Value) (Node, error) {
 		if args[1].Kind != interpreter.KindString {
 			return Node{}, fmt.Errorf("%s: pointer must be string, got %s", fnName, args[1].Kind)
 		}
-		ptr = args[1].Str
+		ptr = args[1].Str()
 	}
 	return Resolve(fnName, n, ptr)
 }
@@ -387,7 +387,7 @@ func (l *Lib) typeOf(fnName string, args []interpreter.Value) (interpreter.Value
 	if args[1].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("%s: pointer must be string, got %s", fnName, args[1].Kind)
 	}
-	tokens, err := ParsePointer(fnName, args[1].Str)
+	tokens, err := ParsePointer(fnName, args[1].Str())
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -420,7 +420,7 @@ func (l *Lib) has(fnName string, args []interpreter.Value) (interpreter.Value, e
 	if args[1].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("%s: pointer must be string, got %s", fnName, args[1].Kind)
 	}
-	tokens, err := ParsePointer(fnName, args[1].Str)
+	tokens, err := ParsePointer(fnName, args[1].Str())
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -886,5 +886,5 @@ func pointerArg(fnName string, arg interpreter.Value) ([]string, error) {
 	if arg.Kind != interpreter.KindString {
 		return nil, fmt.Errorf("%s: pointer must be string, got %s", fnName, arg.Kind)
 	}
-	return ParsePointer(fnName, arg.Str)
+	return ParsePointer(fnName, arg.Str())
 }

@@ -58,12 +58,12 @@ var maxProgramSize = 50000
 // that needs more (a long word list) is past maxProgramSize anyway.
 var maxPatternBytes = 32 << 10
 
-// findAll's result budget in Value cells (~272 bytes each). Measured: a
+// findAll's result budget in Value cells (48 bytes each). Measured: a
 // regex.Match (five fields, a groups list, a groupsNamed map) is about 8
 // cells, each capture group adds about 1.3 (its list element) and a named one
 // about 8 more (its map entry). limits.MaxRangeElements cells keep a findAll
-// result near the size of the largest materialised range (~1.1 GiB; ~270 MiB
-// on jennifer-tiny): 524288 matches of a group-less pattern.
+// result near the size of the largest materialised range (~768 MiB; ~192 MiB
+// on jennifer-tiny): 2097152 matches of a group-less pattern.
 const (
 	matchCells      = 8
 	groupCells      = 2
@@ -241,7 +241,7 @@ func takeStringArg(fnName string, args []Value, idx int, role string) (string, e
 	if args[idx].Kind != interpreter.KindString {
 		return "", fmt.Errorf("%s: %s must be string, got %s", fnName, role, args[idx].Kind)
 	}
-	return args[idx].Str, nil
+	return args[idx].Str(), nil
 }
 
 // -------- byte -> rune index translation --------

@@ -111,7 +111,7 @@ func TestPCAScaleInvariantComponents(t *testing.T) {
 			rows[i] = []float64{r[0] * scale, r[1] * scale}
 		}
 		m := ok(t, pcaFn, mat(rows...), iv(1))
-		c := fvals(ok(t, componentsFn, m).List[0])
+		c := fvals(ok(t, componentsFn, m).List()[0])
 		if c[0] < 0 {
 			c[0], c[1] = -c[0], -c[1]
 		}

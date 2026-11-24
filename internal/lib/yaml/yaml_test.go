@@ -45,7 +45,7 @@ func strAt(t *testing.T, rv interpreter.Value, ptr string) string {
 	if err != nil {
 		t.Fatalf("asString %q: %v", ptr, err)
 	}
-	return v.Str
+	return v.Str()
 }
 
 func intAt(t *testing.T, rv interpreter.Value, ptr string) int64 {
@@ -54,7 +54,7 @@ func intAt(t *testing.T, rv interpreter.Value, ptr string) int64 {
 	if err != nil {
 		t.Fatalf("asInt %q: %v", ptr, err)
 	}
-	return v.Int
+	return v.Int()
 }
 
 func typeAt(t *testing.T, rv interpreter.Value, ptr string) string {
@@ -63,7 +63,7 @@ func typeAt(t *testing.T, rv interpreter.Value, ptr string) string {
 	if err != nil {
 		t.Fatalf("typeOf %q: %v", ptr, err)
 	}
-	return v.Str
+	return v.Str()
 }
 
 func TestDecodeScalars(t *testing.T) {
@@ -84,18 +84,18 @@ func TestDecodeScalars(t *testing.T) {
 		t.Errorf("f type = %q", got)
 	}
 	fv, _ := asFloatFn(noCtx, []interpreter.Value{get(t, rv, "/f")})
-	if fv.Float != 3.5 {
-		t.Errorf("f = %v", fv.Float)
+	if fv.Float() != 3.5 {
+		t.Errorf("f = %v", fv.Float())
 	}
 	bv, _ := asBoolFn(noCtx, []interpreter.Value{get(t, rv, "/b")})
-	if !bv.Bool {
-		t.Errorf("b = %v", bv.Bool)
+	if !bv.Bool() {
+		t.Errorf("b = %v", bv.Bool())
 	}
 	if got := typeAt(t, rv, "/n"); got != "null" {
 		t.Errorf("n type = %q", got)
 	}
 	nv, _ := isNullFn(noCtx, []interpreter.Value{get(t, rv, "/n")})
-	if !nv.Bool {
+	if !nv.Bool() {
 		t.Error("n should be null")
 	}
 	// A quoted "42" stays a string (implicit typing is overridden by quotes).
@@ -114,8 +114,8 @@ func TestDecodeNesting(t *testing.T) {
 		t.Errorf("a/b type = %q", got)
 	}
 	lv, _ := lengthFn(noCtx, []interpreter.Value{get(t, rv, "/a/b")})
-	if lv.Int != 3 {
-		t.Errorf("a/b length = %d", lv.Int)
+	if lv.Int() != 3 {
+		t.Errorf("a/b length = %d", lv.Int())
 	}
 	if got := strAt(t, rv, "/a/b/2"); got != "z" {
 		t.Errorf("a/b/2 = %q", got)
@@ -125,14 +125,14 @@ func TestDecodeNesting(t *testing.T) {
 	}
 	// keys preserves insertion order.
 	kv, _ := keysFn(noCtx, []interpreter.Value{rv})
-	if len(kv.List) != 2 || kv.List[0].Str != "a" || kv.List[1].Str != "m" {
-		t.Errorf("keys = %v, want [a m]", kv.List)
+	if len(kv.List()) != 2 || kv.List()[0].Str() != "a" || kv.List()[1].Str() != "m" {
+		t.Errorf("keys = %v, want [a m]", kv.List())
 	}
 	// has.
-	if h, _ := hasFn(noCtx, []interpreter.Value{rv, interpreter.StringVal("/m/k")}); !h.Bool {
+	if h, _ := hasFn(noCtx, []interpreter.Value{rv, interpreter.StringVal("/m/k")}); !h.Bool() {
 		t.Error("has /m/k should be true")
 	}
-	if h, _ := hasFn(noCtx, []interpreter.Value{rv, interpreter.StringVal("/m/nope")}); h.Bool {
+	if h, _ := hasFn(noCtx, []interpreter.Value{rv, interpreter.StringVal("/m/nope")}); h.Bool() {
 		t.Error("has /m/nope should be false")
 	}
 }
@@ -235,8 +235,8 @@ func TestWriteSurface(t *testing.T) {
 	}
 	// original empty map is untouched (non-mutating).
 	lv, _ := lengthFn(noCtx, []interpreter.Value{empty})
-	if lv.Int != 0 {
-		t.Errorf("empty was mutated: %d keys", lv.Int)
+	if lv.Int() != 0 {
+		t.Errorf("empty was mutated: %d keys", lv.Int())
 	}
 	// insert at index, remove, move.
 	step, _ = insertFn(noCtx, []interpreter.Value{step, interpreter.StringVal("/ports/0"), interpreter.IntVal(22)})
@@ -254,7 +254,7 @@ func TestWriteSurface(t *testing.T) {
 	if got := strAt(t, step, "/hostname"); got != "localhost" {
 		t.Errorf("after move hostname = %q", got)
 	}
-	if h, _ := hasFn(noCtx, []interpreter.Value{step, interpreter.StringVal("/host")}); h.Bool {
+	if h, _ := hasFn(noCtx, []interpreter.Value{step, interpreter.StringVal("/host")}); h.Bool() {
 		t.Error("host should be gone after move")
 	}
 }
@@ -262,20 +262,20 @@ func TestWriteSurface(t *testing.T) {
 func TestDatetimeAccessor(t *testing.T) {
 	rv := mustDecode(t, "when: 2001-12-15T02:59:43Z\n")
 	dv, err := isDatetimeFn(noCtx, []interpreter.Value{rv, interpreter.StringVal("/when")})
-	if err != nil || !dv.Bool {
-		t.Fatalf("isDatetime = (%v, %v)", dv.Bool, err)
+	if err != nil || !dv.Bool() {
+		t.Fatalf("isDatetime = (%v, %v)", dv.Bool(), err)
 	}
 	tv, err := asDatetimeFn(noCtx, []interpreter.Value{get(t, rv, "/when")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tv.Kind != interpreter.KindStruct || tv.StructNS != "time" || tv.StructName != "Time" {
-		t.Fatalf("asDatetime = %s %s.%s, want a time.Time", tv.Kind, tv.StructNS, tv.StructName)
+	if tv.Kind != interpreter.KindStruct || tv.StructNS() != "time" || tv.StructName() != "Time" {
+		t.Fatalf("asDatetime = %s %s.%s, want a time.Time", tv.Kind, tv.StructNS(), tv.StructName())
 	}
 	var nanos int64
-	for _, f := range tv.Fields {
+	for _, f := range tv.Fields() {
 		if f.Name == "nanos" {
-			nanos = f.Value.Int
+			nanos = f.Value.Int()
 		}
 	}
 	// 2001-12-15T02:59:43Z in Unix nanoseconds.
@@ -485,12 +485,12 @@ func TestEncodeQuotesTypeAmbiguousStrings(t *testing.T) {
 		if err != nil {
 			t.Fatalf("encode: %v", err)
 		}
-		back, err := decodeYaml(enc.Str)
+		back, err := decodeYaml(enc.Str())
 		if err != nil {
-			t.Fatalf("re-decode %q: %v", enc.Str, err)
+			t.Fatalf("re-decode %q: %v", enc.Str(), err)
 		}
 		if got := typeAt(t, wrap(back), "/v"); got != "string" {
-			t.Errorf("%q round-tripped to %s, want string (encoded: %s)", s, got, enc.Str)
+			t.Errorf("%q round-tripped to %s, want string (encoded: %s)", s, got, enc.Str())
 		}
 	}
 }
@@ -518,8 +518,8 @@ func TestHugeIntKeepsExactDigits(t *testing.T) {
 		t.Errorf("asInt on a huge int: %v (kind %q)", err, dataerr.KindOf(err))
 	}
 	enc, err := encodeFn([]interpreter.Value{rv}, false)
-	if err != nil || !strings.Contains(enc.Str, "big: 99999999999999999999999999\n") {
-		t.Errorf("encode: %q, %v", enc.Str, err)
+	if err != nil || !strings.Contains(enc.Str(), "big: 99999999999999999999999999\n") {
+		t.Errorf("encode: %q, %v", enc.Str(), err)
 	}
 	ok := mustDecode(t, "f: 3.14\nsci: 1e6\nn: 42")
 	if got := typeAt(t, ok, "/f"); got != "float" {
@@ -584,13 +584,13 @@ func TestEncodeMultilineRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatalf("encode %q: %v", doc, err)
 			}
-			back, err := decodeYaml(enc.Str)
+			back, err := decodeYaml(enc.Str())
 			if err != nil {
-				t.Fatalf("re-decode %q (from %q): %v", enc.Str, s, err)
+				t.Fatalf("re-decode %q (from %q): %v", enc.Str(), s, err)
 			}
 			again, err := encodeFn([]interpreter.Value{wrap(back)}, false)
-			if err != nil || again.Str != enc.Str {
-				t.Errorf("%q in %q: %q re-encodes as %q (%v)", s, wrapIn, enc.Str, again.Str, err)
+			if err != nil || again.Str() != enc.Str() {
+				t.Errorf("%q in %q: %q re-encodes as %q (%v)", s, wrapIn, enc.Str(), again.Str(), err)
 			}
 		}
 	}

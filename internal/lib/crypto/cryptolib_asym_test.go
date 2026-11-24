@@ -68,7 +68,7 @@ func mustBytes(t *testing.T, v interpreter.Value, err error) []byte {
 	if v.Kind != interpreter.KindBytes {
 		t.Fatalf("expected bytes, got kind %v", v.Kind)
 	}
-	return v.Bytes
+	return v.Bytes()
 }
 
 func pemSign(algo string, msg, priv []byte) (interpreter.Value, error) {
@@ -89,12 +89,12 @@ func TestRSASignVerifyRoundTrip(t *testing.T) {
 			t.Errorf("%s: signature length %d, want 256", algo, len(sig))
 		}
 		v, err := pemVerify(algo, msg, sig, pub)
-		if err != nil || !v.Bool {
-			t.Errorf("%s: verify genuine = %v (err %v)", algo, v.Bool, err)
+		if err != nil || !v.Bool() {
+			t.Errorf("%s: verify genuine = %v (err %v)", algo, v.Bool(), err)
 		}
 		// A tampered message must not verify.
 		bad, _ := pemVerify(algo, []byte("tampered"), sig, pub)
-		if bad.Bool {
+		if bad.Bool() {
 			t.Errorf("%s: tampered message verified", algo)
 		}
 		// Nor under another hash: the algorithm name binds the digest.
@@ -103,8 +103,8 @@ func TestRSASignVerifyRoundTrip(t *testing.T) {
 			other = "rsa-sha512"
 		}
 		mism, err := pemVerify(other, msg, sig, pub)
-		if err != nil || mism.Bool {
-			t.Errorf("%s signature verified under %s = %v (err %v), want false", algo, other, mism.Bool, err)
+		if err != nil || mism.Bool() {
+			t.Errorf("%s signature verified under %s = %v (err %v), want false", algo, other, mism.Bool(), err)
 		}
 	}
 }
@@ -118,17 +118,17 @@ func TestECDSASignVerifyRoundTrip(t *testing.T) {
 		t.Fatalf("ES256 signature length %d, want 64", len(sig))
 	}
 	v, err := pemVerify("ecdsa-sha256", msg, sig, pub)
-	if err != nil || !v.Bool {
-		t.Errorf("ES256 verify genuine = %v (err %v)", v.Bool, err)
+	if err != nil || !v.Bool() {
+		t.Errorf("ES256 verify genuine = %v (err %v)", v.Bool(), err)
 	}
 	bad, _ := pemVerify("ecdsa-sha256", []byte("tampered"), sig, pub)
-	if bad.Bool {
+	if bad.Bool() {
 		t.Error("ES256 tampered message verified")
 	}
 	// A signature of the wrong length is not valid (must be false, not a panic).
 	short, err := pemVerify("ecdsa-sha256", msg, []byte{1, 2, 3}, pub)
-	if err != nil || short.Bool {
-		t.Errorf("wrong-length signature: got %v (err %v), want false", short.Bool, err)
+	if err != nil || short.Bool() {
+		t.Errorf("wrong-length signature: got %v (err %v), want false", short.Bool(), err)
 	}
 }
 
@@ -167,8 +167,8 @@ func TestECDSAAllCurves(t *testing.T) {
 			t.Errorf("%s: keypair public = %s, want the PKIX PEM of the private key %s", c.curve, pubPEM, want)
 		}
 		pv, err := publicKeyFn(noCtx, []interpreter.Value{strArg(c.curve), bytesArg(privPEM)})
-		if err != nil || !bytes.Equal(pv.Bytes, want) {
-			t.Errorf("%s: publicKey = %s (err %v), want %s", c.curve, pv.Bytes, err, want)
+		if err != nil || !bytes.Equal(pv.Bytes(), want) {
+			t.Errorf("%s: publicKey = %s (err %v), want %s", c.curve, pv.Bytes(), err, want)
 		}
 
 		sv, se := pemSign(c.algo, msg, privPEM)
@@ -177,12 +177,12 @@ func TestECDSAAllCurves(t *testing.T) {
 			t.Errorf("%s: signature length %d, want %d", c.curve, len(sig), c.sigLen)
 		}
 		v, err := pemVerify(c.algo, msg, sig, pubPEM)
-		if err != nil || !v.Bool {
-			t.Errorf("%s: verify genuine = %v (err %v)", c.curve, v.Bool, err)
+		if err != nil || !v.Bool() {
+			t.Errorf("%s: verify genuine = %v (err %v)", c.curve, v.Bool(), err)
 		}
 		// A tampered message must not verify.
 		bad, _ := pemVerify(c.algo, []byte("tampered"), sig, pubPEM)
-		if bad.Bool {
+		if bad.Bool() {
 			t.Errorf("%s: tampered message verified", c.curve)
 		}
 		// A verify under a different (non-paired) hash must be a clean false.
@@ -191,8 +191,8 @@ func TestECDSAAllCurves(t *testing.T) {
 			wrong = "ecdsa-sha512"
 		}
 		mism, err := pemVerify(wrong, msg, sig, pubPEM)
-		if err != nil || mism.Bool {
-			t.Errorf("%s: verify under wrong hash %s = %v (err %v), want false", c.curve, wrong, mism.Bool, err)
+		if err != nil || mism.Bool() {
+			t.Errorf("%s: verify under wrong hash %s = %v (err %v), want false", c.curve, wrong, mism.Bool(), err)
 		}
 	}
 }
@@ -215,12 +215,12 @@ func TestRSAKeypairAndPublicKey(t *testing.T) {
 		t.Errorf("public key is not a PKIX PEM: %s", pub)
 	}
 	pv, err := publicKeyFn(noCtx, []interpreter.Value{strArg("rsa2048"), bytesArg(priv)})
-	if err != nil || !bytes.Equal(pv.Bytes, pub) {
-		t.Errorf("publicKey = %s (err %v), want the keypair's %s", pv.Bytes, err, pub)
+	if err != nil || !bytes.Equal(pv.Bytes(), pub) {
+		t.Errorf("publicKey = %s (err %v), want the keypair's %s", pv.Bytes(), err, pub)
 	}
 	// The pair works together.
 	sv, se := pemSign("rsa-sha256", []byte("m"), priv)
-	if v, err := pemVerify("rsa-sha256", []byte("m"), mustBytes(t, sv, se), pub); err != nil || !v.Bool {
+	if v, err := pemVerify("rsa-sha256", []byte("m"), mustBytes(t, sv, se), pub); err != nil || !v.Bool() {
 		t.Errorf("keypair's halves do not sign / verify together (err %v)", err)
 	}
 	// A key of the wrong size or type for the name is an error.

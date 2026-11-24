@@ -31,7 +31,7 @@ func mkfifoFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if args[1].Kind != interpreter.KindInt {
 			return interpreter.Null(), fmt.Errorf("fs.mkfifo: mode must be int, got %s", args[1].Kind)
 		}
-		mode = args[1].Int
+		mode = args[1].Int()
 		if mode < 0 || mode > 0o777 {
 			return interpreter.Null(), fmt.Errorf("fs.mkfifo: mode %d out of range [0, 0o777]", mode)
 		}

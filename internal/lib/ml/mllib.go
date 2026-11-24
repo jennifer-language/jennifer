@@ -42,8 +42,8 @@ const (
 	maxClasses        = 100       // one-vs-rest logistic classes (guards continuous y mistaken for labels)
 )
 
-// maxFoldWork caps kFold's nSamples*k index cells. Each is a ~272-byte Value,
-// so half of limits.MaxRangeElements is ~570 MiB of result (~140 MiB on
+// maxFoldWork caps kFold's nSamples*k index cells. Each is a 48-byte Value,
+// so half of limits.MaxRangeElements is ~384 MiB of result (~96 MiB on
 // jennifer-tiny).
 const maxFoldWork = limits.MaxRangeElements / 2
 
@@ -258,25 +258,25 @@ func matrix(name string, args []interpreter.Value, i int) ([][]float64, error) {
 	if v.Kind != interpreter.KindList {
 		return nil, fmt.Errorf("ml.%s: argument %d must be a list of rows, got %s", name, i+1, v.Kind)
 	}
-	if len(v.List) == 0 {
+	if len(v.List()) == 0 {
 		return nil, fmt.Errorf("ml.%s: feature matrix is empty", name)
 	}
-	rows := make([][]float64, len(v.List))
+	rows := make([][]float64, len(v.List()))
 	cols := -1
-	for r, row := range v.List {
+	for r, row := range v.List() {
 		if row.Kind != interpreter.KindList {
 			return nil, fmt.Errorf("ml.%s: row %d must be a list, got %s", name, r, row.Kind)
 		}
 		if cols == -1 {
-			cols = len(row.List)
+			cols = len(row.List())
 			if cols == 0 {
 				return nil, fmt.Errorf("ml.%s: rows must have at least one feature", name)
 			}
-		} else if len(row.List) != cols {
-			return nil, fmt.Errorf("ml.%s: row %d has %d features, expected %d", name, r, len(row.List), cols)
+		} else if len(row.List()) != cols {
+			return nil, fmt.Errorf("ml.%s: row %d has %d features, expected %d", name, r, len(row.List()), cols)
 		}
 		fr := make([]float64, cols)
-		for c, e := range row.List {
+		for c, e := range row.List() {
 			f, ok := e.AsFloat()
 			if !ok {
 				return nil, fmt.Errorf("ml.%s: row %d feature %d must be int or float, got %s", name, r, c, e.Kind)
@@ -294,8 +294,8 @@ func vector(name string, args []interpreter.Value, i int) ([]float64, error) {
 	if v.Kind != interpreter.KindList {
 		return nil, fmt.Errorf("ml.%s: argument %d must be a list, got %s", name, i+1, v.Kind)
 	}
-	out := make([]float64, len(v.List))
-	for j, e := range v.List {
+	out := make([]float64, len(v.List()))
+	for j, e := range v.List() {
 		f, ok := e.AsFloat()
 		if !ok {
 			return nil, fmt.Errorf("ml.%s: element %d must be int or float, got %s", name, j, e.Kind)
@@ -336,10 +336,10 @@ type fitOptions struct {
 
 // options checks that v is an ml.<typ> and returns its fields.
 func options(fn string, v interpreter.Value, typ string) (fitOptions, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != typ {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != typ {
 		return fitOptions{}, fmt.Errorf("ml.%s: argument 3 must be an ml.%s, got %s", fn, typ, v.Kind)
 	}
-	return fitOptions{fn: fn, fields: v.Fields}, nil
+	return fitOptions{fn: fn, fields: v.Fields()}, nil
 }
 
 func (o fitOptions) field(name string) interpreter.Value {
@@ -358,14 +358,14 @@ func (o fitOptions) count(name string, def, max int) (int, error) {
 		return 0, fmt.Errorf("ml.%s: %s must be int, got %s", o.fn, name, v.Kind)
 	}
 	switch {
-	case v.Int == 0:
+	case v.Int() == 0:
 		return def, nil
-	case v.Int < 0:
-		return 0, fmt.Errorf("ml.%s: %s must not be negative, got %d", o.fn, name, v.Int)
-	case v.Int > int64(max):
-		return 0, limits.Capf("ml.%s: %s %d exceeds the limit of %d", o.fn, name, v.Int, max)
+	case v.Int() < 0:
+		return 0, fmt.Errorf("ml.%s: %s must not be negative, got %d", o.fn, name, v.Int())
+	case v.Int() > int64(max):
+		return 0, limits.Capf("ml.%s: %s %d exceeds the limit of %d", o.fn, name, v.Int(), max)
 	}
-	return int(v.Int), nil
+	return int(v.Int()), nil
 }
 
 // float reads a float field: 0 -> def, negative or not finite -> error.

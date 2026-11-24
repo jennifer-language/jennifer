@@ -194,7 +194,7 @@ func numbers(name string, args []interpreter.Value, i int) ([]interpreter.Value,
 	if v.Kind != interpreter.KindList {
 		return nil, nil, fmt.Errorf("stats.%s: argument must be a list of int or float, got %s", name, v.Kind)
 	}
-	raw := v.List
+	raw := v.List()
 	fs := make([]float64, len(raw))
 	for j, e := range raw {
 		f, ok := e.AsFloat()
@@ -276,9 +276,9 @@ func medianFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 // merged into one bucket by a shared float64), a float on its float64.
 func modeKey(e interpreter.Value) any {
 	if e.Kind == interpreter.KindInt {
-		return e.Int
+		return e.Int()
 	}
-	return e.Float
+	return e.Float()
 }
 
 func modeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
@@ -408,9 +408,9 @@ func sumFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	if allInt {
 		var s int64
 		for _, e := range raw {
-			t := s + e.Int
+			t := s + e.Int()
 			// Same-sign operands whose sum flips sign overflowed int64.
-			if (s > 0 && e.Int > 0 && t < 0) || (s < 0 && e.Int < 0 && t >= 0) {
+			if (s > 0 && e.Int() > 0 && t < 0) || (s < 0 && e.Int() < 0 && t >= 0) {
 				return interpreter.Null(), fmt.Errorf("stats.sum: integer overflow")
 			}
 			s = t
@@ -546,7 +546,7 @@ func rangeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		}
 	}
 	if allInt {
-		hi, lo := raw[hiIdx].Int, raw[loIdx].Int
+		hi, lo := raw[hiIdx].Int(), raw[loIdx].Int()
 		d := hi - lo
 		// hi >= lo, so overflow only when a large-positive minus a large-negative
 		// wraps to a negative difference.
@@ -856,7 +856,7 @@ func modesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	}
 	// A generic list (no recorded element type) is validated element-by-element at
 	// the binding site, so a `list of int` result binds to `list of int`.
-	return interpreter.Value{Kind: interpreter.KindList, List: out}, nil
+	return interpreter.GenericListVal(out), nil
 }
 
 // describeFn returns a stats.Summary struct: the count, the five-number summary

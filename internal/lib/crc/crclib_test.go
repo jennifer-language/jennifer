@@ -24,7 +24,7 @@ func compute(t *testing.T, in []byte, algo string) []byte {
 	if v.Kind != interpreter.KindBytes {
 		t.Fatalf("compute(%q): expected KindBytes, got %s", algo, v.Kind)
 	}
-	return v.Bytes
+	return v.Bytes()
 }
 
 // TestCRC32IEEEVector pins "123456789" CRC-32 IEEE against the
@@ -115,8 +115,8 @@ func TestStreamMatchesOneShot(t *testing.T) {
 			t.Fatalf("%s: finalize: %v", algo, err)
 		}
 		want := compute(t, input, algo)
-		if !bytes.Equal(got.Bytes, want) {
-			t.Errorf("%s: streamed %x, one-shot %x", algo, got.Bytes, want)
+		if !bytes.Equal(got.Bytes(), want) {
+			t.Errorf("%s: streamed %x, one-shot %x", algo, got.Bytes(), want)
 		}
 	}
 }

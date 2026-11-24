@@ -27,7 +27,7 @@ func catalog(kv ...string) interpreter.Value {
 			Value: interpreter.StringVal(kv[i+1]),
 		})
 	}
-	return interpreter.Value{Kind: interpreter.KindMap, Map: entries}
+	return interpreter.GenericMapVal(entries)
 }
 
 func mustLoad(t *testing.T, c *catalogs, lang string, cat interpreter.Value) {
@@ -43,7 +43,7 @@ func tr(t *testing.T, c *catalogs, args ...interpreter.Value) string {
 	if err != nil {
 		t.Fatalf("tr: %v", err)
 	}
-	return v.Str
+	return v.Str()
 }
 
 func TestLoadAndTranslate(t *testing.T) {
@@ -58,8 +58,8 @@ func TestLoadAndTranslate(t *testing.T) {
 		t.Fatal(err)
 	}
 	lv, _ := c.localeFn(noCtx, nil)
-	if lv.Str != "en" {
-		t.Errorf("locale = %q", lv.Str)
+	if lv.Str() != "en" {
+		t.Errorf("locale = %q", lv.Str())
 	}
 }
 
@@ -96,7 +96,7 @@ func TestInterpolation(t *testing.T) {
 		for i := 0; i+1 < len(kv); i += 2 {
 			entries = append(entries, interpreter.MapEntry{Key: kv[i], Value: kv[i+1]})
 		}
-		return interpreter.Value{Kind: interpreter.KindMap, Map: entries}
+		return interpreter.GenericMapVal(entries)
 	}
 
 	if got := tr(t, c, interpreter.StringVal("greet"),
@@ -129,9 +129,9 @@ func TestLoadErrors(t *testing.T) {
 		}
 	}
 	// A non-string catalog value is rejected.
-	nonStr := interpreter.Value{Kind: interpreter.KindMap, Map: []interpreter.MapEntry{
+	nonStr := interpreter.GenericMapVal([]interpreter.MapEntry{
 		{Key: interpreter.StringVal("k"), Value: interpreter.IntVal(1)},
-	}}
+	})
 	if _, err := c.loadFn(noCtx, []interpreter.Value{interpreter.StringVal("en"), nonStr}); err == nil {
 		t.Error("load with non-string catalog value should error")
 	}

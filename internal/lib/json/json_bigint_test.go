@@ -30,10 +30,10 @@ func TestBigIntegers(t *testing.T) {
 	ptr := interpreter.StringVal
 
 	v := doc(`{"id": 12345678901234567891, "neg": -98765432109876543210, "edge": 9223372036854775807}`)
-	if got, _ := call("typeOf", v, ptr("/id")); got.Str != "int" {
-		t.Errorf("typeOf big = %q", got.Str)
+	if got, _ := call("typeOf", v, ptr("/id")); got.Str() != "int" {
+		t.Errorf("typeOf big = %q", got.Str())
 	}
-	if got, err := call("asInt", v, ptr("/edge")); err != nil || got.Int != 9223372036854775807 {
+	if got, err := call("asInt", v, ptr("/edge")); err != nil || got.Int() != 9223372036854775807 {
 		t.Errorf("asInt at the int64 edge: %v, %v", got, err)
 	}
 	_, err := call("asInt", v, ptr("/id"))
@@ -46,8 +46,8 @@ func TestBigIntegers(t *testing.T) {
 		}
 	}
 	if enc, err := encodeFn([]interpreter.Value{v}, false); err != nil ||
-		enc.Str != `{"id":12345678901234567891,"neg":-98765432109876543210,"edge":9223372036854775807}` {
-		t.Errorf("encode: %q, %v", enc.Str, err)
+		enc.Str() != `{"id":12345678901234567891,"neg":-98765432109876543210,"edge":9223372036854775807}` {
+		t.Errorf("encode: %q, %v", enc.Str(), err)
 	}
 	if !doc(`[12345678901234567891]`).Equal(doc(`[12345678901234567891]`)) || doc(`[12345678901234567891]`).Equal(doc(`[12345678901234567892]`)) {
 		t.Error("big int equality")
@@ -58,14 +58,14 @@ func TestBigIntegers(t *testing.T) {
 
 	// asFloat: exact or a data error.
 	f := doc(`[9007199254740992, 9007199254740993, 18446744073709551616, 12345678901234567891, 0.1]`)
-	if got, err := call("asFloat", f, ptr("/0")); err != nil || got.Float != 9007199254740992 {
+	if got, err := call("asFloat", f, ptr("/0")); err != nil || got.Float() != 9007199254740992 {
 		t.Errorf("asFloat 2^53: %v, %v", got, err)
 	}
 	if _, err := call("asFloat", f, ptr("/1")); dataerr.KindOf(err) != "json" ||
 		!strings.Contains(err.Error(), "integer 9007199254740993 has no exact float value; read it with json.asDecimal") {
 		t.Errorf("asFloat 2^53+1: %v", err)
 	}
-	if got, err := call("asFloat", f, ptr("/2")); err != nil || got.Float != 18446744073709551616 {
+	if got, err := call("asFloat", f, ptr("/2")); err != nil || got.Float() != 18446744073709551616 {
 		t.Errorf("asFloat 2^64: %v, %v", got, err)
 	}
 	if _, err := call("asFloat", f, ptr("/3")); dataerr.KindOf(err) != "json" {

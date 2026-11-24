@@ -81,7 +81,7 @@ func TestParityPortReadsMarkedFF(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read: %v (got %q so far)", err, got)
 		}
-		got = append(got, v.Bytes...)
+		got = append(got, v.Bytes()...)
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("read %q, want %q", got, want)

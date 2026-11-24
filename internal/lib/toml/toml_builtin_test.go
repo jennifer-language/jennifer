@@ -54,38 +54,38 @@ func TestTomlBuiltinSurface(t *testing.T) {
 		t.Fatalf("decode returned %s, want object", node.Kind)
 	}
 
-	if v := call("typeOf", node); v.Kind != interpreter.KindString || v.Str == "" {
+	if v := call("typeOf", node); v.Kind != interpreter.KindString || v.Str() == "" {
 		t.Errorf("typeOf(root) = %+v", v)
 	}
-	if v := call("asString", node, s("/title")); v.Str != "Jennifer" {
-		t.Errorf("asString(/title) = %q", v.Str)
+	if v := call("asString", node, s("/title")); v.Str() != "Jennifer" {
+		t.Errorf("asString(/title) = %q", v.Str())
 	}
-	if v := call("asInt", node, s("/count")); v.Int != 42 {
-		t.Errorf("asInt(/count) = %d", v.Int)
+	if v := call("asInt", node, s("/count")); v.Int() != 42 {
+		t.Errorf("asInt(/count) = %d", v.Int())
 	}
-	if v := call("asFloat", node, s("/ratio")); v.Float != 3.5 {
-		t.Errorf("asFloat(/ratio) = %v", v.Float)
+	if v := call("asFloat", node, s("/ratio")); v.Float() != 3.5 {
+		t.Errorf("asFloat(/ratio) = %v", v.Float())
 	}
-	if v := call("asBool", node, s("/yes")); !v.Bool {
+	if v := call("asBool", node, s("/yes")); !v.Bool() {
 		t.Error("asBool(/yes) should be true")
 	}
-	if v := call("isDatetime", node, s("/when")); !v.Bool {
+	if v := call("isDatetime", node, s("/when")); !v.Bool() {
 		t.Error("isDatetime(/when) should be true")
 	}
 	if v := call("asDatetime", node, s("/when")); v.Kind == interpreter.KindNull {
 		t.Error("asDatetime(/when) should return a datetime value")
 	}
-	if v := call("has", node, s("/owner/name")); !v.Bool {
+	if v := call("has", node, s("/owner/name")); !v.Bool() {
 		t.Error("has(/owner/name) should be true")
 	}
-	if v := call("has", node, s("/missing")); v.Bool {
+	if v := call("has", node, s("/missing")); v.Bool() {
 		t.Error("has(/missing) should be false")
 	}
-	if v := call("keys", node); v.Kind != interpreter.KindList || len(v.List) == 0 {
+	if v := call("keys", node); v.Kind != interpreter.KindList || len(v.List()) == 0 {
 		t.Errorf("keys(root) = %+v, want a non-empty list", v)
 	}
-	if v := call("length", node, s("/owner/tags")); v.Int != 3 {
-		t.Errorf("length(/owner/tags) = %d, want 3", v.Int)
+	if v := call("length", node, s("/owner/tags")); v.Int() != 3 {
+		t.Errorf("length(/owner/tags) = %d, want 3", v.Int())
 	}
 	if v := call("get", node, s("/owner")); v.Kind != interpreter.KindObject {
 		t.Errorf("get(/owner) = %s, want object", v.Kind)
@@ -103,36 +103,36 @@ func TestTomlBuiltinSurface(t *testing.T) {
 	m = call("append", m, s("/tags"), s("c"))
 	m = call("insert", m, s("/tags/0"), s("a")) // insert at the front
 
-	if v := call("length", m, s("/tags")); v.Int != 3 {
-		t.Errorf("built tags length = %d, want 3", v.Int)
+	if v := call("length", m, s("/tags")); v.Int() != 3 {
+		t.Errorf("built tags length = %d, want 3", v.Int())
 	}
-	if v := call("asString", m, s("/tags/0")); v.Str != "a" {
-		t.Errorf("tags[0] = %q, want a (inserted at front)", v.Str)
+	if v := call("asString", m, s("/tags/0")); v.Str() != "a" {
+		t.Errorf("tags[0] = %q, want a (inserted at front)", v.Str())
 	}
 
 	m = call("remove", m, s("/count"))
-	if v := call("has", m, s("/count")); v.Bool {
+	if v := call("has", m, s("/count")); v.Bool() {
 		t.Error("count should be removed")
 	}
 
 	m = call("move", m, s("/name"), s("/label"))
-	if v := call("asString", m, s("/label")); v.Str != "widget" {
-		t.Errorf("moved value = %q, want widget", v.Str)
+	if v := call("asString", m, s("/label")); v.Str() != "widget" {
+		t.Errorf("moved value = %q, want widget", v.Str())
 	}
-	if v := call("has", m, s("/name")); v.Bool {
+	if v := call("has", m, s("/name")); v.Bool() {
 		t.Error("/name should be gone after move")
 	}
 
 	// --- encode + encodePretty round-trip back through decode ---
 	enc := call("encode", m)
-	if enc.Kind != interpreter.KindString || enc.Str == "" {
+	if enc.Kind != interpreter.KindString || enc.Str() == "" {
 		t.Fatalf("encode = %+v, want a non-empty string", enc)
 	}
-	if v := call("encodePretty", m); v.Kind != interpreter.KindString || v.Str == "" {
+	if v := call("encodePretty", m); v.Kind != interpreter.KindString || v.Str() == "" {
 		t.Errorf("encodePretty = %+v", v)
 	}
 	reparsed := call("decode", enc)
-	if v := call("asString", reparsed, s("/label")); v.Str != "widget" {
-		t.Errorf("re-decoded label = %q, want widget", v.Str)
+	if v := call("asString", reparsed, s("/label")); v.Str() != "widget" {
+		t.Errorf("re-decoded label = %q, want widget", v.Str())
 	}
 }

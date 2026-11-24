@@ -39,19 +39,19 @@ func sv(s string) interpreter.Value { return interpreter.StringVal(s) }
 func iv(n int64) interpreter.Value  { return interpreter.IntVal(n) }
 
 func listStrs(v interpreter.Value) []string {
-	out := make([]string, len(v.List))
-	for i, e := range v.List {
-		out[i] = e.Str
+	out := make([]string, len(v.List()))
+	for i, e := range v.List() {
+		out[i] = e.Str()
 	}
 	return out
 }
 
 func TestUpperLower(t *testing.T) {
 	in := newLib(t)
-	if got := callFn(t, in, "upper", sv("héllo")).Str; got != "HÉLLO" {
+	if got := callFn(t, in, "upper", sv("héllo")).Str(); got != "HÉLLO" {
 		t.Errorf("upper: got %q, want %q", got, "HÉLLO")
 	}
-	if got := callFn(t, in, "lower", sv("HÉLLO")).Str; got != "héllo" {
+	if got := callFn(t, in, "lower", sv("HÉLLO")).Str(); got != "héllo" {
 		t.Errorf("lower: got %q, want %q", got, "héllo")
 	}
 }
@@ -72,7 +72,7 @@ func TestContainsStartsEnds(t *testing.T) {
 		{"endsWith", "hello", "he", false},
 	}
 	for _, c := range cases {
-		if got := callFn(t, in, c.fn, sv(c.str), sv(c.arg)).Bool; got != c.want {
+		if got := callFn(t, in, c.fn, sv(c.str), sv(c.arg)).Bool(); got != c.want {
 			t.Errorf("%s(%q, %q) = %v, want %v", c.fn, c.str, c.arg, got, c.want)
 		}
 	}
@@ -81,13 +81,13 @@ func TestContainsStartsEnds(t *testing.T) {
 func TestIndexOfRuneIndexed(t *testing.T) {
 	in := newLib(t)
 	// é is one rune (two bytes); the index is rune-based, not byte-based.
-	if got := callFn(t, in, "indexOf", sv("héllo"), sv("l")).Int; got != 2 {
+	if got := callFn(t, in, "indexOf", sv("héllo"), sv("l")).Int(); got != 2 {
 		t.Errorf("indexOf rune index: got %d, want 2", got)
 	}
-	if got := callFn(t, in, "indexOf", sv("abc"), sv("z")).Int; got != -1 {
+	if got := callFn(t, in, "indexOf", sv("abc"), sv("z")).Int(); got != -1 {
 		t.Errorf("indexOf not found: got %d, want -1", got)
 	}
-	if got := callFn(t, in, "indexOf", sv("abcabc"), sv("bc")).Int; got != 1 {
+	if got := callFn(t, in, "indexOf", sv("abcabc"), sv("bc")).Int(); got != 1 {
 		t.Errorf("indexOf first occurrence: got %d, want 1", got)
 	}
 }
@@ -95,31 +95,31 @@ func TestIndexOfRuneIndexed(t *testing.T) {
 func TestIndexOfFrom(t *testing.T) {
 	in := newLib(t)
 	// first "b" is rune 2; resuming at 3 finds the second at rune 6; é is one rune.
-	if got := callFn(t, in, "indexOf", sv("héllo"), sv("l"), iv(3)).Int; got != 3 {
+	if got := callFn(t, in, "indexOf", sv("héllo"), sv("l"), iv(3)).Int(); got != 3 {
 		t.Errorf("indexOf from: got %d, want 3", got)
 	}
-	if got := callFn(t, in, "indexOf", sv("a.b.c.b"), sv("b"), iv(3)).Int; got != 6 {
+	if got := callFn(t, in, "indexOf", sv("a.b.c.b"), sv("b"), iv(3)).Int(); got != 6 {
 		t.Errorf("indexOf from offset: got %d, want 6", got)
 	}
-	if got := callFn(t, in, "indexOf", sv("abc"), sv("a"), iv(1)).Int; got != -1 {
+	if got := callFn(t, in, "indexOf", sv("abc"), sv("a"), iv(1)).Int(); got != -1 {
 		t.Errorf("indexOf from past match: got %d, want -1", got)
 	}
 	// from == len (rune count) is allowed: an empty-tail resume finds nothing.
-	if got := callFn(t, in, "indexOf", sv("abc"), sv("x"), iv(3)).Int; got != -1 {
+	if got := callFn(t, in, "indexOf", sv("abc"), sv("x"), iv(3)).Int(); got != -1 {
 		t.Errorf("indexOf from at end: got %d, want -1", got)
 	}
 }
 
 func TestLastIndexOf(t *testing.T) {
 	in := newLib(t)
-	if got := callFn(t, in, "lastIndexOf", sv("a.b.c.b"), sv("b")).Int; got != 6 {
+	if got := callFn(t, in, "lastIndexOf", sv("a.b.c.b"), sv("b")).Int(); got != 6 {
 		t.Errorf("lastIndexOf: got %d, want 6", got)
 	}
 	// rune-indexed: two "héllo", the last starts at rune 6.
-	if got := callFn(t, in, "lastIndexOf", sv("héllo.héllo"), sv("héllo")).Int; got != 6 {
+	if got := callFn(t, in, "lastIndexOf", sv("héllo.héllo"), sv("héllo")).Int(); got != 6 {
 		t.Errorf("lastIndexOf rune index: got %d, want 6", got)
 	}
-	if got := callFn(t, in, "lastIndexOf", sv("abc"), sv("z")).Int; got != -1 {
+	if got := callFn(t, in, "lastIndexOf", sv("abc"), sv("z")).Int(); got != -1 {
 		t.Errorf("lastIndexOf absent: got %d, want -1", got)
 	}
 }
@@ -137,7 +137,7 @@ func TestCount(t *testing.T) {
 		{"", "a", 0},
 	}
 	for _, c := range cases {
-		if got := callFn(t, in, "count", sv(c.s), sv(c.sub)).Int; got != c.want {
+		if got := callFn(t, in, "count", sv(c.s), sv(c.sub)).Int(); got != c.want {
 			t.Errorf("count(%q, %q): got %d, want %d", c.s, c.sub, got, c.want)
 		}
 	}
@@ -148,13 +148,13 @@ func TestCount(t *testing.T) {
 
 func TestTrim(t *testing.T) {
 	in := newLib(t)
-	if got := callFn(t, in, "trim", sv("  hi \t ")).Str; got != "hi" {
+	if got := callFn(t, in, "trim", sv("  hi \t ")).Str(); got != "hi" {
 		t.Errorf("trim: got %q", got)
 	}
-	if got := callFn(t, in, "trimLeft", sv("  hi  ")).Str; got != "hi  " {
+	if got := callFn(t, in, "trimLeft", sv("  hi  ")).Str(); got != "hi  " {
 		t.Errorf("trimLeft: got %q", got)
 	}
-	if got := callFn(t, in, "trimRight", sv("  hi  ")).Str; got != "  hi" {
+	if got := callFn(t, in, "trimRight", sv("  hi  ")).Str(); got != "  hi" {
 		t.Errorf("trimRight: got %q", got)
 	}
 }
@@ -189,7 +189,7 @@ func TestTrimAffixAndSet(t *testing.T) {
 		{"trimLeftSet", "  x  ", "", "  x  "},
 	}
 	for _, c := range cases {
-		if got := callFn(t, in, c.fn, sv(c.s), sv(c.arg)).Str; got != c.want {
+		if got := callFn(t, in, c.fn, sv(c.s), sv(c.arg)).Str(); got != c.want {
 			t.Errorf("%s(%q, %q) = %q, want %q", c.fn, c.s, c.arg, got, c.want)
 		}
 	}
@@ -205,17 +205,17 @@ func TestTrimAffixAndSet(t *testing.T) {
 		}
 	}
 	// The whitespace trims stay whitespace-only.
-	if got := callFn(t, in, "trim", sv("00 x 00")).Str; got != "00 x 00" {
+	if got := callFn(t, in, "trim", sv("00 x 00")).Str(); got != "00 x 00" {
 		t.Errorf("trim touched non-whitespace: %q", got)
 	}
 }
 
 func TestReplace(t *testing.T) {
 	in := newLib(t)
-	if got := callFn(t, in, "replace", sv("a.b.c"), sv("."), sv("-")).Str; got != "a-b-c" {
+	if got := callFn(t, in, "replace", sv("a.b.c"), sv("."), sv("-")).Str(); got != "a-b-c" {
 		t.Errorf("replace all: got %q", got)
 	}
-	if got := callFn(t, in, "replace", sv("abc"), sv("z"), sv("Q")).Str; got != "abc" {
+	if got := callFn(t, in, "replace", sv("abc"), sv("z"), sv("Q")).Str(); got != "abc" {
 		t.Errorf("replace no-op: got %q", got)
 	}
 	// M29.52: an empty old is misuse (kind "runtime"), as in count and split.
@@ -253,13 +253,13 @@ func TestMessagePrefix(t *testing.T) {
 
 func TestReplicate(t *testing.T) {
 	in := newLib(t)
-	if got := callFn(t, in, "replicate", sv("ab"), iv(3)).Str; got != "ababab" {
+	if got := callFn(t, in, "replicate", sv("ab"), iv(3)).Str(); got != "ababab" {
 		t.Errorf("replicate = %q", got)
 	}
-	if got := callFn(t, in, "replicate", sv("ab"), iv(3)).Str; got != "ababab" {
+	if got := callFn(t, in, "replicate", sv("ab"), iv(3)).Str(); got != "ababab" {
 		t.Errorf("repeat 3: got %q", got)
 	}
-	if got := callFn(t, in, "replicate", sv("x"), iv(0)).Str; got != "" {
+	if got := callFn(t, in, "replicate", sv("x"), iv(0)).Str(); got != "" {
 		t.Errorf("repeat 0: got %q", got)
 	}
 	if _, err := rawFn(in, "replicate", sv("x"), iv(-1)); err == nil {
@@ -283,7 +283,7 @@ func TestSplitCharsJoin(t *testing.T) {
 		t.Errorf("chars: got %q", got)
 	}
 	// join is the inverse of split for a non-empty separator
-	if got := callFn(t, in, "join", parts, sv(",")).Str; got != "a,,b" {
+	if got := callFn(t, in, "join", parts, sv(",")).Str(); got != "a,,b" {
 		t.Errorf("join(split(...)): got %q, want %q", got, "a,,b")
 	}
 }

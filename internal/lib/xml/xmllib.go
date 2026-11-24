@@ -88,7 +88,7 @@ func decodeFn(args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) == 2 {
 		ns = args[1]
 	}
-	return decodeWithNS(fn, args[0].Str, ns, defaultCaps())
+	return decodeWithNS(fn, args[0].Str(), ns, defaultCaps())
 }
 
 // decodeWithFn implements `xml.decodeWith(text, xml.DecodeOptions)`: decode
@@ -107,12 +107,12 @@ func decodeWithFn(args []interpreter.Value) (interpreter.Value, error) {
 		return interpreter.Null(), err
 	}
 	ns := interpreter.Null()
-	for _, f := range args[1].Fields {
+	for _, f := range args[1].Fields() {
 		if f.Name == "namespaces" {
 			ns = f.Value
 		}
 	}
-	return decodeWithNS(fn, args[0].Str, ns, caps)
+	return decodeWithNS(fn, args[0].Str(), ns, caps)
 }
 
 // decodeWithNS decodes text under caps with the prefix map ns (a map of
@@ -120,7 +120,7 @@ func decodeWithFn(args []interpreter.Value) (interpreter.Value, error) {
 // cut out of a larger document decodes against its root's declarations.
 func decodeWithNS(fn, text string, ns interpreter.Value, caps doctree.DecodeCaps) (interpreter.Value, error) {
 	var seed *nsScope
-	if ns.Kind != interpreter.KindNull && !(ns.Kind == interpreter.KindMap && len(ns.Map) == 0) {
+	if ns.Kind != interpreter.KindNull && !(ns.Kind == interpreter.KindMap && len(ns.Map()) == 0) {
 		m, err := prefixMap(fn, ns)
 		if err != nil {
 			return interpreter.Null(), err
@@ -401,10 +401,10 @@ func elementFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("xml.element: name must be string, got %s", args[0].Kind)
 	}
-	if !validName(args[0].Str) {
-		return interpreter.Null(), fmt.Errorf("xml.element: %q is not a valid element name", args[0].Str)
+	if !validName(args[0].Str()) {
+		return interpreter.Null(), fmt.Errorf("xml.element: %q is not a valid element name", args[0].Str())
 	}
-	return wrap(elementNode(args[0].Str, nil, nil)), nil
+	return wrap(elementNode(args[0].Str(), nil, nil)), nil
 }
 
 // setAttrFn: xml.setAttr(node, name, value) -> the element with the attribute
@@ -423,8 +423,8 @@ func setAttrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if args[1].Kind != interpreter.KindString || args[2].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("xml.setAttr: name and value must be strings")
 	}
-	if !validName(args[1].Str) {
-		return interpreter.Null(), fmt.Errorf("xml.setAttr: %q is not a valid attribute name", args[1].Str)
+	if !validName(args[1].Str()) {
+		return interpreter.Null(), fmt.Errorf("xml.setAttr: %q is not a valid attribute name", args[1].Str())
 	}
 	// On a namespace-aware element (decoded, or built with elementNS) a
 	// prefixed name must resolve through the prefixes in scope, or encode
@@ -434,8 +434,8 @@ func setAttrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	ns := ""
 	scope := n.el.scope
 	if n.el.aware {
-		if p, decl := isNSDecl(args[1].Str); decl {
-			uri := args[2].Str
+		if p, decl := isNSDecl(args[1].Str()); decl {
+			uri := args[2].Str()
 			switch {
 			case p == "xmlns":
 				return interpreter.Null(), fmt.Errorf("xml.setAttr: the xmlns prefix must not be declared")
@@ -444,21 +444,21 @@ func setAttrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 			case p != "xml" && (uri == xmlNamespace || uri == xmlnsNamespace):
 				return interpreter.Null(), fmt.Errorf("xml.setAttr: %s cannot be bound to a prefix", uri)
 			case p != "" && uri == "":
-				return interpreter.Null(), fmt.Errorf("xml.setAttr: %s=\"\" is not allowed: a prefix cannot be undeclared", args[1].Str)
+				return interpreter.Null(), fmt.Errorf("xml.setAttr: %s=\"\" is not allowed: a prefix cannot be undeclared", args[1].Str())
 			}
 			ns = xmlnsNamespace
 			if p != "xml" {
 				scope = &nsScope{prefix: p, uri: uri, parent: scope}
 			}
-		} else if p, _ := splitQName(args[1].Str); p != "" {
+		} else if p, _ := splitQName(args[1].Str()); p != "" {
 			uri, ok := n.el.scope.lookup(p)
 			if !ok {
-				return interpreter.Null(), fmt.Errorf("xml.setAttr: prefix %q is not declared on <%s>; use xml.setAttrNS(v, uri, %q, value)", p, n.el.name, args[1].Str)
+				return interpreter.Null(), fmt.Errorf("xml.setAttr: prefix %q is not declared on <%s>; use xml.setAttrNS(v, uri, %q, value)", p, n.el.name, args[1].Str())
 			}
 			ns = uri
 		}
 	}
-	if err := checkChars("xml.setAttr", "the value", args[2].Str); err != nil {
+	if err := checkChars("xml.setAttr", "the value", args[2].Str()); err != nil {
 		return interpreter.Null(), err
 	}
 	// Copy the attribute list so the shared source element is never mutated.
@@ -466,14 +466,14 @@ func setAttrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	copy(attrs, n.el.attrs)
 	replaced := false
 	for i := range attrs {
-		if attrs[i].name == args[1].Str {
-			attrs[i].value, attrs[i].ns = args[2].Str, ns
+		if attrs[i].name == args[1].Str() {
+			attrs[i].value, attrs[i].ns = args[2].Str(), ns
 			replaced = true
 			break
 		}
 	}
 	if !replaced {
-		attrs = append(attrs, attr{name: args[1].Str, value: args[2].Str, ns: ns})
+		attrs = append(attrs, attr{name: args[1].Str(), value: args[2].Str(), ns: ns})
 	}
 	out := n.el.with(attrs, n.el.children)
 	out.el.scope = scope
@@ -515,7 +515,7 @@ func elementNSFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if args[0].Kind != interpreter.KindString || args[1].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("xml.elementNS: uri and qname must be strings")
 	}
-	uri, qname := args[0].Str, args[1].Str
+	uri, qname := args[0].Str(), args[1].Str()
 	if err := checkNSName("xml.elementNS", "element", uri, qname); err != nil {
 		return interpreter.Null(), err
 	}
@@ -547,7 +547,7 @@ func setAttrNSFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 			return interpreter.Null(), fmt.Errorf("%s: uri, qname and value must be strings", fn)
 		}
 	}
-	uri, qname, value := args[1].Str, args[2].Str, args[3].Str
+	uri, qname, value := args[1].Str(), args[2].Str(), args[3].Str()
 	if err := checkNSName(fn, "attribute", uri, qname); err != nil {
 		return interpreter.Null(), err
 	}
@@ -595,10 +595,10 @@ func setTextFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if args[1].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("xml.setText: text must be string, got %s", args[1].Kind)
 	}
-	if err := checkChars("xml.setText", "the text", args[1].Str); err != nil {
+	if err := checkChars("xml.setText", "the text", args[1].Str()); err != nil {
 		return interpreter.Null(), err
 	}
-	return wrap(n.el.with(n.el.attrs, []node{textNode(args[1].Str)})), nil
+	return wrap(n.el.with(n.el.attrs, []node{textNode(args[1].Str())})), nil
 }
 
 // appendFn: xml.append(parent, child) -> the parent element with child (an

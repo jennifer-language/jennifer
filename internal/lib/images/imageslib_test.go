@@ -81,9 +81,9 @@ func errorKind(t *testing.T, err error) string {
 	if !ok {
 		t.Fatalf("want *ErrorSignal, got %T %v", err, err)
 	}
-	for _, f := range sig.Value.Fields {
+	for _, f := range sig.Value.Fields() {
 		if f.Name == "kind" {
-			return f.Value.Str
+			return f.Value.Str()
 		}
 	}
 	return ""
@@ -108,7 +108,7 @@ func TestCreatePixelAndColors(t *testing.T) {
 		t.Errorf("default fill should be transparent, got %v", got)
 	}
 	c := call(t, pixelFn, m, num(0), num(0))
-	if c.StructName != "Color" || c.Fields[0].Value.Int != 255 || c.Fields[3].Value.Int != 255 {
+	if c.StructName() != "Color" || c.Fields()[0].Value.Int() != 255 || c.Fields()[3].Value.Int() != 255 {
 		t.Errorf("pixel returned %v", c.Display())
 	}
 	fails(t, pixelFn, "outside the 3x2 image", m, num(3), num(0))
@@ -146,7 +146,7 @@ func TestCodecsRoundTrip(t *testing.T) {
 		t.Error("png should round-trip exactly, alpha included")
 	}
 	info := call(t, infoFn, pngData)
-	if info.Fields[0].Value.Str != "png" || info.Fields[1].Value.Int != 16 || info.Fields[2].Value.Int != 8 {
+	if info.Fields()[0].Value.Str() != "png" || info.Fields()[1].Value.Int() != 16 || info.Fields()[2].Value.Int() != 8 {
 		t.Errorf("info = %v", info.Display())
 	}
 
@@ -181,7 +181,7 @@ func diff(a, b color.NRGBA) int {
 // gray flag again.
 func TestGrayPNG(t *testing.T) {
 	g := call(t, grayscaleFn, call(t, createFn, num(8), num(8), col(red)))
-	data := call(t, encodeFn, str("png"), g).Bytes
+	data := call(t, encodeFn, str("png"), g).Bytes()
 	decoded, err := png.Decode(bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
@@ -214,9 +214,9 @@ func TestDecodeLimit(t *testing.T) {
 
 func errMessage(err error) string {
 	if sig, ok := err.(*interpreter.ErrorSignal); ok {
-		for _, f := range sig.Value.Fields {
+		for _, f := range sig.Value.Fields() {
 			if f.Name == "message" {
-				return f.Value.Str
+				return f.Value.Str()
 			}
 		}
 	}
@@ -226,12 +226,12 @@ func errMessage(err error) string {
 func TestPixelsRoundTrip(t *testing.T) {
 	data := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	m := call(t, fromPixelsFn, num(2), num(1), raw(data))
-	if got := call(t, pixelsFn, m).Bytes; !bytes.Equal(got, data) {
+	if got := call(t, pixelsFn, m).Bytes(); !bytes.Equal(got, data) {
 		t.Errorf("pixels = %v", got)
 	}
 	// pixels hands out a copy: editing it leaves the image alone.
 	out := call(t, pixelsFn, m)
-	out.Bytes[0] = 99
+	out.Bytes()[0] = 99
 	if at(t, m, 0, 0).R != 1 {
 		t.Error("pixels must not alias the image")
 	}
@@ -240,15 +240,15 @@ func TestPixelsRoundTrip(t *testing.T) {
 
 func TestColorAndAlphaPixels(t *testing.T) {
 	m := call(t, fromPixelsFn, num(2), num(1), raw([]byte{1, 2, 3, 4, 5, 6, 7, 8}))
-	if got := call(t, colorPixelsFn, m).Bytes; !bytes.Equal(got, []byte{1, 2, 3, 5, 6, 7}) {
+	if got := call(t, colorPixelsFn, m).Bytes(); !bytes.Equal(got, []byte{1, 2, 3, 5, 6, 7}) {
 		t.Errorf("colorPixels = %v", got)
 	}
-	if got := call(t, alphaPixelsFn, m).Bytes; !bytes.Equal(got, []byte{4, 8}) {
+	if got := call(t, alphaPixelsFn, m).Bytes(); !bytes.Equal(got, []byte{4, 8}) {
 		t.Errorf("alphaPixels = %v", got)
 	}
 	// a translucent pixel keeps its colour: nothing is premultiplied
 	h := call(t, createFn, num(1), num(1), col(color.NRGBA{R: 200, G: 100, B: 50, A: 10}))
-	if got := call(t, colorPixelsFn, h).Bytes; !bytes.Equal(got, []byte{200, 100, 50}) {
+	if got := call(t, colorPixelsFn, h).Bytes(); !bytes.Equal(got, []byte{200, 100, 50}) {
 		t.Errorf("colorPixels premultiplied: %v", got)
 	}
 	fails(t, colorPixelsFn, "", num(1))

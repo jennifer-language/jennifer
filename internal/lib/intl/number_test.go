@@ -17,7 +17,7 @@ func formatNum(t *testing.T, locale string, v interpreter.Value, digits int64) s
 	if err != nil {
 		t.Fatalf("formatNumber(%q, %s, %d): %v", locale, v.Display(), digits, err)
 	}
-	return out.Str
+	return out.Str()
 }
 
 // TestFormatNumberLocales checks each kind of rule against CLDR's own output:

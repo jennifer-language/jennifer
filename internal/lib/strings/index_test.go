@@ -38,7 +38,7 @@ func TestIndexOfFromRunes(t *testing.T) {
 	want := []int64{1, 4, 6}
 	var got []int64
 	for from := int64(0); ; {
-		idx := callFn(t, in, "indexOf", sv(s), sv("b"), iv(from)).Int
+		idx := callFn(t, in, "indexOf", sv(s), sv("b"), iv(from)).Int()
 		if idx < 0 {
 			break
 		}
@@ -48,7 +48,7 @@ func TestIndexOfFromRunes(t *testing.T) {
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
 		t.Fatalf("hits %v, want %v", got, want)
 	}
-	if got := callFn(t, in, "indexOf", sv(s), sv("b"), iv(7)).Int; got != -1 {
+	if got := callFn(t, in, "indexOf", sv(s), sv("b"), iv(7)).Int(); got != -1 {
 		t.Fatalf("from = len: got %d", got)
 	}
 	_, err := rawFn(in, "indexOf", sv(s), sv("b"), iv(8))
@@ -74,8 +74,8 @@ func TestSplitCharsJoinCaps(t *testing.T) {
 		t.Fatalf("chars: %v", err)
 	}
 	// At the cap both still work.
-	if v := callFn(t, in, "split", sv(commas[1:]), sv(",")); len(v.List) != limits.MaxRangeElements {
-		t.Fatalf("split at cap: %d parts", len(v.List))
+	if v := callFn(t, in, "split", sv(commas[1:]), sv(",")); len(v.List()) != limits.MaxRangeElements {
+		t.Fatalf("split at cap: %d parts", len(v.List()))
 	}
 	// 1026 empty parts joined with a 1 MiB separator: 1 GiB + 1 MiB of
 	// separators (the separator scales with the limit on tiny).
@@ -88,7 +88,7 @@ func TestSplitCharsJoinCaps(t *testing.T) {
 	if _, err := rawFn(in, "join", list, sv(sep)); err == nil || !strings.Contains(err.Error(), "strings.join: result exceeds") {
 		t.Fatalf("join: %v", err)
 	}
-	if got := callFn(t, in, "join", interpreter.ListVal(stringListType, parts[:3]), sv("-")).Str; got != "--" {
+	if got := callFn(t, in, "join", interpreter.ListVal(stringListType, parts[:3]), sv("-")).Str(); got != "--" {
 		t.Fatalf("join: %q", got)
 	}
 }

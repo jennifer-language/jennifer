@@ -37,26 +37,26 @@ func expectErr(t *testing.T, fn interpreter.Builtin, args ...interpreter.Value) 
 // ----- introspection ------------------------------------------------
 
 func TestIsAscii(t *testing.T) {
-	if v := callFn(t, isAsciiFn, interpreter.BytesVal([]byte("hello"))); v.Bool != true {
-		t.Errorf(`isAscii("hello") = %v, want true`, v.Bool)
+	if v := callFn(t, isAsciiFn, interpreter.BytesVal([]byte("hello"))); v.Bool() != true {
+		t.Errorf(`isAscii("hello") = %v, want true`, v.Bool())
 	}
-	if v := callFn(t, isAsciiFn, interpreter.BytesVal([]byte{0x80})); v.Bool != false {
-		t.Errorf(`isAscii(0x80) = %v, want false`, v.Bool)
+	if v := callFn(t, isAsciiFn, interpreter.BytesVal([]byte{0x80})); v.Bool() != false {
+		t.Errorf(`isAscii(0x80) = %v, want false`, v.Bool())
 	}
-	if v := callFn(t, isAsciiFn, interpreter.BytesVal(nil)); v.Bool != true {
-		t.Errorf(`isAscii(empty) = %v, want true`, v.Bool)
+	if v := callFn(t, isAsciiFn, interpreter.BytesVal(nil)); v.Bool() != true {
+		t.Errorf(`isAscii(empty) = %v, want true`, v.Bool())
 	}
 }
 
 func TestLenBytesVsLenRunes(t *testing.T) {
 	// "café" is 5 UTF-8 bytes (c, a, f, 0xC3 0xA9) but 4 runes.
 	bytesVal := callFn(t, lenBytesFn, interpreter.StringVal("café"))
-	if bytesVal.Int != 5 {
-		t.Errorf(`lenBytes("café") = %d, want 5`, bytesVal.Int)
+	if bytesVal.Int() != 5 {
+		t.Errorf(`lenBytes("café") = %d, want 5`, bytesVal.Int())
 	}
 	runesVal := callFn(t, lenRunesFn, interpreter.BytesVal([]byte("café")))
-	if runesVal.Int != 4 {
-		t.Errorf(`lenRunes("café".bytes) = %d, want 4`, runesVal.Int)
+	if runesVal.Int() != 4 {
+		t.Errorf(`lenRunes("café".bytes) = %d, want 4`, runesVal.Int())
 	}
 }
 
@@ -71,24 +71,24 @@ func TestLenRunesRejectsInvalidUTF8(t *testing.T) {
 
 func TestToTextHexRoundTrip(t *testing.T) {
 	enc := callFn(t, toTextFn, interpreter.StringVal("hex"), interpreter.BytesVal([]byte{0xDE, 0xAD, 0xBE, 0xEF}))
-	if enc.Str != "deadbeef" {
-		t.Errorf("hex got %q, want %q", enc.Str, "deadbeef")
+	if enc.Str() != "deadbeef" {
+		t.Errorf("hex got %q, want %q", enc.Str(), "deadbeef")
 	}
 	dec := callFn(t, fromTextFn, interpreter.StringVal("hex"), interpreter.StringVal("DEADBEEF"))
-	if !bytes.Equal(dec.Bytes, []byte{0xDE, 0xAD, 0xBE, 0xEF}) {
-		t.Errorf("fromText hex (uppercase) = %x, want deadbeef", dec.Bytes)
+	if !bytes.Equal(dec.Bytes(), []byte{0xDE, 0xAD, 0xBE, 0xEF}) {
+		t.Errorf("fromText hex (uppercase) = %x, want deadbeef", dec.Bytes())
 	}
 }
 
 func TestToTextEmptyRoundTrip(t *testing.T) {
 	for _, fmtName := range []string{"hex", "base64", "base64-url", "quoted-printable"} {
 		enc := callFn(t, toTextFn, interpreter.StringVal(fmtName), interpreter.BytesVal(nil))
-		if enc.Str != "" {
-			t.Errorf("toText(%q, empty) = %q, want empty", fmtName, enc.Str)
+		if enc.Str() != "" {
+			t.Errorf("toText(%q, empty) = %q, want empty", fmtName, enc.Str())
 		}
 		dec := callFn(t, fromTextFn, interpreter.StringVal(fmtName), interpreter.StringVal(""))
-		if len(dec.Bytes) != 0 {
-			t.Errorf("fromText(%q, empty) = %x, want empty", fmtName, dec.Bytes)
+		if len(dec.Bytes()) != 0 {
+			t.Errorf("fromText(%q, empty) = %x, want empty", fmtName, dec.Bytes())
 		}
 	}
 }
@@ -97,9 +97,9 @@ func TestBase32Ascii85Z85RoundTrip(t *testing.T) {
 	src := []byte("Hello, World") // 12 bytes - also a valid z85 length (multiple of 4)
 	for _, f := range []string{"base32", "base32-hex", "ascii85", "z85"} {
 		enc := callFn(t, toTextFn, interpreter.StringVal(f), interpreter.BytesVal(src))
-		dec := callFn(t, fromTextFn, interpreter.StringVal(f), interpreter.StringVal(enc.Str))
-		if string(dec.Bytes) != string(src) {
-			t.Errorf("%s round-trip: got %q, want %q", f, dec.Bytes, src)
+		dec := callFn(t, fromTextFn, interpreter.StringVal(f), interpreter.StringVal(enc.Str()))
+		if string(dec.Bytes()) != string(src) {
+			t.Errorf("%s round-trip: got %q, want %q", f, dec.Bytes(), src)
 		}
 	}
 }
@@ -108,12 +108,12 @@ func TestZ85CanonicalVector(t *testing.T) {
 	// The RFC 32 canonical test vector.
 	in := []byte{0x86, 0x4F, 0xD2, 0x6F, 0xB5, 0x59, 0xF7, 0x5B}
 	enc := callFn(t, toTextFn, interpreter.StringVal("z85"), interpreter.BytesVal(in))
-	if enc.Str != "HelloWorld" {
-		t.Errorf("z85(RFC 32 vector) = %q, want %q", enc.Str, "HelloWorld")
+	if enc.Str() != "HelloWorld" {
+		t.Errorf("z85(RFC 32 vector) = %q, want %q", enc.Str(), "HelloWorld")
 	}
 	dec := callFn(t, fromTextFn, interpreter.StringVal("z85"), interpreter.StringVal("HelloWorld"))
-	if !bytes.Equal(dec.Bytes, in) {
-		t.Errorf("z85 decode = % x, want % x", dec.Bytes, in)
+	if !bytes.Equal(dec.Bytes(), in) {
+		t.Errorf("z85 decode = % x, want % x", dec.Bytes(), in)
 	}
 }
 
@@ -136,12 +136,12 @@ func TestToTextQuotedPrintable(t *testing.T) {
 	// RFC 2045: `=` -> `=3D`, printable ASCII stays literal, 8-bit bytes -> `=XX`.
 	in := []byte("a = caf\xc3\xa9") // "a = café" (é is UTF-8 C3 A9)
 	enc := callFn(t, toTextFn, interpreter.StringVal("quoted-printable"), interpreter.BytesVal(in))
-	if enc.Str != "a =3D caf=C3=A9" {
-		t.Errorf("QP encode = %q, want %q", enc.Str, "a =3D caf=C3=A9")
+	if enc.Str() != "a =3D caf=C3=A9" {
+		t.Errorf("QP encode = %q, want %q", enc.Str(), "a =3D caf=C3=A9")
 	}
-	dec := callFn(t, fromTextFn, interpreter.StringVal("quoted-printable"), interpreter.StringVal(enc.Str))
-	if string(dec.Bytes) != string(in) {
-		t.Errorf("QP round-trip = %q, want %q", dec.Bytes, in)
+	dec := callFn(t, fromTextFn, interpreter.StringVal("quoted-printable"), interpreter.StringVal(enc.Str()))
+	if string(dec.Bytes()) != string(in) {
+		t.Errorf("QP round-trip = %q, want %q", dec.Bytes(), in)
 	}
 	// format names are exact (strict): a non-canonical spelling errors,
 	// unlike the charset codec names, which normalise.
@@ -156,13 +156,13 @@ func TestToTextQuotedPrintableSoftWrap(t *testing.T) {
 	// unwinds the `=`+CRLF soft breaks back to the original bytes.
 	in := bytes.Repeat([]byte("a"), 200)
 	enc := callFn(t, toTextFn, interpreter.StringVal("quoted-printable"), interpreter.BytesVal(in))
-	for _, line := range strings.Split(enc.Str, "\r\n") {
+	for _, line := range strings.Split(enc.Str(), "\r\n") {
 		if len(line) > 76 {
 			t.Errorf("QP line exceeds 76 columns: %d (%q)", len(line), line)
 		}
 	}
-	dec := callFn(t, fromTextFn, interpreter.StringVal("quoted-printable"), interpreter.StringVal(enc.Str))
-	if !bytes.Equal(dec.Bytes, in) {
+	dec := callFn(t, fromTextFn, interpreter.StringVal("quoted-printable"), interpreter.StringVal(enc.Str()))
+	if !bytes.Equal(dec.Bytes(), in) {
 		t.Error("QP soft-wrap did not round-trip")
 	}
 }
@@ -177,12 +177,12 @@ func TestFromTextHexRejectsOddLength(t *testing.T) {
 func TestToTextBase64StandardRoundTrip(t *testing.T) {
 	// "Hello" -> "SGVsbG8=" (RFC 4648 standard).
 	enc := callFn(t, toTextFn, interpreter.StringVal("base64"), interpreter.BytesVal([]byte("Hello")))
-	if enc.Str != "SGVsbG8=" {
-		t.Errorf("base64 got %q, want SGVsbG8=", enc.Str)
+	if enc.Str() != "SGVsbG8=" {
+		t.Errorf("base64 got %q, want SGVsbG8=", enc.Str())
 	}
 	dec := callFn(t, fromTextFn, interpreter.StringVal("base64"), interpreter.StringVal("SGVsbG8="))
-	if string(dec.Bytes) != "Hello" {
-		t.Errorf("fromText base64 got %q, want Hello", string(dec.Bytes))
+	if string(dec.Bytes()) != "Hello" {
+		t.Errorf("fromText base64 got %q, want Hello", string(dec.Bytes()))
 	}
 }
 
@@ -192,8 +192,8 @@ func TestToTextBase64StandardRoundTrip(t *testing.T) {
 // `/` while url-safe uses `-` and `_`.
 func TestBase64UrlSafeDistinguishes(t *testing.T) {
 	input := []byte{0xFF, 0xFE}
-	std := callFn(t, toTextFn, interpreter.StringVal("base64"), interpreter.BytesVal(input)).Str
-	url := callFn(t, toTextFn, interpreter.StringVal("base64-url"), interpreter.BytesVal(input)).Str
+	std := callFn(t, toTextFn, interpreter.StringVal("base64"), interpreter.BytesVal(input)).Str()
+	url := callFn(t, toTextFn, interpreter.StringVal("base64-url"), interpreter.BytesVal(input)).Str()
 	if std == url {
 		t.Fatalf("standard and url-safe produced same output: %q", std)
 	}
@@ -204,8 +204,8 @@ func TestBase64UrlSafeDistinguishes(t *testing.T) {
 		t.Errorf("url-safe output %q contains +/", url)
 	}
 	dec := callFn(t, fromTextFn, interpreter.StringVal("base64-url"), interpreter.StringVal(url))
-	if !bytes.Equal(dec.Bytes, input) {
-		t.Errorf("url-safe round-trip mismatch: %x vs %x", dec.Bytes, input)
+	if !bytes.Equal(dec.Bytes(), input) {
+		t.Errorf("url-safe round-trip mismatch: %x vs %x", dec.Bytes(), input)
 	}
 }
 
@@ -227,12 +227,12 @@ func TestCodecsLists(t *testing.T) {
 	// the generated ISO-8859 / Windows codecs follow, in registration order.
 	head := []string{"utf-8", "utf-16", "utf-16le", "utf-16be", "utf-32", "utf-32le", "utf-32be",
 		"ascii", "ebcdic", "iso-8859-1", "iso-8859-2"}
-	if len(v.List) < len(head) {
-		t.Fatalf("codecs() returned %d entries", len(v.List))
+	if len(v.List()) < len(head) {
+		t.Fatalf("codecs() returned %d entries", len(v.List()))
 	}
 	for i, s := range head {
-		if v.List[i].Str != s {
-			t.Errorf("codecs()[%d] = %q, want %q", i, v.List[i].Str, s)
+		if v.List()[i].Str() != s {
+			t.Errorf("codecs()[%d] = %q, want %q", i, v.List()[i].Str(), s)
 		}
 	}
 }
@@ -241,12 +241,12 @@ func TestISO885915(t *testing.T) {
 	// Latin-9: EURO at 0xA4, and Latin-1 code points elsewhere unchanged
 	// (e.g. é at 0xE9).
 	enc := callFn(t, encodeFn, interpreter.StringVal("iso-8859-15"), interpreter.StringVal("€é"))
-	if len(enc.Bytes) != 2 || enc.Bytes[0] != 0xA4 || enc.Bytes[1] != 0xE9 {
-		t.Errorf("iso-8859-15 encode = % x, want a4 e9", enc.Bytes)
+	if len(enc.Bytes()) != 2 || enc.Bytes()[0] != 0xA4 || enc.Bytes()[1] != 0xE9 {
+		t.Errorf("iso-8859-15 encode = % x, want a4 e9", enc.Bytes())
 	}
 	dec := callFn(t, decodeFn, interpreter.StringVal("iso-8859-15"), interpreter.BytesVal([]byte{0xA4, 0xE9}))
-	if dec.Str != "€é" {
-		t.Errorf("iso-8859-15 decode = %q, want euro+e-acute", dec.Str)
+	if dec.Str() != "€é" {
+		t.Errorf("iso-8859-15 decode = %q, want euro+e-acute", dec.Str())
 	}
 }
 
@@ -263,13 +263,13 @@ func TestGeneratedCodecs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		dec := callFn(t, decodeFn, interpreter.StringVal(tc.codec), interpreter.BytesVal([]byte{tc.b}))
-		if dec.Str != tc.want {
-			t.Errorf("%s 0x%02X = %q, want %q", tc.codec, tc.b, dec.Str, tc.want)
+		if dec.Str() != tc.want {
+			t.Errorf("%s 0x%02X = %q, want %q", tc.codec, tc.b, dec.Str(), tc.want)
 		}
 	}
-	// 7 Unicode forms + 4 base codecs + iso-8859-15 + 21 generated = 33.
-	if list := callFn(t, codecsFn); len(list.List) != 33 {
-		t.Errorf("codec count = %d, want 33", len(list.List))
+	// 7 Unicode forms + 4 base codecs + iso-8859-15 + 21 generated + macintosh = 34.
+	if list := callFn(t, codecsFn); len(list.List()) != 34 {
+		t.Errorf("codec count = %d, want 34", len(list.List()))
 	}
 }
 
@@ -296,12 +296,12 @@ func TestCodecNamesAreExact(t *testing.T) {
 
 func TestEncodeDecodeAsciiRoundTrip(t *testing.T) {
 	enc := callFn(t, encodeFn, interpreter.StringVal("ascii"), interpreter.StringVal("hello"))
-	if !bytes.Equal(enc.Bytes, []byte("hello")) {
-		t.Errorf("encode ascii: %x", enc.Bytes)
+	if !bytes.Equal(enc.Bytes(), []byte("hello")) {
+		t.Errorf("encode ascii: %x", enc.Bytes())
 	}
 	dec := callFn(t, decodeFn, interpreter.StringVal("ascii"), interpreter.BytesVal([]byte("hello")))
-	if dec.Str != "hello" {
-		t.Errorf("decode ascii: %q", dec.Str)
+	if dec.Str() != "hello" {
+		t.Errorf("decode ascii: %q", dec.Str())
 	}
 }
 
@@ -322,12 +322,12 @@ func TestAsciiRejectsHighByteOnDecode(t *testing.T) {
 func TestLatin1RoundTrip(t *testing.T) {
 	// "café" -> 0x63 0x61 0x66 0xE9 in Latin-1.
 	enc := callFn(t, encodeFn, interpreter.StringVal("iso-8859-1"), interpreter.StringVal("café"))
-	if !bytes.Equal(enc.Bytes, []byte{0x63, 0x61, 0x66, 0xE9}) {
-		t.Errorf("encode latin-1: %x", enc.Bytes)
+	if !bytes.Equal(enc.Bytes(), []byte{0x63, 0x61, 0x66, 0xE9}) {
+		t.Errorf("encode latin-1: %x", enc.Bytes())
 	}
 	dec := callFn(t, decodeFn, interpreter.StringVal("iso-8859-1"), interpreter.BytesVal([]byte{0x63, 0x61, 0x66, 0xE9}))
-	if dec.Str != "café" {
-		t.Errorf("decode latin-1: %q", dec.Str)
+	if dec.Str() != "café" {
+		t.Errorf("decode latin-1: %q", dec.Str())
 	}
 }
 
@@ -344,12 +344,12 @@ func TestWindows1252EuroDecode(t *testing.T) {
 	// C1 control char. This is the textbook reason the two codecs
 	// are distinct.
 	dec := callFn(t, decodeFn, interpreter.StringVal("windows-1252"), interpreter.BytesVal([]byte{0x80, '1', '0', '0'}))
-	if dec.Str != "€100" {
-		t.Errorf("decode 0x80 = %q, want €100", dec.Str)
+	if dec.Str() != "€100" {
+		t.Errorf("decode 0x80 = %q, want €100", dec.Str())
 	}
 	enc := callFn(t, encodeFn, interpreter.StringVal("windows-1252"), interpreter.StringVal("€100"))
-	if !bytes.Equal(enc.Bytes, []byte{0x80, '1', '0', '0'}) {
-		t.Errorf("encode €100 = %x", enc.Bytes)
+	if !bytes.Equal(enc.Bytes(), []byte{0x80, '1', '0', '0'}) {
+		t.Errorf("encode €100 = %x", enc.Bytes())
 	}
 }
 
@@ -365,21 +365,21 @@ func TestEbcdicHelloRoundTrip(t *testing.T) {
 	// EBCDIC IBM-1047: "Hello" = 0xC8 0x85 0x93 0x93 0x96
 	enc := callFn(t, encodeFn, interpreter.StringVal("ebcdic"), interpreter.StringVal("Hello"))
 	want := []byte{0xC8, 0x85, 0x93, 0x93, 0x96}
-	if !bytes.Equal(enc.Bytes, want) {
-		t.Errorf("encode Hello -> %x, want %x", enc.Bytes, want)
+	if !bytes.Equal(enc.Bytes(), want) {
+		t.Errorf("encode Hello -> %x, want %x", enc.Bytes(), want)
 	}
 	dec := callFn(t, decodeFn, interpreter.StringVal("ebcdic"), interpreter.BytesVal(want))
-	if dec.Str != "Hello" {
-		t.Errorf("decode = %q", dec.Str)
+	if dec.Str() != "Hello" {
+		t.Errorf("decode = %q", dec.Str())
 	}
 }
 
 func TestEbcdicLatin1Range(t *testing.T) {
 	// EBCDIC IBM-1047 covers Latin-1 so "café" must round-trip.
 	enc := callFn(t, encodeFn, interpreter.StringVal("ebcdic"), interpreter.StringVal("café"))
-	dec := callFn(t, decodeFn, interpreter.StringVal("ebcdic"), interpreter.BytesVal(enc.Bytes))
-	if dec.Str != "café" {
-		t.Errorf("ebcdic café round-trip: enc=%x dec=%q", enc.Bytes, dec.Str)
+	dec := callFn(t, decodeFn, interpreter.StringVal("ebcdic"), interpreter.BytesVal(enc.Bytes()))
+	if dec.Str() != "café" {
+		t.Errorf("ebcdic café round-trip: enc=%x dec=%q", enc.Bytes(), dec.Str())
 	}
 }
 

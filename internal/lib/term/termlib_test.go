@@ -50,8 +50,8 @@ func TestReadByteBulk(t *testing.T) {
 		if err != nil {
 			t.Fatalf("readByte[%d]: %v", i, err)
 		}
-		if v.Int != int64(buf[i]) {
-			t.Fatalf("readByte[%d] = %d, want %d", i, v.Int, buf[i])
+		if v.Int() != int64(buf[i]) {
+			t.Fatalf("readByte[%d] = %d, want %d", i, v.Int(), buf[i])
 		}
 	}
 	// Exactly drained: the next read throws "closed", and keeps throwing it.
@@ -139,11 +139,11 @@ func TestSize(t *testing.T) {
 		}
 		return
 	}
-	if v.Kind != interpreter.KindStruct || v.StructName != "Size" {
+	if v.Kind != interpreter.KindStruct || v.StructName() != "Size" {
 		t.Fatalf("size = %v, want a term.Size struct", v)
 	}
 	var haveRows, haveCols bool
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		switch f.Name {
 		case "rows":
 			haveRows = true
@@ -152,7 +152,7 @@ func TestSize(t *testing.T) {
 		}
 	}
 	if !haveRows || !haveCols {
-		t.Errorf("term.Size missing rows/cols: %v", v.Fields)
+		t.Errorf("term.Size missing rows/cols: %v", v.Fields())
 	}
 }
 
@@ -227,8 +227,8 @@ func TestReadByteRetriesEmptyRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Int != int64('A') {
-		t.Errorf("readByte after empty reads = %d, want %d ('A')", v.Int, 'A')
+	if v.Int() != int64('A') {
+		t.Errorf("readByte after empty reads = %d, want %d ('A')", v.Int(), 'A')
 	}
 	// After the steps are exhausted, a real EOF throws "closed".
 	if got := readOne(t, ctx); got != gotClosed {
@@ -249,7 +249,7 @@ func outcome(t *testing.T, what string, v Value, err error) int64 {
 	t.Helper()
 	switch {
 	case err == nil:
-		return v.Int
+		return v.Int()
 	case errKind(err) == "timeout":
 		return gotTimeout
 	case errKind(err) == "closed":
@@ -310,7 +310,7 @@ func TestReadByteTimeout(t *testing.T) {
 	// The timed-out read is still pending: the next write lands in it, and a
 	// blocking readByte collects it.
 	go func() { _, _ = w.Write([]byte("xy")) }()
-	if v, err := readByteFn(ctx, nil); err != nil || v.Int != 'x' {
+	if v, err := readByteFn(ctx, nil); err != nil || v.Int() != 'x' {
 		t.Errorf("readByte after a timeout = %v, %v; want 'x'", v, err)
 	}
 	if got := readTimeout(t, ctx, 2000); got != 'y' {

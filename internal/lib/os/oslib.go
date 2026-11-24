@@ -163,9 +163,9 @@ func getEnvFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("os.getEnv: variable name must be string, got %s", args[0].Kind)
 	}
-	v := stdos.Getenv(args[0].Str)
+	v := stdos.Getenv(args[0].Str())
 	if off := limits.InvalidUTF8At(v); off >= 0 {
-		return interpreter.Null(), dataerr.New(dataKind, "os.getEnv: %s: invalid UTF-8 at byte %d; use os.getEnvBytes", args[0].Str, off)
+		return interpreter.Null(), dataerr.New(dataKind, "os.getEnv: %s: invalid UTF-8 at byte %d; use os.getEnvBytes", args[0].Str(), off)
 	}
 	return interpreter.StringVal(v), nil
 }
@@ -180,7 +180,7 @@ func getEnvBytesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpre
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("os.getEnvBytes: variable name must be string, got %s", args[0].Kind)
 	}
-	return interpreter.BytesVal([]byte(stdos.Getenv(args[0].Str))), nil
+	return interpreter.BytesVal([]byte(stdos.Getenv(args[0].Str()))), nil
 }
 
 // setEnvFn sets an environment variable for the current process (and any
@@ -197,7 +197,7 @@ func setEnvFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if args[1].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("os.setEnv: value must be string, got %s", args[1].Kind)
 	}
-	if err := stdos.Setenv(args[0].Str, args[1].Str); err != nil {
+	if err := stdos.Setenv(args[0].Str(), args[1].Str()); err != nil {
 		return interpreter.Null(), fmt.Errorf("os.setEnv: %v", err)
 	}
 	return interpreter.Null(), nil
@@ -209,10 +209,10 @@ func envName(fn string, v interpreter.Value) (string, error) {
 	if v.Kind != interpreter.KindString {
 		return "", fmt.Errorf("%s: variable name must be string, got %s", fn, v.Kind)
 	}
-	if v.Str == "" || strings.ContainsAny(v.Str, "=\x00") {
-		return "", fmt.Errorf("%s: invalid variable name %q", fn, v.Str)
+	if v.Str() == "" || strings.ContainsAny(v.Str(), "=\x00") {
+		return "", fmt.Errorf("%s: invalid variable name %q", fn, v.Str())
 	}
-	return v.Str, nil
+	return v.Str(), nil
 }
 
 // unsetEnvFn removes an environment variable from the current process (and so
@@ -260,7 +260,7 @@ func hasFlagFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("os.hasFlag: flag name must be string, got %s", args[0].Kind)
 	}
-	name := args[0].Str
+	name := args[0].Str()
 	for _, a := range argvSource() {
 		if a == name {
 			return interpreter.BoolVal(true), nil
@@ -287,7 +287,7 @@ func isTerminalFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpret
 		return interpreter.Null(), fmt.Errorf("os.isTerminal: stream must be string, got %s", args[0].Kind)
 	}
 	var f *stdos.File
-	switch args[0].Str {
+	switch args[0].Str() {
 	case "stdout":
 		f = stdos.Stdout
 	case "stderr":
@@ -295,7 +295,7 @@ func isTerminalFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpret
 	case "stdin":
 		f = stdos.Stdin
 	default:
-		return interpreter.Null(), fmt.Errorf("os.isTerminal: unknown stream %q; known: \"stdout\", \"stderr\", \"stdin\"", args[0].Str)
+		return interpreter.Null(), fmt.Errorf("os.isTerminal: unknown stream %q; known: \"stdout\", \"stderr\", \"stdin\"", args[0].Str())
 	}
 	return interpreter.BoolVal(isTerminalFile(f)), nil
 }
@@ -354,7 +354,7 @@ func flagFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("os.flag: flag name must be string, got %s", args[0].Kind)
 	}
-	name := args[0].Str
+	name := args[0].Str()
 	argv := argvSource()
 	for i, a := range argv {
 		if a == name && i+1 < len(argv) {

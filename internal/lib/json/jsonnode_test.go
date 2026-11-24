@@ -53,7 +53,7 @@ func TestMapIndexMaintainedAcrossWrites(t *testing.T) {
 		got, err := asIntFn(ctx, []interpreter.Value{d, interpreter.StringVal("/" + k)})
 		w, present := want[k]
 		switch {
-		case present && (err != nil || got.Int != w):
+		case present && (err != nil || got.Int() != w):
 			t.Errorf("%s: got %v (err %v), want %d", k, got, err, w)
 		case !present && err == nil:
 			t.Errorf("%s: removed key still found", k)

@@ -349,17 +349,17 @@ func makeStore(id int64) interpreter.Value {
 
 // resolve pulls the store out of a `kv.Store` argument.
 func (r *registry) resolve(fnName string, v interpreter.Value) (*store, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "Store" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "Store" {
 		return nil, fmt.Errorf("%s: argument must be a kv.Store, got %s", fnName, v.Kind)
 	}
 	var id int64
 	found := false
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == "id" {
 			if f.Value.Kind != interpreter.KindInt {
 				return nil, fmt.Errorf("%s: kv.Store.id is not int", fnName)
 			}
-			id = f.Value.Int
+			id = f.Value.Int()
 			found = true
 		}
 	}
@@ -421,14 +421,14 @@ func stringArg(fnName, what string, v interpreter.Value) (string, error) {
 	if v.Kind != interpreter.KindString {
 		return "", fmt.Errorf("%s: %s must be string, got %s", fnName, what, v.Kind)
 	}
-	return v.Str, nil
+	return v.Str(), nil
 }
 
 func intArg(fnName, what string, v interpreter.Value) (int64, error) {
 	if v.Kind != interpreter.KindInt {
 		return 0, fmt.Errorf("%s: %s must be int, got %s", fnName, what, v.Kind)
 	}
-	return v.Int, nil
+	return v.Int(), nil
 }
 
 // openFn implements `kv.open() -> kv.Store`: a fresh, empty store.
@@ -588,7 +588,7 @@ func (r *registry) getFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (in
 
 // objectType names an opaque value's type for messages ("json.Value").
 func objectType(v interpreter.Value) string {
-	return v.StructNS + "." + v.StructName
+	return v.StructNS() + "." + v.StructName()
 }
 
 // setValueFn implements `kv.setValue(store, key, value, ttl)`: store an opaque
@@ -829,14 +829,14 @@ func (r *registry) closeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("kv.close expects 1 argument (store), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindStruct || args[0].StructNS != LibraryName || args[0].StructName != "Store" {
+	if args[0].Kind != interpreter.KindStruct || args[0].StructNS() != LibraryName || args[0].StructName() != "Store" {
 		return interpreter.Null(), fmt.Errorf("kv.close: argument must be a kv.Store, got %s", args[0].Kind)
 	}
-	for _, f := range args[0].Fields {
+	for _, f := range args[0].Fields() {
 		if f.Name == "id" && f.Value.Kind == interpreter.KindInt {
 			r.mu.Lock()
-			if s, ok := r.stores[f.Value.Int]; ok {
-				delete(r.stores, f.Value.Int)
+			if s, ok := r.stores[f.Value.Int()]; ok {
+				delete(r.stores, f.Value.Int())
 				s.refs--
 				if s.refs <= 0 && s.key != "" {
 					delete(r.paths, s.key)

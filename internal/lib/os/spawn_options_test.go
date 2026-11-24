@@ -58,9 +58,9 @@ func TestSpawnUnknownOption(t *testing.T) {
 	}{
 		{optsMap("stdOut", "discard"), `os.spawn: unknown option "stdOut"; known: stdout, stderr`},
 		{optsMap("stdin", "discard"), `os.spawn: unknown option "stdin"`},
-		{interpreter.Value{Kind: interpreter.KindMap, Map: []interpreter.MapEntry{
+		{interpreter.GenericMapVal([]interpreter.MapEntry{
 			{Key: interpreter.StringVal("stdout"), Value: interpreter.IntVal(1)},
-		}}, `os.spawn: option "stdout" must be a string, got int`},
+		}), `os.spawn: option "stdout" must be a string, got int`},
 	}
 	for _, c := range bad {
 		_, err := spawnFn(interpreter.BuiltinCtx{}, []interpreter.Value{stringList("true"), c.opts})

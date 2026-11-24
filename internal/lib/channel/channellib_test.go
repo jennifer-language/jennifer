@@ -72,11 +72,11 @@ func TestMakeReturnsChannel(t *testing.T) {
 		if ch.Kind != interpreter.KindChannel {
 			t.Fatalf("make(%d): kind = %s, want channel", capacity, ch.Kind)
 		}
-		if ch.Chan == nil {
+		if ch.Chan() == nil {
 			t.Fatalf("make(%d): channel state is nil", capacity)
 		}
-		if got := mustInvoke(t, in, "capacity", ch); got.Int != capacity {
-			t.Errorf("make(%d): capacity() = %d, want %d", capacity, got.Int, capacity)
+		if got := mustInvoke(t, in, "capacity", ch); got.Int() != capacity {
+			t.Errorf("make(%d): capacity() = %d, want %d", capacity, got.Int(), capacity)
 		}
 	}
 }
@@ -108,10 +108,10 @@ func TestSendRecvRoundTrip(t *testing.T) {
 	mustInvoke(t, in, "send", ch, interpreter.IntVal(42))
 	mustInvoke(t, in, "send", ch, interpreter.StringVal("hi"))
 	// Buffered FIFO: values come back in send order.
-	if got := mustInvoke(t, in, "recv", ch); got.Kind != interpreter.KindInt || got.Int != 42 {
+	if got := mustInvoke(t, in, "recv", ch); got.Kind != interpreter.KindInt || got.Int() != 42 {
 		t.Errorf("recv 1 = %+v, want int 42", got)
 	}
-	if got := mustInvoke(t, in, "recv", ch); got.Kind != interpreter.KindString || got.Str != "hi" {
+	if got := mustInvoke(t, in, "recv", ch); got.Kind != interpreter.KindString || got.Str() != "hi" {
 		t.Errorf("recv 2 = %+v, want string \"hi\"", got)
 	}
 }
@@ -124,10 +124,10 @@ func TestSendDeepCopiesValue(t *testing.T) {
 	orig := interpreter.ListVal(parser.PrimitiveType(parser.TypeInt),
 		[]interpreter.Value{interpreter.IntVal(1), interpreter.IntVal(2)})
 	mustInvoke(t, in, "send", ch, orig)
-	orig.List[0] = interpreter.IntVal(999) // mutate the original after the send
+	orig.List()[0] = interpreter.IntVal(999) // mutate the original after the send
 	got := mustInvoke(t, in, "recv", ch)
-	if got.Kind != interpreter.KindList || len(got.List) != 2 || got.List[0].Int != 1 {
-		t.Errorf("send must deep-copy: received first element = %+v, want 1 (unaffected by later mutation)", got.List[0])
+	if got.Kind != interpreter.KindList || len(got.List()) != 2 || got.List()[0].Int() != 1 {
+		t.Errorf("send must deep-copy: received first element = %+v, want 1 (unaffected by later mutation)", got.List()[0])
 	}
 }
 
@@ -146,11 +146,11 @@ func TestRecvDrainsThenErrorsAfterClose(t *testing.T) {
 	mustInvoke(t, in, "send", ch, interpreter.IntVal(10))
 	mustInvoke(t, in, "send", ch, interpreter.IntVal(20))
 	mustInvoke(t, in, "close", ch)
-	if got := mustInvoke(t, in, "recv", ch); got.Int != 10 {
-		t.Errorf("recv after close 1 = %d, want 10", got.Int)
+	if got := mustInvoke(t, in, "recv", ch); got.Int() != 10 {
+		t.Errorf("recv after close 1 = %d, want 10", got.Int())
 	}
-	if got := mustInvoke(t, in, "recv", ch); got.Int != 20 {
-		t.Errorf("recv after close 2 = %d, want 20", got.Int)
+	if got := mustInvoke(t, in, "recv", ch); got.Int() != 20 {
+		t.Errorf("recv after close 2 = %d, want 20", got.Int())
 	}
 	wantErr(t, in, "recv", "closed", ch) // drained + closed
 }
@@ -165,17 +165,17 @@ func TestCloseAndDoubleClose(t *testing.T) {
 func TestLenTracksBuffer(t *testing.T) {
 	in := newLib(t)
 	ch := makeChan(t, in, 3)
-	if got := mustInvoke(t, in, "len", ch); got.Int != 0 {
-		t.Errorf("len of fresh channel = %d, want 0", got.Int)
+	if got := mustInvoke(t, in, "len", ch); got.Int() != 0 {
+		t.Errorf("len of fresh channel = %d, want 0", got.Int())
 	}
 	mustInvoke(t, in, "send", ch, interpreter.IntVal(1))
 	mustInvoke(t, in, "send", ch, interpreter.IntVal(2))
-	if got := mustInvoke(t, in, "len", ch); got.Int != 2 {
-		t.Errorf("len after 2 sends = %d, want 2", got.Int)
+	if got := mustInvoke(t, in, "len", ch); got.Int() != 2 {
+		t.Errorf("len after 2 sends = %d, want 2", got.Int())
 	}
 	mustInvoke(t, in, "recv", ch)
-	if got := mustInvoke(t, in, "len", ch); got.Int != 1 {
-		t.Errorf("len after 1 recv = %d, want 1", got.Int)
+	if got := mustInvoke(t, in, "len", ch); got.Int() != 1 {
+		t.Errorf("len after 1 recv = %d, want 1", got.Int())
 	}
 }
 
@@ -186,7 +186,7 @@ func TestSelectReturnsReadyValue(t *testing.T) {
 	mustInvoke(t, in, "send", b, interpreter.IntVal(99))
 	chans := interpreter.ListVal(parser.ChannelType(parser.PrimitiveType(parser.TypeInt)), []interpreter.Value{a, b})
 	got := mustInvoke(t, in, "select", chans)
-	if got.Kind != interpreter.KindInt || got.Int != 99 {
+	if got.Kind != interpreter.KindInt || got.Int() != 99 {
 		t.Errorf("select returned %+v, want int 99 from the ready channel", got)
 	}
 }
@@ -201,7 +201,7 @@ func TestSelectSkipsClosedChannel(t *testing.T) {
 	mustInvoke(t, in, "close", b) // b is closed and empty
 	chans := interpreter.ListVal(parser.ChannelType(parser.PrimitiveType(parser.TypeInt)), []interpreter.Value{b, a})
 	got := mustInvoke(t, in, "select", chans)
-	if got.Int != 7 {
+	if got.Int() != 7 {
 		t.Errorf("select over [closed b, live a] = %+v, want 7 from a", got)
 	}
 }
@@ -229,11 +229,11 @@ func TestSelectArgumentErrors(t *testing.T) {
 
 func TestCapacityValues(t *testing.T) {
 	in := newLib(t)
-	if got := mustInvoke(t, in, "capacity", makeChan(t, in, 0)); got.Int != 0 {
-		t.Errorf("capacity(make 0) = %d, want 0", got.Int)
+	if got := mustInvoke(t, in, "capacity", makeChan(t, in, 0)); got.Int() != 0 {
+		t.Errorf("capacity(make 0) = %d, want 0", got.Int())
 	}
-	if got := mustInvoke(t, in, "capacity", makeChan(t, in, 7)); got.Int != 7 {
-		t.Errorf("capacity(make 7) = %d, want 7", got.Int)
+	if got := mustInvoke(t, in, "capacity", makeChan(t, in, 7)); got.Int() != 7 {
+		t.Errorf("capacity(make 7) = %d, want 7", got.Int())
 	}
 }
 
@@ -278,7 +278,7 @@ func TestSendElementTypeCheck(t *testing.T) {
 	in := newLib(t)
 	ch := makeChan(t, in, 1)
 	intT := parser.PrimitiveType(parser.TypeInt)
-	ch.Chan.ElemTyp.Store(&intT)
+	ch.Chan().ElemTyp.Store(&intT)
 	wantErr(t, in, "send", "must be int", ch, interpreter.StringVal("nope"))
 	mustInvoke(t, in, "send", ch, interpreter.IntVal(1)) // right type is accepted
 }
@@ -309,7 +309,7 @@ func TestSelectFanInStress(t *testing.T) {
 				}
 			}(s)
 		}
-		list := interpreter.Value{Kind: interpreter.KindList, List: chans}
+		list := interpreter.GenericListVal(chans)
 		seen := make(map[int64]bool)
 		for {
 			v, err := invoke(t, in, "select", list)
@@ -319,10 +319,10 @@ func TestSelectFanInStress(t *testing.T) {
 				}
 				break
 			}
-			if seen[v.Int] {
-				t.Fatalf("capacity %d: value %d received twice", capacity, v.Int)
+			if seen[v.Int()] {
+				t.Fatalf("capacity %d: value %d received twice", capacity, v.Int())
 			}
-			seen[v.Int] = true
+			seen[v.Int()] = true
 		}
 		if len(seen) != senders*perSender {
 			t.Errorf("capacity %d: received %d values, want %d", capacity, len(seen), senders*perSender)
@@ -337,7 +337,7 @@ func TestSelectWakesOnLaterSend(t *testing.T) {
 	a, b := makeChan(t, in, 0), makeChan(t, in, 0)
 	got := make(chan interpreter.Value, 1)
 	go func() {
-		v, err := invoke(t, in, "select", interpreter.Value{Kind: interpreter.KindList, List: []interpreter.Value{a, b}})
+		v, err := invoke(t, in, "select", interpreter.GenericListVal([]interpreter.Value{a, b}))
 		if err != nil {
 			panic(err)
 		}
@@ -347,8 +347,8 @@ func TestSelectWakesOnLaterSend(t *testing.T) {
 	mustInvoke(t, in, "send", b, interpreter.IntVal(7))
 	select {
 	case v := <-got:
-		if v.Int != 7 {
-			t.Errorf("select returned %d, want 7", v.Int)
+		if v.Int() != 7 {
+			t.Errorf("select returned %d, want 7", v.Int())
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("select was not woken by a later send")
@@ -367,7 +367,7 @@ func TestCloseWakesBlockedSender(t *testing.T) {
 		_, err := invoke(t, in, "send", ch, interpreter.IntVal(1))
 		errc <- err
 	}()
-	for !ch.Chan.HasPendingSend() {
+	for !ch.Chan().HasPendingSend() {
 		time.Sleep(time.Millisecond)
 	}
 	time.Sleep(10 * time.Millisecond) // let the sender park
@@ -388,10 +388,10 @@ func TestCloseWakesBlockedSender(t *testing.T) {
 func TestSelectSameChannelTwice(t *testing.T) {
 	in := newLib(t)
 	ch := makeChan(t, in, 1)
-	both := interpreter.Value{Kind: interpreter.KindList, List: []interpreter.Value{ch, ch}}
+	both := interpreter.GenericListVal([]interpreter.Value{ch, ch})
 	mustInvoke(t, in, "send", ch, interpreter.IntVal(3))
-	if got := mustInvoke(t, in, "select", both); got.Int != 3 {
-		t.Errorf("select = %d, want 3", got.Int)
+	if got := mustInvoke(t, in, "select", both); got.Int() != 3 {
+		t.Errorf("select = %d, want 3", got.Int())
 	}
 	mustInvoke(t, in, "close", ch)
 	wantErr(t, in, "select", "all channels are closed", both)

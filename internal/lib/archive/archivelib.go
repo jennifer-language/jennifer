@@ -96,6 +96,11 @@ func readCapped(r io.Reader, budget *int64, caps unpackCaps, size int64) ([]byte
 		if limit < 0 && n > limits.MaxAllocBytes {
 			n = limits.MaxAllocBytes // unlimited: grow past it only as data arrives
 		}
+		if n > int64(math.MaxInt) {
+			// Only on a 32-bit int, where make panics on such a length: a
+			// caller-set cap past 2 GiB pre-sizes as an unlimited one does.
+			n = limits.MaxAllocBytes
+		}
 		data = make([]byte, n)
 		if _, err := io.ReadFull(r, data); err != nil {
 			return nil, err
@@ -190,32 +195,32 @@ func makeEntry(e entry) interpreter.Value {
 
 // extractEntry pulls the four fields out of an `archive.Entry`.
 func extractEntry(idx int, v interpreter.Value) (entry, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "Entry" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "Entry" {
 		return entry{}, fmt.Errorf("archive.pack: entry %d must be an archive.Entry, got %s", idx, v.Kind)
 	}
 	var e entry
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		switch f.Name {
 		case "name":
 			if f.Value.Kind != interpreter.KindString {
 				return entry{}, fmt.Errorf("archive.pack: entry %d name must be string, got %s", idx, f.Value.Kind)
 			}
-			e.name = f.Value.Str
+			e.name = f.Value.Str()
 		case "data":
 			if f.Value.Kind != interpreter.KindBytes {
 				return entry{}, fmt.Errorf("archive.pack: entry %d data must be bytes, got %s", idx, f.Value.Kind)
 			}
-			e.data = f.Value.Bytes
+			e.data = f.Value.Bytes()
 		case "mode":
 			if f.Value.Kind != interpreter.KindInt {
 				return entry{}, fmt.Errorf("archive.pack: entry %d mode must be int, got %s", idx, f.Value.Kind)
 			}
-			e.mode = f.Value.Int
+			e.mode = f.Value.Int()
 		case "mtime":
 			if f.Value.Kind != interpreter.KindInt {
 				return entry{}, fmt.Errorf("archive.pack: entry %d mtime must be int, got %s", idx, f.Value.Kind)
 			}
-			e.mtime = f.Value.Int
+			e.mtime = f.Value.Int()
 		}
 	}
 	return e, nil
@@ -231,8 +236,8 @@ func packFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if args[1].Kind != interpreter.KindList {
 		return interpreter.Null(), fmt.Errorf("archive.pack: second argument must be a list of archive.Entry, got %s", args[1].Kind)
 	}
-	entries := make([]entry, 0, len(args[1].List))
-	for i, ev := range args[1].List {
+	entries := make([]entry, 0, len(args[1].List()))
+	for i, ev := range args[1].List() {
 		e, err := extractEntry(i, ev)
 		if err != nil {
 			return interpreter.Null(), err
@@ -253,7 +258,7 @@ func packFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 		out []byte
 		err error
 	)
-	switch args[0].Str {
+	switch args[0].Str() {
 	case "tar":
 		out, err = packTar(entries)
 	case "zip":
@@ -264,7 +269,7 @@ func packFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 			out, err = gzipBytes(raw)
 		}
 	default:
-		return interpreter.Null(), fmt.Errorf("archive.pack: unknown format %q; known: %s", args[0].Str, formatList)
+		return interpreter.Null(), fmt.Errorf("archive.pack: unknown format %q; known: %s", args[0].Str(), formatList)
 	}
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("archive.pack: %v", err)
@@ -282,7 +287,7 @@ func unpackFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	if args[1].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("archive.unpack: second argument must be bytes, got %s", args[1].Kind)
 	}
-	entries, err := unpackBytes(args[1].Bytes, args[0].Str, defaultUnpackCaps())
+	entries, err := unpackBytes(args[1].Bytes(), args[0].Str(), defaultUnpackCaps())
 	return finishUnpack(ctx, "archive.unpack", entries, err)
 }
 
@@ -304,7 +309,7 @@ func unpackWithFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpr
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	entries, derr := unpackBytes(args[1].Bytes, args[0].Str, caps)
+	entries, derr := unpackBytes(args[1].Bytes(), args[0].Str(), caps)
 	return finishUnpack(ctx, "archive.unpackWith", entries, derr)
 }
 
@@ -367,24 +372,24 @@ func finishUnpack(ctx interpreter.BuiltinCtx, fnName string, entries []entry, er
 // the default, math.MAX_INT is unlimited, another positive field is that cap, a
 // negative field is an error.
 func capsFromOptions(v interpreter.Value) (unpackCaps, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "UnpackOptions" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "UnpackOptions" {
 		return unpackCaps{}, fmt.Errorf("archive.unpackWith: options must be an archive.UnpackOptions, got %s", v.Kind)
 	}
 	def := defaultUnpackCaps()
 	caps := def
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		var err error
 		switch f.Name {
 		case "maxTotalBytes":
-			caps.total, err = capFromOpt(f.Name, f.Value.Int, def.total)
+			caps.total, err = capFromOpt(f.Name, f.Value.Int(), def.total)
 		case "maxEntryBytes":
-			caps.entryBytes, err = capFromOpt(f.Name, f.Value.Int, def.entryBytes)
+			caps.entryBytes, err = capFromOpt(f.Name, f.Value.Int(), def.entryBytes)
 		case "maxEntries":
 			var n int64
-			n, err = capFromOpt(f.Name, f.Value.Int, int64(def.entries))
+			n, err = capFromOpt(f.Name, f.Value.Int(), int64(def.entries))
 			caps.entries = int(min(n, math.MaxInt))
 		case "skipSpecial":
-			caps.skipSpecial = f.Value.Bool
+			caps.skipSpecial = f.Value.Bool()
 		}
 		if err != nil {
 			return unpackCaps{}, err

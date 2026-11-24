@@ -40,10 +40,12 @@ func kMeansArgs(name string, args []interpreter.Value) ([][]float64, int, error)
 	if args[1].Kind != interpreter.KindInt {
 		return nil, 0, fmt.Errorf("ml.%s: k must be an int", name)
 	}
-	k := int(args[1].Int)
-	if k < 1 || k > len(x) {
-		return nil, 0, fmt.Errorf("ml.%s: k must be in [1, rows] (got k=%d, rows=%d)", name, k, len(x))
+	// Compared as int64 before narrowing: on a 32-bit int, 1<<32 + 1 would
+	// truncate to a valid k of 1.
+	if k64 := args[1].Int(); k64 < 1 || k64 > int64(len(x)) {
+		return nil, 0, fmt.Errorf("ml.%s: k must be in [1, rows] (got k=%d, rows=%d)", name, k64, len(x))
 	}
+	k := int(args[1].Int())
 	return x, k, nil
 }
 
@@ -79,10 +81,10 @@ func kMeansFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	}
 	maxIter := defaultMaxIter
 	if len(args) == 3 {
-		if args[2].Kind != interpreter.KindInt || args[2].Int < 1 || args[2].Int > maxKMeansIter {
+		if args[2].Kind != interpreter.KindInt || args[2].Int() < 1 || args[2].Int() > maxKMeansIter {
 			return interpreter.Null(), fmt.Errorf("ml.kMeans: maxIter must be in [1, %d]", maxKMeansIter)
 		}
-		maxIter = int(args[2].Int)
+		maxIter = int(args[2].Int())
 	}
 	return trainKMeans("kMeans", x, k, maxIter)
 }

@@ -48,13 +48,13 @@ func TestTypeOfAtPointer(t *testing.T) {
 	}
 	for p, want := range cases {
 		got := call(t, typeOfFn, doc, ptr(p))
-		if got.Str != want {
-			t.Errorf("typeOf(%q) = %q, want %q", p, got.Str, want)
+		if got.Str() != want {
+			t.Errorf("typeOf(%q) = %q, want %q", p, got.Str(), want)
 		}
 	}
 	// no pointer arg -> the root type.
-	if got := call(t, typeOfFn, doc); got.Str != "map" {
-		t.Errorf("typeOf(root) = %q, want map", got.Str)
+	if got := call(t, typeOfFn, doc); got.Str() != "map" {
+		t.Errorf("typeOf(root) = %q, want map", got.Str())
 	}
 }
 
@@ -64,15 +64,15 @@ func TestTypeOfAtPointer(t *testing.T) {
 func TestTypeOfMissing(t *testing.T) {
 	doc := doc(t, `{"s": "hi", "xs": [1], "m": {"k": null}}`)
 	for _, p := range []string{"/nope", "/xs/1", "/xs/x", "/s/deeper", "/m/k/deeper", "/m/other"} {
-		if got := call(t, typeOfFn, doc, ptr(p)); got.Str != "missing" {
-			t.Errorf("typeOf(%q) = %q, want missing", p, got.Str)
+		if got := call(t, typeOfFn, doc, ptr(p)); got.Str() != "missing" {
+			t.Errorf("typeOf(%q) = %q, want missing", p, got.Str())
 		}
-		if has := call(t, hasFn, doc, ptr(p)); has.Bool {
+		if has := call(t, hasFn, doc, ptr(p)); has.Bool() {
 			t.Errorf("has(%q) = true, but typeOf says missing", p)
 		}
 	}
-	if got := call(t, typeOfFn, doc, ptr("/m/k")); got.Str != "null" {
-		t.Errorf("typeOf(/m/k) = %q, want null (present, not missing)", got.Str)
+	if got := call(t, typeOfFn, doc, ptr("/m/k")); got.Str() != "null" {
+		t.Errorf("typeOf(/m/k) = %q, want null (present, not missing)", got.Str())
 	}
 	if _, err := typeOfFn(interpreter.BuiltinCtx{}, []interpreter.Value{doc, ptr("no-slash")}); err == nil {
 		t.Error("typeOf with a malformed pointer: want an error")
@@ -82,27 +82,27 @@ func TestTypeOfMissing(t *testing.T) {
 func TestDeepWalkAndLeaves(t *testing.T) {
 	doc := doc(t, `{"user": {"name": "ada", "age": 36, "roles": ["admin", "dev"], "ok": true, "z": null}}`)
 
-	if got := call(t, asStringFn, doc, ptr("/user/name")); got.Str != "ada" {
-		t.Errorf("name = %q, want ada", got.Str)
+	if got := call(t, asStringFn, doc, ptr("/user/name")); got.Str() != "ada" {
+		t.Errorf("name = %q, want ada", got.Str())
 	}
-	if got := call(t, asIntFn, doc, ptr("/user/age")); got.Int != 36 {
-		t.Errorf("age = %d, want 36", got.Int)
+	if got := call(t, asIntFn, doc, ptr("/user/age")); got.Int() != 36 {
+		t.Errorf("age = %d, want 36", got.Int())
 	}
 	// an integral number promotes to float via asFloat.
-	if got := call(t, asFloatFn, doc, ptr("/user/age")); got.Float != 36.0 {
-		t.Errorf("age asFloat = %v, want 36.0", got.Float)
+	if got := call(t, asFloatFn, doc, ptr("/user/age")); got.Float() != 36.0 {
+		t.Errorf("age asFloat = %v, want 36.0", got.Float())
 	}
-	if got := call(t, asStringFn, doc, ptr("/user/roles/1")); got.Str != "dev" {
-		t.Errorf("roles/1 = %q, want dev", got.Str)
+	if got := call(t, asStringFn, doc, ptr("/user/roles/1")); got.Str() != "dev" {
+		t.Errorf("roles/1 = %q, want dev", got.Str())
 	}
-	if got := call(t, asBoolFn, doc, ptr("/user/ok")); !got.Bool {
-		t.Errorf("ok = %v, want true", got.Bool)
+	if got := call(t, asBoolFn, doc, ptr("/user/ok")); !got.Bool() {
+		t.Errorf("ok = %v, want true", got.Bool())
 	}
-	if got := call(t, isNullFn, doc, ptr("/user/z")); !got.Bool {
-		t.Errorf("z isNull = %v, want true", got.Bool)
+	if got := call(t, isNullFn, doc, ptr("/user/z")); !got.Bool() {
+		t.Errorf("z isNull = %v, want true", got.Bool())
 	}
-	if got := call(t, lengthFn, doc, ptr("/user/roles")); got.Int != 2 {
-		t.Errorf("roles length = %d, want 2", got.Int)
+	if got := call(t, lengthFn, doc, ptr("/user/roles")); got.Int() != 2 {
+		t.Errorf("roles length = %d, want 2", got.Int())
 	}
 }
 
@@ -113,13 +113,13 @@ func TestGetReturnsSubtreeAndComposesRelative(t *testing.T) {
 	if _, ok := asNode(user); !ok {
 		t.Fatalf("get did not return a json.Value")
 	}
-	if got := call(t, asStringFn, user, ptr("/name")); got.Str != "ada" {
-		t.Errorf("relative name = %q, want ada", got.Str)
+	if got := call(t, asStringFn, user, ptr("/name")); got.Str() != "ada" {
+		t.Errorf("relative name = %q, want ada", got.Str())
 	}
 	// get with no pointer returns the node itself.
 	same := call(t, getFn, doc)
-	if got := call(t, asStringFn, same, ptr("/user/name")); got.Str != "ada" {
-		t.Errorf("get(root) then walk = %q, want ada", got.Str)
+	if got := call(t, asStringFn, same, ptr("/user/name")); got.Str() != "ada" {
+		t.Errorf("get(root) then walk = %q, want ada", got.Str())
 	}
 }
 
@@ -127,33 +127,33 @@ func TestHasAndKeys(t *testing.T) {
 	doc := doc(t, `{"a": 1, "b": {"c": 2}}`)
 	trueCases := []string{"/a", "/b", "/b/c"}
 	for _, p := range trueCases {
-		if got := call(t, hasFn, doc, ptr(p)); !got.Bool {
+		if got := call(t, hasFn, doc, ptr(p)); !got.Bool() {
 			t.Errorf("has(%q) = false, want true", p)
 		}
 	}
 	falseCases := []string{"/z", "/b/z", "/a/x"} // missing key, missing nested, descend into scalar
 	for _, p := range falseCases {
-		if got := call(t, hasFn, doc, ptr(p)); got.Bool {
+		if got := call(t, hasFn, doc, ptr(p)); got.Bool() {
 			t.Errorf("has(%q) = true, want false", p)
 		}
 	}
 	keys := call(t, keysFn, doc)
-	if len(keys.List) != 2 || keys.List[0].Str != "a" || keys.List[1].Str != "b" {
-		t.Errorf("keys = %v, want [a b] in order", keys.List)
+	if len(keys.List()) != 2 || keys.List()[0].Str() != "a" || keys.List()[1].Str() != "b" {
+		t.Errorf("keys = %v, want [a b] in order", keys.List())
 	}
 }
 
 func TestPointerEscaping(t *testing.T) {
 	// RFC 6901: ~1 -> "/", ~0 -> "~".
 	doc := doc(t, `{"m~n": 8, "a/b": 0, "e^f": 3}`)
-	if got := call(t, asIntFn, doc, ptr("/a~1b")); got.Int != 0 {
-		t.Errorf("/a~1b = %d, want 0", got.Int)
+	if got := call(t, asIntFn, doc, ptr("/a~1b")); got.Int() != 0 {
+		t.Errorf("/a~1b = %d, want 0", got.Int())
 	}
-	if got := call(t, asIntFn, doc, ptr("/m~0n")); got.Int != 8 {
-		t.Errorf("/m~0n = %d, want 8", got.Int)
+	if got := call(t, asIntFn, doc, ptr("/m~0n")); got.Int() != 8 {
+		t.Errorf("/m~0n = %d, want 8", got.Int())
 	}
-	if got := call(t, asIntFn, doc, ptr("/e^f")); got.Int != 3 {
-		t.Errorf("/e^f = %d, want 3", got.Int)
+	if got := call(t, asIntFn, doc, ptr("/e^f")); got.Int() != 3 {
+		t.Errorf("/e^f = %d, want 3", got.Int())
 	}
 }
 
@@ -221,7 +221,7 @@ func TestRoundTripThroughObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encode(json.Value): %v", err)
 	}
-	if out.Str != src {
-		t.Errorf("round-trip = %q, want %q", out.Str, src)
+	if out.Str() != src {
+		t.Errorf("round-trip = %q, want %q", out.Str(), src)
 	}
 }

@@ -83,10 +83,10 @@ func TestDecodeWithNamespaces(t *testing.T) {
 	if !got.Equal(old) {
 		t.Error("decodeWith{namespaces} differs from decode(s, ns)")
 	}
-	if a, b := call(t, encodeFnFor(false), got).Str, call(t, encodeFnFor(false), old).Str; a != b {
+	if a, b := call(t, encodeFnFor(false), got).Str(), call(t, encodeFnFor(false), old).Str(); a != b {
 		t.Errorf("encodings differ:\n%s\n%s", a, b)
 	}
-	if got := call(t, namespaceFn, mustGet(t, got, "x:ext")).Str; got != "urn:x" {
+	if got := call(t, namespaceFn, mustGet(t, got, "x:ext")).Str(); got != "urn:x" {
 		t.Errorf("x:ext namespace = %q", got)
 	}
 	// Without the bindings the prefixes are undeclared.

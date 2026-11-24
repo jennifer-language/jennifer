@@ -28,7 +28,7 @@ func TestDecodeWithCaps(t *testing.T) {
 	inner := mustBuild(t, sequenceFn, interpreter.ListVal(parser.Type{}, []interpreter.Value{mustBuild(t, integerFn, interpreter.IntVal(1))}))
 	outer := mustBuild(t, sequenceFn, interpreter.ListVal(parser.Type{}, []interpreter.Value{inner, mustBuild(t, integerFn, interpreter.IntVal(2))}))
 	data := interpreter.BytesVal(der(t, outer))
-	plain := decode(t, data.Bytes)
+	plain := decode(t, data.Bytes())
 	for _, o := range []interpreter.Value{asn1Opts(0, 0), asn1Opts(2, 4)} {
 		got, err := call(decodeWithFn, data, o)
 		if err != nil || !got.Equal(plain) {
@@ -59,7 +59,7 @@ func TestDecodeWithCaps(t *testing.T) {
 		t.Error("a string for data should be refused")
 	}
 	// Malformed input stays kind "asn1", named by the call.
-	_, err := call(decodeWithFn, interpreter.BytesVal(append(data.Bytes, 0)), asn1Opts(0, 0))
+	_, err := call(decodeWithFn, interpreter.BytesVal(append(data.Bytes(), 0)), asn1Opts(0, 0))
 	if dataerr.KindOf(err) != "asn1" || !strings.HasPrefix(err.Error(), "asn1.decodeWith:") {
 		t.Errorf("trailing byte: %v", err)
 	}

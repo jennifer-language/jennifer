@@ -71,7 +71,7 @@ func (c *catalogs) loadFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("intl.load: lang must be string, got %s", args[0].Kind)
 	}
-	lang, err := normalizeLocale("intl.load", args[0].Str)
+	lang, err := normalizeLocale("intl.load", args[0].Str())
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -81,12 +81,12 @@ func (c *catalogs) loadFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 	// Validate every entry up front (no allocation) so a bad catalog fails
 	// before it touches shared state; the copy into the stored map then runs
 	// straight from args, without a redundant intermediate map.
-	for _, e := range args[1].Map {
+	for _, e := range args[1].Map() {
 		if e.Key.Kind != interpreter.KindString {
 			return interpreter.Null(), fmt.Errorf("intl.load: catalog key must be string, got %s", e.Key.Kind)
 		}
 		if e.Value.Kind != interpreter.KindString {
-			return interpreter.Null(), fmt.Errorf("intl.load: catalog value for %q must be string, got %s", e.Key.Str, e.Value.Kind)
+			return interpreter.Null(), fmt.Errorf("intl.load: catalog value for %q must be string, got %s", e.Key.Str(), e.Value.Kind)
 		}
 	}
 
@@ -94,11 +94,11 @@ func (c *catalogs) loadFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 	defer c.mu.Unlock()
 	m := c.byLang[lang]
 	if m == nil {
-		m = make(map[string]string, len(args[1].Map))
+		m = make(map[string]string, len(args[1].Map()))
 		c.byLang[lang] = m
 	}
-	for _, e := range args[1].Map {
-		m[e.Key.Str] = e.Value.Str
+	for _, e := range args[1].Map() {
+		m[e.Key.Str()] = e.Value.Str()
 	}
 	if c.deflang == "" {
 		c.deflang = lang
@@ -115,14 +115,14 @@ func (c *catalogs) setLocaleFn(_ interpreter.BuiltinCtx, args []interpreter.Valu
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("intl.setLocale: lang must be string, got %s", args[0].Kind)
 	}
-	loc, err := normalizeLocale("intl.setLocale", args[0].Str)
+	loc, err := normalizeLocale("intl.setLocale", args[0].Str())
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.byLang[loc] == nil && c.byLang[baseLang(loc)] == nil {
-		return interpreter.Null(), fmt.Errorf("intl.setLocale: unknown locale %q (no catalog loaded for it or its language)", args[0].Str)
+		return interpreter.Null(), fmt.Errorf("intl.setLocale: unknown locale %q (no catalog loaded for it or its language)", args[0].Str())
 	}
 	c.locale = loc
 	return interpreter.Null(), nil
@@ -153,18 +153,18 @@ func (c *catalogs) trFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (int
 		if args[1].Kind != interpreter.KindMap {
 			return interpreter.Null(), fmt.Errorf("intl.tr: params must be a map, got %s", args[1].Kind)
 		}
-		params = make(map[string]string, len(args[1].Map))
-		for _, e := range args[1].Map {
+		params = make(map[string]string, len(args[1].Map()))
+		for _, e := range args[1].Map() {
 			if e.Key.Kind != interpreter.KindString {
 				return interpreter.Null(), fmt.Errorf("intl.tr: param key must be string, got %s", e.Key.Kind)
 			}
 			// A non-string value is rendered to its display form, so a caller can
 			// interpolate numbers without a manual convert.toString.
-			params[e.Key.Str] = e.Value.Display()
+			params[e.Key.Str()] = e.Value.Display()
 		}
 	}
 
-	out, err := interpolate(c.lookup(args[0].Str), params)
+	out, err := interpolate(c.lookup(args[0].Str()), params)
 	if err != nil {
 		return interpreter.Null(), err
 	}

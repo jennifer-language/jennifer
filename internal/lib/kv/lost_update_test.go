@@ -39,7 +39,7 @@ func TestLostUpdateRefused(t *testing.T) {
 	if now, _ := os.ReadFile(path); string(now) != string(written) {
 		t.Error("refused flush changed the file")
 	}
-	if got := call(t, r2.hasFn, b, str("y")); got.Bool {
+	if got := call(t, r2.hasFn, b, str("y")); got.Bool() {
 		t.Error("refused set left y in memory")
 	}
 	// The first store keeps flushing over its own writes.
@@ -49,8 +49,8 @@ func TestLostUpdateRefused(t *testing.T) {
 	// Reopened, the second store sees the first's content and may write.
 	call(t, r2.closeFn, b)
 	b = call(t, r2.openFileFn, str(path))
-	if got := call(t, r2.getFn, b, str("z")); got.Str != "3" {
-		t.Errorf("reopened get z = %q, want 3", got.Str)
+	if got := call(t, r2.getFn, b, str("z")); got.Str() != "3" {
+		t.Errorf("reopened get z = %q, want 3", got.Str())
 	}
 	call(t, r2.setFn, b, str("y"), str("2"), iv(0))
 	if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {

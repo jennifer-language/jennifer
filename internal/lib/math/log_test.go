@@ -50,16 +50,16 @@ func TestLogExactAtPowers(t *testing.T) {
 	// Subnormal arguments: Go's amd64 Log is off there (ln(1e-308) gave
 	// -708.718 instead of -709.196).
 	for _, c := range [][2]float64{{1e-308, -709.1962086421661}, {5e-324, -744.4400719213812}, {0x1p-1060, -1060 * math.Ln2}} {
-		if got := callOK(t, callable("ln"), f(c[0])).Float; !closeTo(got, c[1], 1e-12) {
+		if got := callOK(t, callable("ln"), f(c[0])).Float(); !closeTo(got, c[1], 1e-12) {
 			t.Errorf("ln(%v) = %v, want %v", c[0], got, c[1])
 		}
 	}
-	if got := callOK(t, callable("log10"), f(1e-310)).Float; !closeTo(got, -310, 1e-9) {
+	if got := callOK(t, callable("log10"), f(1e-310)).Float(); !closeTo(got, -310, 1e-9) {
 		t.Errorf("log10(1e-310) = %v", got)
 	}
 	callErr(t, callable("log"), f(0), f(10))
 	callErr(t, callable("log"), f(10), f(1))
-	if v := callOK(t, callable("log"), i(1000), i(10)); v.Float != 3 {
-		t.Errorf("math.log(1000, 10) = %v", v.Float)
+	if v := callOK(t, callable("log"), i(1000), i(10)); v.Float() != 3 {
+		t.Errorf("math.log(1000, 10) = %v", v.Float())
 	}
 }

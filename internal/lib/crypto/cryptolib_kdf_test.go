@@ -69,7 +69,7 @@ func TestDeriveKeyMatchesOldFunctions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s old: %v", c.algo, err)
 		}
-		if !bytes.Equal(got.Bytes, want.Bytes) || len(got.Bytes) != 42 {
+		if !bytes.Equal(got.Bytes(), want.Bytes()) || len(got.Bytes()) != 42 {
 			t.Errorf("%s: deriveKey differs from the old function", c.algo)
 		}
 	}

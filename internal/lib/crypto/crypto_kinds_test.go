@@ -27,7 +27,7 @@ func TestErrorKinds(t *testing.T) {
 		return func() error { _, err := fn(ctx, args); return err }
 	}
 	key32, nonce12, iv16 := make([]byte, 32), make([]byte, 12), make([]byte, 16)
-	box := opCall(t, encryptFn, s("aes-gcm"), b([]byte("hi")), b(key32), b(nonce12), b(nil)).Bytes
+	box := opCall(t, encryptFn, s("aes-gcm"), b([]byte("hi")), b(key32), b(nonce12), b(nil)).Bytes()
 	tampered := append([]byte(nil), box...)
 	tampered[0] ^= 1
 	ed := opCall(t, keypairFn, s("ed25519"))
@@ -37,9 +37,9 @@ func TestErrorKinds(t *testing.T) {
 	ec := opCall(t, keypairFn, s("p256"))
 	x := opCall(t, keypairFn, s("x25519"))
 	ml := opCall(t, keypairFn, s("mlkem768"))
-	cbcPad := opCall(t, blockEncryptFn, s("aes-cbc-nopad"), b(bytes.Repeat([]byte{0x20}, 16)), b(iv16[:16]), b(iv16)).Bytes
+	cbcPad := opCall(t, blockEncryptFn, s("aes-cbc-nopad"), b(bytes.Repeat([]byte{0x20}, 16)), b(iv16[:16]), b(iv16)).Bytes()
 	notPEM := []byte("-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n")
-	sealed := opCall(t, wrapFn, s("nacl-sealedbox"), b([]byte("hi")), b(opField(x, "public"))).Bytes
+	sealed := opCall(t, wrapFn, s("nacl-sealedbox"), b([]byte("hi")), b(opField(x, "public"))).Bytes()
 	sealed[len(sealed)-1] ^= 1
 	b64 := base64.RawURLEncoding.EncodeToString
 	hugeN := b64(bytes.Repeat([]byte{0xff}, 16384/8+2))
@@ -125,9 +125,9 @@ func TestVerifyMismatchIsFalse(t *testing.T) {
 	for _, algo := range []string{"ed25519", "rsa-sha256", "ecdsa-sha256"} {
 		kpAlgo := map[string]string{"ed25519": "ed25519", "rsa-sha256": "rsa2048", "ecdsa-sha256": "p256"}[algo]
 		kp := opCall(t, keypairFn, opStr(kpAlgo))
-		sig := opCall(t, signFn, opStr(algo), opBytes([]byte("a")), opBytes(opField(kp, "private"))).Bytes
+		sig := opCall(t, signFn, opStr(algo), opBytes([]byte("a")), opBytes(opField(kp, "private"))).Bytes()
 		v := opCall(t, verifyFn, opStr(algo), opBytes([]byte("b")), opBytes(sig), opBytes(opField(kp, "public")))
-		if v.Bool {
+		if v.Bool() {
 			t.Errorf("%s: a changed message verified", algo)
 		}
 	}

@@ -32,25 +32,25 @@ func makeZone(offset int64, name string) interpreter.Value {
 
 // extractZone unpacks a `time.Zone` argument into (offset, name).
 func extractZone(fnName string, v interpreter.Value) (int64, string, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "Zone" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "Zone" {
 		return 0, "", fmt.Errorf("%s: argument must be a time.Zone, got %s", fnName, v.Kind)
 	}
 	var offset int64
 	var name string
 	var sawOffset, sawName bool
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		switch f.Name {
 		case "offset":
 			if f.Value.Kind != interpreter.KindInt {
 				return 0, "", fmt.Errorf("%s: time.Zone.offset is not int (got %s)", fnName, f.Value.Kind)
 			}
-			offset = f.Value.Int
+			offset = f.Value.Int()
 			sawOffset = true
 		case "name":
 			if f.Value.Kind != interpreter.KindString {
 				return 0, "", fmt.Errorf("%s: time.Zone.name is not string (got %s)", fnName, f.Value.Kind)
 			}
-			name = f.Value.Str
+			name = f.Value.Str()
 			sawName = true
 		}
 	}
@@ -77,14 +77,14 @@ func zoneFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if args[1].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("time.zone: name must be string, got %s", args[1].Kind)
 	}
-	offset := args[0].Int
+	offset := args[0].Int()
 	if offset > maxOffsetSeconds || offset < -maxOffsetSeconds {
 		return interpreter.Null(), fmt.Errorf(
 			"time.zone: offset %d is outside +/-%d seconds (~26h cap)",
 			offset, maxOffsetSeconds,
 		)
 	}
-	return makeZone(offset, args[1].Str), nil
+	return makeZone(offset, args[1].Str()), nil
 }
 
 // inZoneFn implements `time.inZone($t, $z)`. The UTC instant is

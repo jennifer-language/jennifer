@@ -31,11 +31,11 @@ func DecodeOptionFields(extra ...parser.StructField) []parser.StructField {
 // naming the allowed range. Fields other than maxDepth / maxNodes are left to
 // the caller.
 func ReadDecodeOptions(fnName, ns string, o interpreter.Value, def DecodeCaps) (DecodeCaps, error) {
-	if o.Kind != interpreter.KindStruct || o.StructNS != ns || o.StructName != "DecodeOptions" {
+	if o.Kind != interpreter.KindStruct || o.StructNS() != ns || o.StructName() != "DecodeOptions" {
 		return DecodeCaps{}, fmt.Errorf("%s: argument 2 must be a %s.DecodeOptions, got %s", fnName, ns, o.Kind)
 	}
 	caps := def
-	for _, f := range o.Fields {
+	for _, f := range o.Fields() {
 		var limit *int
 		switch f.Name {
 		case "maxDepth":
@@ -48,7 +48,7 @@ func ReadDecodeOptions(fnName, ns string, o interpreter.Value, def DecodeCaps) (
 		if f.Value.Kind != interpreter.KindInt {
 			return DecodeCaps{}, fmt.Errorf("%s: %s must be int, got %s", fnName, f.Name, f.Value.Kind)
 		}
-		v := f.Value.Int
+		v := f.Value.Int()
 		if v < 0 || v > int64(*limit) {
 			return DecodeCaps{}, fmt.Errorf("%s: %s must be 0 (the default) to %d, got %d", fnName, f.Name, *limit, v)
 		}

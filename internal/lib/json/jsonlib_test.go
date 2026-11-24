@@ -21,7 +21,7 @@ func enc(t *testing.T, v interpreter.Value) string {
 	if err != nil {
 		t.Fatalf("encode(%v): %v", v, err)
 	}
-	return out.Str
+	return out.Str()
 }
 
 // dec decodes s and materialises the node tree as interpreter Values, so the
@@ -43,13 +43,13 @@ func toValue(n node) interpreter.Value {
 		for i, e := range n.Elems() {
 			out[i] = toValue(e)
 		}
-		return interpreter.Value{Kind: interpreter.KindList, List: out}
+		return interpreter.GenericListVal(out)
 	case doctree.KindMap:
 		entries := make([]interpreter.MapEntry, n.Len())
 		for i, e := range n.Elems() {
 			entries[i] = interpreter.MapEntry{Key: interpreter.StringVal(n.Key(i)), Value: toValue(e)}
 		}
-		return interpreter.Value{Kind: interpreter.KindMap, Map: entries}
+		return interpreter.GenericMapVal(entries)
 	}
 	return n.ScalarValue()
 }
@@ -113,14 +113,14 @@ func TestEncodePretty(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "{\n  \"a\": 1\n}"
-	if out.Str != want {
-		t.Errorf("pretty = %q, want %q", out.Str, want)
+	if out.Str() != want {
+		t.Errorf("pretty = %q, want %q", out.Str(), want)
 	}
 	// empty collections stay compact even when pretty
 	empty := interpreter.ListVal(parser.PrimitiveType(parser.TypeInt), nil)
 	got, _ := encodeFn([]interpreter.Value{empty}, true)
-	if got.Str != "[]" {
-		t.Errorf("empty pretty list = %q, want []", got.Str)
+	if got.Str() != "[]" {
+		t.Errorf("empty pretty list = %q, want []", got.Str())
 	}
 }
 
@@ -145,13 +145,13 @@ func TestDecodeScalars(t *testing.T) {
 	if v := dec(t, "null"); v.Kind != interpreter.KindNull {
 		t.Errorf("null -> %v", v.Kind)
 	}
-	if v := dec(t, "true"); v.Kind != interpreter.KindBool || !v.Bool {
+	if v := dec(t, "true"); v.Kind != interpreter.KindBool || !v.Bool() {
 		t.Errorf("true -> %v", v)
 	}
-	if v := dec(t, "42"); v.Kind != interpreter.KindInt || v.Int != 42 {
+	if v := dec(t, "42"); v.Kind != interpreter.KindInt || v.Int() != 42 {
 		t.Errorf("42 -> %v", v)
 	}
-	if v := dec(t, "-7"); v.Kind != interpreter.KindInt || v.Int != -7 {
+	if v := dec(t, "-7"); v.Kind != interpreter.KindInt || v.Int() != -7 {
 		t.Errorf("-7 -> %v", v)
 	}
 	// integral vs non-integral
@@ -160,26 +160,26 @@ func TestDecodeScalars(t *testing.T) {
 			t.Errorf("%s -> %v, want float", s, v.Kind)
 		}
 	}
-	if v := dec(t, `"a\nb"`); v.Kind != interpreter.KindString || v.Str != "a\nb" {
-		t.Errorf("escaped string -> %q", v.Str)
+	if v := dec(t, `"a\nb"`); v.Kind != interpreter.KindString || v.Str() != "a\nb" {
+		t.Errorf("escaped string -> %q", v.Str())
 	}
 	// \u escape + surrogate pair (emoji)
-	if v := dec(t, `"A😀"`); v.Str != "A\U0001F600" {
-		t.Errorf("unicode escapes -> %q", v.Str)
+	if v := dec(t, `"A😀"`); v.Str() != "A\U0001F600" {
+		t.Errorf("unicode escapes -> %q", v.Str())
 	}
 }
 
 func TestDecodeCompound(t *testing.T) {
 	v := dec(t, `[1, 2, 3]`)
-	if v.Kind != interpreter.KindList || len(v.List) != 3 || v.List[0].Int != 1 {
+	if v.Kind != interpreter.KindList || len(v.List()) != 3 || v.List()[0].Int() != 1 {
 		t.Fatalf("array -> %v", v)
 	}
 	o := dec(t, `{"a": 1, "b": [true, null]}`)
-	if o.Kind != interpreter.KindMap || len(o.Map) != 2 {
+	if o.Kind != interpreter.KindMap || len(o.Map()) != 2 {
 		t.Fatalf("object -> %v", o)
 	}
-	if o.Map[0].Key.Str != "a" || o.Map[0].Value.Int != 1 {
-		t.Errorf("object[a] wrong: %v", o.Map[0])
+	if o.Map()[0].Key.Str() != "a" || o.Map()[0].Value.Int() != 1 {
+		t.Errorf("object[a] wrong: %v", o.Map()[0])
 	}
 	// A duplicate key is an error (as in yaml / toml), positioned at the second
 	// copy, at any depth; equal keys in different objects are fine.
@@ -192,7 +192,7 @@ func TestDecodeCompound(t *testing.T) {
 	if _, err := decodeFn([]interpreter.Value{interpreter.StringVal(`{"k": 1, "x": 2, "k": 3}`)}); err == nil || !strings.Contains(err.Error(), "line 1, column 18") {
 		t.Errorf("duplicate-key error should point at the second key (1:18), got %v", err)
 	}
-	if o := dec(t, `{"k": {"k": 1}, "j": {"k": 2}}`); len(o.Map) != 2 {
+	if o := dec(t, `{"k": {"k": 1}, "j": {"k": 2}}`); len(o.Map()) != 2 {
 		t.Errorf("same key in different objects must decode: %v", o)
 	}
 }
@@ -380,8 +380,8 @@ func TestDecodedObjectIndexedLookup(t *testing.T) {
 	ctx := interpreter.BuiltinCtx{}
 	for i := 0; i < n; i++ {
 		v, err := asIntFn(ctx, []interpreter.Value{doc, interpreter.StringVal("/k" + strconv.Itoa(i))})
-		if err != nil || v.Int != int64(i) {
-			t.Fatalf("key k%d: got %d (err %v)", i, v.Int, err)
+		if err != nil || v.Int() != int64(i) {
+			t.Fatalf("key k%d: got %d (err %v)", i, v.Int(), err)
 		}
 	}
 	if _, err := asIntFn(ctx, []interpreter.Value{doc, interpreter.StringVal("/missing")}); err == nil {

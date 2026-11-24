@@ -95,15 +95,15 @@ func makeStream(id int64) interpreter.Value {
 }
 
 func extractStreamID(fnName string, v interpreter.Value) (int64, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "Stream" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "Stream" {
 		return 0, fmt.Errorf("%s: argument must be a crc.Stream, got %s", fnName, v.Kind)
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == "id" {
 			if f.Value.Kind != interpreter.KindInt {
 				return 0, fmt.Errorf("%s: crc.Stream.id is not int (got %s)", fnName, f.Value.Kind)
 			}
-			return f.Value.Int, nil
+			return f.Value.Int(), nil
 		}
 	}
 	return 0, fmt.Errorf("%s: crc.Stream has no id field", fnName)
@@ -122,12 +122,12 @@ func computeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if args[1].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("crc.compute: second argument must be bytes, got %s", args[1].Kind)
 	}
-	spec, ok := algoSpecs[args[0].Str]
+	spec, ok := algoSpecs[args[0].Str()]
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("crc.compute: unknown algorithm %q; known: %s", args[0].Str, algoList)
+		return interpreter.Null(), fmt.Errorf("crc.compute: unknown algorithm %q; known: %s", args[0].Str(), algoList)
 	}
 	h := spec.newStream()
-	h.Write(args[1].Bytes)
+	h.Write(args[1].Bytes())
 	out := h.Sum(nil)
 	// h.Sum already returns big-endian bytes of the natural width for
 	// Go's crc32/crc64 helpers, but assert the width as a safety net.
@@ -155,9 +155,9 @@ func streamFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("crc.stream: algo must be string, got %s", args[0].Kind)
 	}
-	spec, ok := algoSpecs[args[0].Str]
+	spec, ok := algoSpecs[args[0].Str()]
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("crc.stream: unknown algorithm %q; known: %s", args[0].Str, algoList)
+		return interpreter.Null(), fmt.Errorf("crc.stream: unknown algorithm %q; known: %s", args[0].Str(), algoList)
 	}
 	streamsMu.Lock()
 	if len(streams) >= maxStreams {
@@ -189,7 +189,7 @@ func updateFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		return interpreter.Null(), interpreter.KindedError("closed", fmt.Sprintf("crc.update: stream %d has already been finalized or discarded, or never existed", id))
 	}
 	entry.mu.Lock()
-	entry.h.Write(args[1].Bytes)
+	entry.h.Write(args[1].Bytes())
 	entry.mu.Unlock()
 	return interpreter.Null(), nil
 }

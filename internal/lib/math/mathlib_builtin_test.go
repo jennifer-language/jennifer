@@ -18,17 +18,17 @@ func ctx() interpreter.BuiltinCtx    { return interpreter.BuiltinCtx{} }
 
 func TestMinMaxBuiltins(t *testing.T) {
 	// int/int keeps the int kind (fast path).
-	if v, _ := minFn(ctx(), []interpreter.Value{iv(3), iv(5)}); v.Kind != interpreter.KindInt || v.Int != 3 {
+	if v, _ := minFn(ctx(), []interpreter.Value{iv(3), iv(5)}); v.Kind != interpreter.KindInt || v.Int() != 3 {
 		t.Errorf("min(3,5) = %+v, want int 3", v)
 	}
-	if v, _ := maxFn(ctx(), []interpreter.Value{iv(3), iv(5)}); v.Int != 5 {
+	if v, _ := maxFn(ctx(), []interpreter.Value{iv(3), iv(5)}); v.Int() != 5 {
 		t.Errorf("max(3,5) = %+v, want 5", v)
 	}
 	// mixed int/float promotes to float.
-	if v, _ := maxFn(ctx(), []interpreter.Value{iv(3), fl(2.5)}); v.Kind != interpreter.KindFloat || v.Float != 3.0 {
+	if v, _ := maxFn(ctx(), []interpreter.Value{iv(3), fl(2.5)}); v.Kind != interpreter.KindFloat || v.Float() != 3.0 {
 		t.Errorf("max(3, 2.5) = %+v, want float 3.0", v)
 	}
-	if v, _ := minFn(ctx(), []interpreter.Value{fl(2.5), iv(3)}); v.Float != 2.5 {
+	if v, _ := minFn(ctx(), []interpreter.Value{fl(2.5), iv(3)}); v.Float() != 2.5 {
 		t.Errorf("min(2.5, 3) = %+v, want 2.5", v)
 	}
 	// errors: non-numeric operand, wrong arity.
@@ -41,10 +41,10 @@ func TestMinMaxBuiltins(t *testing.T) {
 }
 
 func TestSqrtBuiltin(t *testing.T) {
-	if v, _ := sqrtFn(ctx(), []interpreter.Value{fl(9.0)}); v.Kind != interpreter.KindFloat || v.Float != 3.0 {
+	if v, _ := sqrtFn(ctx(), []interpreter.Value{fl(9.0)}); v.Kind != interpreter.KindFloat || v.Float() != 3.0 {
 		t.Errorf("sqrt(9) = %+v, want 3.0", v)
 	}
-	if v, _ := sqrtFn(ctx(), []interpreter.Value{iv(16)}); v.Float != 4.0 { // int accepted
+	if v, _ := sqrtFn(ctx(), []interpreter.Value{iv(16)}); v.Float() != 4.0 { // int accepted
 		t.Errorf("sqrt(16) = %+v, want 4.0", v)
 	}
 	if _, err := sqrtFn(ctx(), []interpreter.Value{fl(-1.0)}); err == nil {
@@ -59,10 +59,10 @@ func TestSqrtBuiltin(t *testing.T) {
 }
 
 func TestPowBuiltin(t *testing.T) {
-	if v, _ := powFn(ctx(), []interpreter.Value{fl(2.0), fl(10.0)}); v.Float != 1024.0 {
+	if v, _ := powFn(ctx(), []interpreter.Value{fl(2.0), fl(10.0)}); v.Float() != 1024.0 {
 		t.Errorf("pow(2,10) = %+v, want 1024", v)
 	}
-	if v, _ := powFn(ctx(), []interpreter.Value{iv(2), iv(3)}); v.Float != 8.0 {
+	if v, _ := powFn(ctx(), []interpreter.Value{iv(2), iv(3)}); v.Float() != 8.0 {
 		t.Errorf("pow(2,3) = %+v, want 8", v)
 	}
 	// A result that overflows to infinity is rejected (strict).
@@ -88,10 +88,10 @@ func TestRandSeededDeterminism(t *testing.T) {
 			if err != nil {
 				t.Fatalf("rand: %v", err)
 			}
-			if v.Kind != interpreter.KindFloat || v.Float < 0 || v.Float >= 1 {
+			if v.Kind != interpreter.KindFloat || v.Float() < 0 || v.Float() >= 1 {
 				t.Fatalf("rand() = %+v, want a float in [0,1)", v)
 			}
-			out[k] = v.Float
+			out[k] = v.Float()
 		}
 		return out
 	}
@@ -122,13 +122,13 @@ func TestRandIntBuiltin(t *testing.T) {
 		if err != nil {
 			t.Fatalf("randInt: %v", err)
 		}
-		if v.Kind != interpreter.KindInt || v.Int < 1 || v.Int > 6 {
+		if v.Kind != interpreter.KindInt || v.Int() < 1 || v.Int() > 6 {
 			t.Fatalf("randInt(1,6) = %+v, out of [1,6]", v)
 		}
 	}
 	// lo == hi yields that value.
-	if v, _ := randIntFn(ctx(), []interpreter.Value{iv(5), iv(5)}); v.Int != 5 {
-		t.Errorf("randInt(5,5) = %d, want 5", v.Int)
+	if v, _ := randIntFn(ctx(), []interpreter.Value{iv(5), iv(5)}); v.Int() != 5 {
+		t.Errorf("randInt(5,5) = %d, want 5", v.Int())
 	}
 	// errors: lo > hi, non-int operand, arity.
 	if _, err := randIntFn(ctx(), []interpreter.Value{iv(6), iv(1)}); err == nil {
@@ -155,8 +155,8 @@ func TestInstallAndSpecialBuiltins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lgamma(5): %v", err)
 	}
-	if v.Kind != interpreter.KindFloat || v.Float < 3.17 || v.Float > 3.18 {
-		t.Errorf("lgamma(5) = %v, want ~3.178", v.Float)
+	if v.Kind != interpreter.KindFloat || v.Float() < 3.17 || v.Float() > 3.18 {
+		t.Errorf("lgamma(5) = %v, want ~3.178", v.Float())
 	}
 	// The exported special functions the stats distributions draw on.
 	if p, ok := RegularizedGammaP(2.0, 2.0); !ok || p <= 0 || p >= 1 {

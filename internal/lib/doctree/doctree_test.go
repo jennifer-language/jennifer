@@ -206,8 +206,8 @@ func TestOptionalSurface(t *testing.T) {
 		}
 	}
 	got, err := testLib.Builtin("typeOf")(interpreter.BuiltinCtx{}, []interpreter.Value{testLib.Wrap(Datetime("x", 0))})
-	if err != nil || got.Str != "datetime" {
-		t.Errorf("typeOf datetime = %q, %v", got.Str, err)
+	if err != nil || got.Str() != "datetime" {
+		t.Errorf("typeOf datetime = %q, %v", got.Str(), err)
 	}
 	if _, err := testLib.Builtin("get")(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(1)}); err == nil || !strings.Contains(err.Error(), "t.get: argument must be a t.Value") {
 		t.Errorf("wrong argument: %v", err)
@@ -221,7 +221,7 @@ func TestZeroAndCrossLibraryEquality(t *testing.T) {
 		t.Error("zero should equal null")
 	}
 	other := &Lib{Name: "t"} // same namespace, different library
-	if testLib.Wrap(Null()).Obj == nil || (&payload{root: Null(), lib: testLib}).EqualNative(&payload{root: Null(), lib: other}) {
+	if testLib.Wrap(Null()).Obj() == nil || (&payload{root: Null(), lib: testLib}).EqualNative(&payload{root: Null(), lib: other}) {
 		t.Error("payloads of different libraries should not be equal")
 	}
 }
@@ -234,8 +234,8 @@ func TestAsFloatRefusesNonFinite(t *testing.T) {
 		if _, err := testLib.Builtin("asFloat")(interpreter.BuiltinCtx{}, []interpreter.Value{v}); err == nil || !strings.Contains(err.Error(), "non-finite") {
 			t.Errorf("asFloat(%v): %v", f, err)
 		}
-		if got, _ := testLib.Builtin("typeOf")(interpreter.BuiltinCtx{}, []interpreter.Value{v}); got.Str != "float" {
-			t.Errorf("typeOf(%v) = %q", f, got.Str)
+		if got, _ := testLib.Builtin("typeOf")(interpreter.BuiltinCtx{}, []interpreter.Value{v}); got.Str() != "float" {
+			t.Errorf("typeOf(%v) = %q", f, got.Str())
 		}
 	}
 }
@@ -372,7 +372,7 @@ func TestAsDatetimeRange(t *testing.T) {
 			t.Errorf("%s: %v", text, err)
 			continue
 		}
-		if got := v.Fields[0].Value.Int; got != want {
+		if got := v.Fields()[0].Value.Int(); got != want {
 			t.Errorf("%s: nanos %d, want %d", text, got, want)
 		}
 	}

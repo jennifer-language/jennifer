@@ -55,12 +55,12 @@ func TestReadLines(t *testing.T) {
 			if v.Kind != interpreter.KindList {
 				t.Fatalf("got %s, want List", v.Kind)
 			}
-			if len(v.List) != len(tc.want) {
-				t.Fatalf("got %d lines, want %d", len(v.List), len(tc.want))
+			if len(v.List()) != len(tc.want) {
+				t.Fatalf("got %d lines, want %d", len(v.List()), len(tc.want))
 			}
 			for i, w := range tc.want {
-				if v.List[i].Kind != interpreter.KindString || v.List[i].Str != w {
-					t.Errorf("line %d: got %s(%q), want %q", i, v.List[i].Kind, v.List[i].Str, w)
+				if v.List()[i].Kind != interpreter.KindString || v.List()[i].Str() != w {
+					t.Errorf("line %d: got %s(%q), want %q", i, v.List()[i].Kind, v.List()[i].Str(), w)
 				}
 			}
 		})
@@ -79,8 +79,8 @@ func TestReadLineBareCRPreserved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Str != "x\r" {
-		t.Errorf("got %q, want %q (bare trailing CR must be preserved)", v.Str, "x\r")
+	if v.Str() != "x\r" {
+		t.Errorf("got %q, want %q (bare trailing CR must be preserved)", v.Str(), "x\r")
 	}
 }
 
@@ -105,8 +105,8 @@ func TestReadLineSingleLine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Kind != interpreter.KindString || v.Str != "hello" {
-		t.Errorf("got %s(%q), want String(%q)", v.Kind, v.Str, "hello")
+	if v.Kind != interpreter.KindString || v.Str() != "hello" {
+		t.Errorf("got %s(%q), want String(%q)", v.Kind, v.Str(), "hello")
 	}
 }
 
@@ -120,8 +120,8 @@ func TestReadLineStripsCRLF(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Str != "hello" {
-		t.Errorf("got %q, want %q", v.Str, "hello")
+	if v.Str() != "hello" {
+		t.Errorf("got %q, want %q", v.Str(), "hello")
 	}
 }
 
@@ -132,15 +132,15 @@ func TestReadLineFinalUnterminatedLine(t *testing.T) {
 	ctx := interpreter.BuiltinCtx{Out: &bytes.Buffer{}, In: strings.NewReader("a\nb")}
 
 	v, err := callReadLine(in, ctx, nil)
-	if err != nil || v.Str != "a" {
-		t.Fatalf("first line: v=%q err=%v", v.Str, err)
+	if err != nil || v.Str() != "a" {
+		t.Fatalf("first line: v=%q err=%v", v.Str(), err)
 	}
 	v, err = callReadLine(in, ctx, nil)
 	if err != nil {
 		t.Fatalf("unterminated final line: %v", err)
 	}
-	if v.Str != "b" {
-		t.Errorf("got %q, want %q", v.Str, "b")
+	if v.Str() != "b" {
+		t.Errorf("got %q, want %q", v.Str(), "b")
 	}
 	_, err = callReadLine(in, ctx, nil)
 	if err == nil || !strings.Contains(err.Error(), "end of input") {
@@ -171,8 +171,8 @@ func TestReadLineWithPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Str != "answer" {
-		t.Errorf("got %q", v.Str)
+	if v.Str() != "answer" {
+		t.Errorf("got %q", v.Str())
 	}
 	if out.String() != "name: " {
 		t.Errorf("prompt got %q, want %q", out.String(), "name: ")
@@ -203,8 +203,8 @@ func TestEofEmptyInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Kind != interpreter.KindBool || !v.Bool {
-		t.Errorf("eof on empty input: got %s(%v), want Bool(true)", v.Kind, v.Bool)
+	if v.Kind != interpreter.KindBool || !v.Bool() {
+		t.Errorf("eof on empty input: got %s(%v), want Bool(true)", v.Kind, v.Bool())
 	}
 }
 
@@ -218,7 +218,7 @@ func TestEofBeforeReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Bool {
+	if v.Bool() {
 		t.Errorf("eof should be false with data buffered")
 	}
 }
@@ -236,7 +236,7 @@ func TestEofAfterAllConsumed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if !v.Bool {
+	if !v.Bool() {
 		t.Errorf("eof should be true after last line consumed")
 	}
 }
@@ -252,7 +252,7 @@ func TestEofStickyOnceTrue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if !v.Bool {
+	if !v.Bool() {
 		t.Errorf("eof should stay true on repeat calls")
 	}
 }
@@ -270,14 +270,14 @@ func TestReadEofLoop(t *testing.T) {
 		if err != nil {
 			t.Fatalf("eof: %v", err)
 		}
-		if v.Bool {
+		if v.Bool() {
 			break
 		}
 		line, err := callReadLine(in, ctx, nil)
 		if err != nil {
 			t.Fatalf("readLine: %v", err)
 		}
-		got = append(got, line.Str)
+		got = append(got, line.Str())
 	}
 	if len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "c" {
 		t.Errorf("got %v, want [a b c]", got)
@@ -351,7 +351,7 @@ func TestReadBytesHugeCountShortStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Kind != interpreter.KindBytes || string(v.Bytes) != "hello" {
-		t.Errorf("got %s(%q), want the 5 available bytes", v.Kind, string(v.Bytes))
+	if v.Kind != interpreter.KindBytes || string(v.Bytes()) != "hello" {
+		t.Errorf("got %s(%q), want the 5 available bytes", v.Kind, string(v.Bytes()))
 	}
 }

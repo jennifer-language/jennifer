@@ -216,7 +216,7 @@ func nodeAndPath(fn string, args []interpreter.Value) ([]pathStep, node, error) 
 	if args[1].Kind != interpreter.KindString {
 		return nil, node{}, fmt.Errorf("%s: path must be string, got %s", fn, args[1].Kind)
 	}
-	steps, err := parsePath(fn, args[1].Str)
+	steps, err := parsePath(fn, args[1].Str())
 	if err != nil {
 		return nil, node{}, err
 	}
@@ -237,12 +237,12 @@ func prefixMap(fn string, v interpreter.Value) (map[string]string, error) {
 	if v.Kind != interpreter.KindMap {
 		return nil, fmt.Errorf("%s: namespace map must be a map of string to string, got %s", fn, v.Kind)
 	}
-	ns := make(map[string]string, len(v.Map))
-	for _, e := range v.Map {
+	ns := make(map[string]string, len(v.Map()))
+	for _, e := range v.Map() {
 		if e.Key.Kind != interpreter.KindString || e.Value.Kind != interpreter.KindString {
 			return nil, fmt.Errorf("%s: namespace map must be a map of string to string", fn)
 		}
-		ns[e.Key.Str] = e.Value.Str
+		ns[e.Key.Str()] = e.Value.Str()
 	}
 	return ns, nil
 }
@@ -334,7 +334,7 @@ func nodeAndName(fn string, args []interpreter.Value) (node, string, error) {
 	if err := requireElement(fn, n); err != nil {
 		return node{}, "", err
 	}
-	return n, args[1].Str, nil
+	return n, args[1].Str(), nil
 }
 
 // attrsFn: xml.attrs(node) -> list of string, the attribute names in order.
@@ -382,7 +382,7 @@ func getFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	}
 	matches := resolvePath(n, steps)
 	if len(matches) == 0 {
-		return interpreter.Null(), fmt.Errorf("xml.get: no element matches path %q", args[1].Str)
+		return interpreter.Null(), fmt.Errorf("xml.get: no element matches path %q", args[1].Str())
 	}
 	return wrap(matches[0]), nil
 }
@@ -490,7 +490,7 @@ func nodeURILocal(fn string, args []interpreter.Value) (node, string, string, er
 	if err := requireElement(fn, n); err != nil {
 		return node{}, "", "", err
 	}
-	return n, args[1].Str, args[2].Str, nil
+	return n, args[1].Str(), args[2].Str(), nil
 }
 
 // attrNSFn: xml.attrNS(node, uri, local) -> the value of the attribute named

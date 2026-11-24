@@ -186,12 +186,12 @@ func errKind(err error) (string, string) {
 		return "runtime", err.Error()
 	}
 	var kind, msg string
-	for _, f := range sig.Value.Fields {
+	for _, f := range sig.Value.Fields() {
 		switch f.Name {
 		case "kind":
-			kind = f.Value.Str
+			kind = f.Value.Str()
 		case "message":
-			msg = f.Value.Str
+			msg = f.Value.Str()
 		}
 	}
 	return kind, msg
@@ -212,8 +212,8 @@ func TestHangup(t *testing.T) {
 		t.Fatal(err)
 	}
 	v, err := readFn(interpreter.BuiltinCtx{}, []Value{p, interpreter.IntVal(16)})
-	if err != nil || string(v.Bytes) != "hi" {
-		t.Fatalf("read before hangup: %q %v", v.Bytes, err)
+	if err != nil || string(v.Bytes()) != "hi" {
+		t.Fatalf("read before hangup: %q %v", v.Bytes(), err)
 	}
 	master.Close()
 	for i := 0; i < 3; i++ {

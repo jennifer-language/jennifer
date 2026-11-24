@@ -41,7 +41,7 @@ func encoded(t *testing.T, v interpreter.Value) string {
 	t.Helper()
 	return call(t, func(_ interpreter.BuiltinCtx, a []interpreter.Value) (interpreter.Value, error) {
 		return encodeFn(a, false)
-	}, v).Str
+	}, v).Str()
 }
 
 // Names resolve against the declarations in scope: an unprefixed element takes
@@ -60,27 +60,27 @@ func TestNamespaceResolution(t *testing.T) {
 	}
 	for _, c := range cases {
 		n := mustGet(t, doc, c.path)
-		if got := call(t, namespaceFn, n).Str; got != c.ns {
+		if got := call(t, namespaceFn, n).Str(); got != c.ns {
 			t.Errorf("namespace(%q) = %q, want %q", c.path, got, c.ns)
 		}
-		if got := call(t, localNameFn, n).Str; got != c.local {
+		if got := call(t, localNameFn, n).Str(); got != c.local {
 			t.Errorf("localName(%q) = %q, want %q", c.path, got, c.local)
 		}
 	}
 	for _, c := range []struct{ uri, local, want string }{{"", "a", "1"}, {"urn:p", "b", "2"}, {xmlNamespace, "lang", "en"}} {
-		if got := call(t, attrNSFn, doc, sval(c.uri), sval(c.local)).Str; got != c.want {
+		if got := call(t, attrNSFn, doc, sval(c.uri), sval(c.local)).Str(); got != c.want {
 			t.Errorf("attrNS(%q, %q) = %q, want %q", c.uri, c.local, got, c.want)
 		}
 	}
 	// An unprefixed attribute is not in the default namespace.
-	if call(t, hasAttrNSFn, doc, sval("urn:d"), sval("a")).Bool {
+	if call(t, hasAttrNSFn, doc, sval("urn:d"), sval("a")).Bool() {
 		t.Error("unprefixed attribute a must not be in the default namespace")
 	}
-	if call(t, hasAttrNSFn, doc, sval("urn:p"), sval("a")).Bool {
+	if call(t, hasAttrNSFn, doc, sval("urn:p"), sval("a")).Bool() {
 		t.Error("hasAttrNS({urn:p}a) should be false")
 	}
 	// The qualified-name accessors are unchanged.
-	if got := call(t, tagFn, mustGet(t, doc, "p:c")).Str; got != "p:c" {
+	if got := call(t, tagFn, mustGet(t, doc, "p:c")).Str(); got != "p:c" {
 		t.Errorf("tag = %q", got)
 	}
 }
@@ -90,14 +90,14 @@ func TestLookupPrefixOnSubtree(t *testing.T) {
 	doc := mustDecode(t, `<r xmlns="urn:d" xmlns:p="urn:p"><s xmlns:q="urn:q"><t/></s></r>`)
 	sub := mustGet(t, doc, "s/t")
 	for prefix, want := range map[string]string{"": "urn:d", "p": "urn:p", "q": "urn:q", "xml": xmlNamespace} {
-		if got := call(t, lookupPrefixFn, sub, sval(prefix)).Str; got != want {
+		if got := call(t, lookupPrefixFn, sub, sval(prefix)).Str(); got != want {
 			t.Errorf("lookupPrefix(%q) = %q, want %q", prefix, got, want)
 		}
 	}
 	if _, err := lookupPrefixFn(noCtx, []interpreter.Value{sub, sval("zz")}); err == nil {
 		t.Error("an unbound prefix should error")
 	}
-	if got := call(t, lookupPrefixFn, mustDecode(t, `<a/>`), sval("")).Str; got != "" {
+	if got := call(t, lookupPrefixFn, mustDecode(t, `<a/>`), sval("")).Str(); got != "" {
 		t.Errorf("undeclared default = %q, want empty", got)
 	}
 }
@@ -148,28 +148,28 @@ func TestPathPrefixMap(t *testing.T) {
 	m := nsMap("g", kmlNS)
 	for name, doc := range map[string]interpreter.Value{"default": plain, "prefixed": prefixed} {
 		got := call(t, findAllFn, doc, sval("g:Document/g:Placemark"), m)
-		if len(got.List) != 2 {
-			t.Errorf("%s: g:Document/g:Placemark = %d, want 2", name, len(got.List))
+		if len(got.List()) != 2 {
+			t.Errorf("%s: g:Document/g:Placemark = %d, want 2", name, len(got.List()))
 		}
-		if !call(t, hasFn, doc, sval("g:Document/g:Placemark[2]"), m).Bool {
+		if !call(t, hasFn, doc, sval("g:Document/g:Placemark[2]"), m).Bool() {
 			t.Errorf("%s: indexed step should match", name)
 		}
-		if n := len(call(t, findAllFn, doc, sval("*:Document/*:Placemark")).List); n != 2 {
+		if n := len(call(t, findAllFn, doc, sval("*:Document/*:Placemark")).List()); n != 2 {
 			t.Errorf("%s: *:Document/*:Placemark = %d, want 2", name, n)
 		}
 	}
 	// Verbatim matching without a map is unchanged.
-	if n := len(call(t, findAllFn, plain, sval("Document/Placemark")).List); n != 2 {
+	if n := len(call(t, findAllFn, plain, sval("Document/Placemark")).List()); n != 2 {
 		t.Errorf("verbatim on default-ns doc = %d, want 2", n)
 	}
-	if n := len(call(t, findAllFn, prefixed, sval("Document")).List); n != 0 {
+	if n := len(call(t, findAllFn, prefixed, sval("Document")).List()); n != 0 {
 		t.Errorf("verbatim unprefixed step on prefixed doc = %d, want 0", n)
 	}
 	// With a map, an unprefixed step is in no namespace unless "" is mapped.
-	if call(t, hasFn, plain, sval("Document"), m).Bool {
+	if call(t, hasFn, plain, sval("Document"), m).Bool() {
 		t.Error("unprefixed step with a map should not match a namespaced element")
 	}
-	if !call(t, hasFn, plain, sval("Document"), nsMap("", kmlNS)).Bool {
+	if !call(t, hasFn, plain, sval("Document"), nsMap("", kmlNS)).Bool() {
 		t.Error(`a "" entry should give unprefixed steps that namespace`)
 	}
 	if _, err := findAllFn(noCtx, []interpreter.Value{plain, sval("x:Document"), m}); err == nil {
@@ -220,7 +220,7 @@ func TestBuildNamespaces(t *testing.T) {
 		t.Errorf("built feed:\n got %s\nwant %s", got, want)
 	}
 	back := mustDecode(t, want)
-	if got := call(t, attrNSFn, mustGet(t, back, "entry"), sval(dcNS), sval("id")).Str; got != "7" {
+	if got := call(t, attrNSFn, mustGet(t, back, "entry"), sval(dcNS), sval("id")).Str(); got != "7" {
 		t.Errorf("attrNS after round-trip = %q", got)
 	}
 	if got := encoded(t, back); got != want {
@@ -240,8 +240,8 @@ func TestBuildNamespaces(t *testing.T) {
 	// setAttrNS replaces the attribute with the same expanded name.
 	el := call(t, setAttrNSFn, creator, sval(dcNS), sval("dc:x"), sval("1"))
 	el = call(t, setAttrNSFn, el, sval(dcNS), sval("dc:x"), sval("2"))
-	if got := call(t, attrNSFn, el, sval(dcNS), sval("x")).Str; got != "2" || len(call(t, attrsFn, el).List) != 1 {
-		t.Errorf("setAttrNS replace: value %q, %d attrs", got, len(call(t, attrsFn, el).List))
+	if got := call(t, attrNSFn, el, sval(dcNS), sval("x")).Str(); got != "2" || len(call(t, attrsFn, el).List()) != 1 {
+		t.Errorf("setAttrNS replace: value %q, %d attrs", got, len(call(t, attrsFn, el).List()))
 	}
 	for _, bad := range [][]string{{"", "p:a"}, {"urn:x", "xmlns:a"}, {"urn:x", "a:b:c"}, {"urn:x", "xml:a"}, {xmlNamespace, "a"}} {
 		if _, err := elementNSFn(noCtx, []interpreter.Value{sval(bad[0]), sval(bad[1])}); err == nil {
@@ -292,10 +292,10 @@ func TestDecodeFragmentWithPrefixMap(t *testing.T) {
 		t.Fatalf("decode with seed: %v", err)
 	}
 	v := wrap(root)
-	if got := call(t, namespaceFn, mustGet(t, v, "x:ext")).Str; got != "urn:x" {
+	if got := call(t, namespaceFn, mustGet(t, v, "x:ext")).Str(); got != "urn:x" {
 		t.Errorf("x:ext namespace = %q", got)
 	}
-	if got := call(t, lookupPrefixFn, v, sval("")).Str; got != "urn:d" {
+	if got := call(t, lookupPrefixFn, v, sval("")).Str(); got != "urn:d" {
 		t.Errorf("seeded default = %q", got)
 	}
 	want := `<gpx:wpt lat="1" xmlns:gpx="urn:gpx"><gpx:name>a</gpx:name><x:ext xmlns:x="urn:x"/></gpx:wpt>`

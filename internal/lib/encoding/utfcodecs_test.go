@@ -13,12 +13,12 @@ import (
 
 func encodeAs(t *testing.T, codec, s string) []byte {
 	t.Helper()
-	return callFn(t, encodeFn, interpreter.StringVal(codec), interpreter.StringVal(s)).Bytes
+	return callFn(t, encodeFn, interpreter.StringVal(codec), interpreter.StringVal(s)).Bytes()
 }
 
 func decodeAs(t *testing.T, codec string, b []byte) string {
 	t.Helper()
-	return callFn(t, decodeFn, interpreter.StringVal(codec), interpreter.BytesVal(b)).Str
+	return callFn(t, decodeFn, interpreter.StringVal(codec), interpreter.BytesVal(b)).Str()
 }
 
 // "aé€😀": ASCII, two-byte, three-byte and a supplementary-plane rune

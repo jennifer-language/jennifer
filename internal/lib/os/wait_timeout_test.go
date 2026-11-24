@@ -69,23 +69,23 @@ func TestWaitTimeoutLeavesProcessRunning(t *testing.T) {
 	if _, err := waitBytesTimeoutFn(ctx, []interpreter.Value{p, interpreter.IntVal(0)}); kindOf(err) != "timeout" {
 		t.Errorf("poll of a running process: err = %v, want a timeout", err)
 	}
-	if polled, _ := pollFn(ctx, []interpreter.Value{p}); polled.Bool {
+	if polled, _ := pollFn(ctx, []interpreter.Value{p}); polled.Bool() {
 		t.Error("process finished early; the test needs it running")
 	}
 	r, err := waitTimeoutFn(ctx, []interpreter.Value{p, interpreter.IntVal(10000)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out := r.Fields[1].Value.Str; out != "done\n" {
+	if out := r.Fields()[1].Value.Str(); out != "done\n" {
 		t.Errorf("stdout = %q", out)
 	}
 	for i := 0; i < 50; i++ {
 		b, err := waitBytesTimeoutFn(ctx, []interpreter.Value{p, interpreter.IntVal(0)})
-		if err != nil || string(b.Fields[1].Value.Bytes) != "done\n" {
+		if err != nil || string(b.Fields()[1].Value.Bytes()) != "done\n" {
 			t.Fatalf("waitBytesTimeout(p, 0) after exit: %v, %v", b, err)
 		}
 	}
-	if r, err := waitFn(ctx, []interpreter.Value{p}); err != nil || r.Fields[1].Value.Str != "done\n" {
+	if r, err := waitFn(ctx, []interpreter.Value{p}); err != nil || r.Fields()[1].Value.Str() != "done\n" {
 		t.Errorf("os.wait after: %v, %v", r, err)
 	}
 }
@@ -194,7 +194,7 @@ func TestSpawnWith(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, err := waitFn(ctx, []interpreter.Value{p})
-	if err != nil || r.Fields[1].Value.Str != "out\n" || r.Fields[2].Value.Str != "err\n" {
+	if err != nil || r.Fields()[1].Value.Str() != "out\n" || r.Fields()[2].Value.Str() != "err\n" {
 		t.Fatalf("zero options: %v, %v", r, err)
 	}
 	log := filepath.Join(t.TempDir(), "x.log")
@@ -203,7 +203,7 @@ func TestSpawnWith(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, err = waitFn(ctx, []interpreter.Value{p})
-	if err != nil || r.Fields[1].Value.Str != "" || r.Fields[2].Value.Str != "" {
+	if err != nil || r.Fields()[1].Value.Str() != "" || r.Fields()[2].Value.Str() != "" {
 		t.Fatalf("file + discard: %v, %v", r, err)
 	}
 	if body, err := stdos.ReadFile(log); err != nil || string(body) != "out\n" {

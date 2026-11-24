@@ -30,13 +30,13 @@ func takeOrder(fn string, args []Value, idx int) (binary.ByteOrder, error) {
 	if v.Kind != interpreter.KindString {
 		return nil, fmt.Errorf("%s: order must be a string (\"le\" or \"be\"), got %s", fn, v.Kind)
 	}
-	switch v.Str {
+	switch v.Str() {
 	case "le":
 		return binary.LittleEndian, nil
 	case "be":
 		return binary.BigEndian, nil
 	}
-	return nil, fmt.Errorf("%s: order must be \"le\" or \"be\", got %q", fn, v.Str)
+	return nil, fmt.Errorf("%s: order must be \"le\" or \"be\", got %q", fn, v.Str())
 }
 
 // Widths accepted by the integer and float readers.

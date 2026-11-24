@@ -22,7 +22,7 @@ func TestPercentCodec(t *testing.T) {
 		if err != nil {
 			t.Fatalf("toText(%q): %v", s, err)
 		}
-		return v.Str
+		return v.Str()
 	}
 	dec := func(s string) (string, error) {
 		v, err := fromText(interpreter.BuiltinCtx{}, []interpreter.Value{
@@ -31,7 +31,7 @@ func TestPercentCodec(t *testing.T) {
 		if err != nil {
 			return "", err
 		}
-		return string(v.Bytes), nil
+		return string(v.Bytes()), nil
 	}
 
 	cases := map[string]string{
@@ -71,14 +71,14 @@ func TestFormCodec(t *testing.T) {
 
 	enc := func(s string) string {
 		v, _ := toText(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("uri-form"), interpreter.BytesVal([]byte(s))})
-		return v.Str
+		return v.Str()
 	}
 	dec := func(s string) (string, error) {
 		v, err := fromText(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("uri-form"), interpreter.StringVal(s)})
 		if err != nil {
 			return "", err
 		}
-		return string(v.Bytes), nil
+		return string(v.Bytes()), nil
 	}
 
 	// Space becomes "+" (the form difference from percent); "+" round-trips

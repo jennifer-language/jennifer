@@ -90,7 +90,7 @@ func TestJWKMatchesIndependentOracle(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, want := jv.Str, independentJWK(t, k); got != want {
+		if got, want := jv.Str(), independentJWK(t, k); got != want {
 			t.Errorf("jwkPublic canonical JWK mismatch:\n got  %s\n want %s", got, want)
 		}
 	}
@@ -109,7 +109,7 @@ func TestEcKeypairAndJWK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := verifyFn(noCtx, []interpreter.Value{strArg("ecdsa-sha256"), bytesArg([]byte("m")), bytesArg(sig.Bytes), bytesArg(pubPEM)}); err != nil || !ok.Bool {
+	if ok, err := verifyFn(noCtx, []interpreter.Value{strArg("ecdsa-sha256"), bytesArg([]byte("m")), bytesArg(sig.Bytes()), bytesArg(pubPEM)}); err != nil || !ok.Bool() {
 		t.Errorf("signature of the generated key did not verify (err %v)", err)
 	}
 	// JWK is canonical (members in lexicographic order crv, kty, x, y).
@@ -117,7 +117,7 @@ func TestEcKeypairAndJWK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	jwk := jv.Str
+	jwk := jv.Str()
 	if !strings.HasPrefix(jwk, `{"crv":"P-256","kty":"EC","x":"`) {
 		t.Errorf("EC JWK not canonical: %s", jwk)
 	}
@@ -130,8 +130,8 @@ func TestRsaKeypairAndJWK(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Canonical RSA JWK order is e, kty, n.
-	if !strings.HasPrefix(jv.Str, `{"e":"`) || !strings.Contains(jv.Str, `"kty":"RSA"`) {
-		t.Errorf("RSA JWK not canonical: %s", jv.Str)
+	if !strings.HasPrefix(jv.Str(), `{"e":"`) || !strings.Contains(jv.Str(), `"kty":"RSA"`) {
+		t.Errorf("RSA JWK not canonical: %s", jv.Str())
 	}
 	// There is no weak size to ask for.
 	for _, algo := range []string{"rsa1024", "rsa512", "rsa"} {
@@ -149,11 +149,11 @@ func TestJWKThumbprintStable(t *testing.T) {
 	_, kv := genKeypair(t, "p256")
 	a, _ := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(kv)})
 	b, _ := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(kv)})
-	if a.Str != b.Str {
+	if a.Str() != b.Str() {
 		t.Fatal("jwkPublic is not deterministic for the same key")
 	}
 	// The thumbprint is just SHA-256 of the canonical JWK - confirm it hashes.
-	sum := sha256.Sum256([]byte(a.Str))
+	sum := sha256.Sum256([]byte(a.Str()))
 	if len(sum) != 32 {
 		t.Fatal("unexpected digest length")
 	}
@@ -184,7 +184,7 @@ func TestCSRForDomains(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The DER parses as a valid CSR carrying both SAN domains.
-	csr, err := x509.ParseCertificateRequest(dv.Bytes)
+	csr, err := x509.ParseCertificateRequest(dv.Bytes())
 	if err != nil {
 		t.Fatalf("csr produced invalid DER: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestJwkToPemRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rpem, err := jwkToPemFn(noCtx, []interpreter.Value{interpreter.StringVal(rjwk.Str)})
+	rpem, err := jwkToPemFn(noCtx, []interpreter.Value{interpreter.StringVal(rjwk.Str())})
 	if err != nil {
 		t.Fatalf("jwkToPem RSA: %v", err)
 	}
@@ -225,11 +225,11 @@ func TestJwkToPemRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, err := verifyFn(noCtx, []interpreter.Value{strArg("rsa-pkcs1-sha256"), bytesArg(msg), bytesArg(rsig.Bytes), bytesArg(rpem.Bytes)})
+	ok, err := verifyFn(noCtx, []interpreter.Value{strArg("rsa-pkcs1-sha256"), bytesArg(msg), bytesArg(rsig.Bytes()), bytesArg(rpem.Bytes())})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok.Kind != interpreter.KindBool || !ok.Bool {
+	if ok.Kind != interpreter.KindBool || !ok.Bool() {
 		t.Errorf("RSA: signature did not verify against the jwkToPem public key")
 	}
 
@@ -239,7 +239,7 @@ func TestJwkToPemRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	epem, err := jwkToPemFn(noCtx, []interpreter.Value{interpreter.StringVal(ejwk.Str)})
+	epem, err := jwkToPemFn(noCtx, []interpreter.Value{interpreter.StringVal(ejwk.Str())})
 	if err != nil {
 		t.Fatalf("jwkToPem EC: %v", err)
 	}
@@ -247,11 +247,11 @@ func TestJwkToPemRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, err = verifyFn(noCtx, []interpreter.Value{strArg("ecdsa-sha256"), bytesArg(msg), bytesArg(esig.Bytes), bytesArg(epem.Bytes)})
+	ok, err = verifyFn(noCtx, []interpreter.Value{strArg("ecdsa-sha256"), bytesArg(msg), bytesArg(esig.Bytes()), bytesArg(epem.Bytes())})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok.Kind != interpreter.KindBool || !ok.Bool {
+	if ok.Kind != interpreter.KindBool || !ok.Bool() {
 		t.Errorf("EC: signature did not verify against the jwkToPem public key")
 	}
 }

@@ -44,11 +44,12 @@ func pcaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	if args[1].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("ml.pca: nComponents must be an int")
 	}
-	nc := int(args[1].Int)
 	d := len(x[0])
-	if nc < 1 || nc > d {
-		return interpreter.Null(), fmt.Errorf("ml.pca: nComponents must be in [1, features] (got %d, features=%d)", nc, d)
+	// int64 compare before narrowing (32-bit int safety).
+	if nc64 := args[1].Int(); nc64 < 1 || nc64 > int64(d) {
+		return interpreter.Null(), fmt.Errorf("ml.pca: nComponents must be in [1, features] (got %d, features=%d)", nc64, d)
 	}
+	nc := int(args[1].Int())
 	// The covariance is d x d (and the Jacobi sweeps O(d^3)): cap it like a
 	// linalg matrix before allocating.
 	if cells, ok := limits.MulInt64(int64(d), int64(d)); !ok || cells > limits.MaxMatrixElements {

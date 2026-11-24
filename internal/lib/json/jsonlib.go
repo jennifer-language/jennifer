@@ -130,21 +130,21 @@ func encodeWithFn(args []interpreter.Value) (interpreter.Value, error) {
 // encoderFor reads a json.EncodeOptions. Settings that contradict each other
 // are an error rather than one silently winning.
 func encoderFor(verb string, v interpreter.Value) (*encoder, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "EncodeOptions" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "EncodeOptions" {
 		return nil, fmt.Errorf("%s: options must be a json.EncodeOptions, got %s", verb, v.Kind)
 	}
 	e := &encoder{}
 	indent := int64(0)
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		switch f.Name {
 		case "indent":
-			indent = f.Value.Int
+			indent = f.Value.Int()
 		case "sortKeys":
-			e.sortKeys = f.Value.Bool
+			e.sortKeys = f.Value.Bool()
 		case "rawHtml":
-			e.rawHtml = f.Value.Bool
+			e.rawHtml = f.Value.Bool()
 		case "canonical":
-			e.canonical = f.Value.Bool
+			e.canonical = f.Value.Bool()
 		}
 	}
 	if indent < 0 || indent > maxIndent {
@@ -194,31 +194,31 @@ func (e *encoder) value(v interpreter.Value, depth int) error {
 	case interpreter.KindNull:
 		sb.WriteString("null")
 	case interpreter.KindBool:
-		writeBool(sb, v.Bool)
+		writeBool(sb, v.Bool())
 	case interpreter.KindInt:
-		return e.int(v.Int)
+		return e.int(v.Int())
 	case interpreter.KindFloat:
-		return e.float(v.Float)
+		return e.float(v.Float())
 	case interpreter.KindString:
-		e.string(v.Str)
+		e.string(v.Str())
 	case interpreter.KindBytes:
-		e.string(base64.StdEncoding.EncodeToString(v.Bytes))
+		e.string(base64.StdEncoding.EncodeToString(v.Bytes()))
 	case interpreter.KindList:
-		return e.seq(len(v.List), depth, '[', ']', nil, func(i int) error {
-			return e.value(v.List[i], depth+1)
+		return e.seq(len(v.List()), depth, '[', ']', nil, func(i int) error {
+			return e.value(v.List()[i], depth+1)
 		})
 	case interpreter.KindMap:
-		for _, m := range v.Map {
+		for _, m := range v.Map() {
 			if m.Key.Kind != interpreter.KindString {
 				return fmt.Errorf("map key must be string, got %s", m.Key.Kind)
 			}
 		}
-		return e.seq(len(v.Map), depth, '{', '}', func(i int) string { return v.Map[i].Key.Str }, func(i int) error {
-			e.member(v.Map[i].Key.Str)
-			return e.value(v.Map[i].Value, depth+1)
+		return e.seq(len(v.Map()), depth, '{', '}', func(i int) string { return v.Map()[i].Key.Str() }, func(i int) error {
+			e.member(v.Map()[i].Key.Str())
+			return e.value(v.Map()[i].Value, depth+1)
 		})
 	case interpreter.KindStruct:
-		return e.fields(v.Fields, depth)
+		return e.fields(v.Fields(), depth)
 	case interpreter.KindEnum:
 		// Externally tagged, the conventional JSON encoding for a sum type: a
 		// payload-less variant is its name as a string, a payloaded one is a
@@ -227,20 +227,20 @@ func (e *encoder) value(v interpreter.Value, depth int) error {
 		// Decoding does not reconstruct an enum - json.decode yields the plain
 		// string / map, and the program matches on it - because the wire form
 		// carries no enum type identity.
-		if len(v.Fields) == 0 {
-			e.string(v.Variant)
+		if len(v.Fields()) == 0 {
+			e.string(v.Variant())
 			return nil
 		}
 		return e.seq(1, depth, '{', '}', nil, func(int) error {
-			e.member(v.Variant)
-			return e.fields(v.Fields, depth+1)
+			e.member(v.Variant())
+			return e.fields(v.Fields(), depth+1)
 		})
 	case interpreter.KindObject:
 		// a json.Value round-trips: encode its node tree.
 		if n, ok := asNode(v); ok {
 			return e.node(n, depth)
 		}
-		return fmt.Errorf("cannot encode an opaque %s.%s value", v.StructNS, v.StructName)
+		return fmt.Errorf("cannot encode an opaque %s.%s value", v.StructNS(), v.StructName())
 	case interpreter.KindTask:
 		return fmt.Errorf("cannot encode a task value")
 	default:

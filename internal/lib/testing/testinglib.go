@@ -108,7 +108,7 @@ func takeStringArg(fnName string, args []Value, idx int, role string) (string, e
 	if args[idx].Kind != interpreter.KindString {
 		return "", fmt.Errorf("%s: %s must be string, got %s", fnName, role, args[idx].Kind)
 	}
-	return args[idx].Str, nil
+	return args[idx].Str(), nil
 }
 
 func recToValue(r Record) Value {
@@ -125,28 +125,28 @@ func recToValue(r Record) Value {
 }
 
 func valueToRec(fnName string, v Value) (Record, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "Result" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "Result" {
 		return Record{}, fmt.Errorf("%s: expected a testing.Result, got %s", fnName, v.Kind)
 	}
 	var r Record
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		switch f.Name {
 		case "name":
-			r.Name = f.Value.Str
+			r.Name = f.Value.Str()
 		case "ms":
-			r.Ms = f.Value.Int
+			r.Ms = f.Value.Int()
 		case "passed":
-			r.Passed = f.Value.Bool
+			r.Passed = f.Value.Bool()
 		case "errorKind":
-			r.ErrorKind = f.Value.Str
+			r.ErrorKind = f.Value.Str()
 		case "errorMessage":
-			r.ErrorMessage = f.Value.Str
+			r.ErrorMessage = f.Value.Str()
 		case "file":
-			r.File = f.Value.Str
+			r.File = f.Value.Str()
 		case "line":
-			r.Line = int(f.Value.Int)
+			r.Line = int(f.Value.Int())
 		case "col":
-			r.Col = int(f.Value.Int)
+			r.Col = int(f.Value.Int())
 		}
 	}
 	return r, nil
@@ -207,7 +207,7 @@ func makeRunWithFn(_ *interpreter.Interpreter, fnName string) interpreter.Builti
 		if args[1].Kind != interpreter.KindList {
 			return interpreter.Null(), fmt.Errorf("testing.%s: args must be a list, got %s", fnName, args[1].Kind)
 		}
-		callArgs := args[1].List
+		callArgs := args[1].List()
 		return timeAndRecord(name, func() (Value, error) { return ctx.CallByName(name, callArgs...) }), nil
 	}
 }
@@ -270,8 +270,8 @@ func reportFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("testing.report: results must be a list of testing.Result, got %s", args[1].Kind)
 	}
 
-	recs := make([]Record, len(args[1].List))
-	for i, v := range args[1].List {
+	recs := make([]Record, len(args[1].List()))
+	for i, v := range args[1].List() {
 		r, err := valueToRec("testing.report", v)
 		if err != nil {
 			return interpreter.Null(), err

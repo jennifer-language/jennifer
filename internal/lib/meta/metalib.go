@@ -81,11 +81,11 @@ func Install(in *interpreter.Interpreter) {
 			return interpreter.Null(), fmt.Errorf("meta.hasCapability: name must be string, got %s", args[0].Kind)
 		}
 		// An unknown name is a typo, not a capability this build lacks.
-		if !capabilities.Known(args[0].Str) {
+		if !capabilities.Known(args[0].Str()) {
 			return interpreter.Null(), fmt.Errorf("meta.hasCapability: unknown capability %q (known: %s)",
-				args[0].Str, strings.Join(capabilities.KnownNames(), ", "))
+				args[0].Str(), strings.Join(capabilities.KnownNames(), ", "))
 		}
-		return interpreter.BoolVal(capabilities.Has(args[0].Str)), nil
+		return interpreter.BoolVal(capabilities.Has(args[0].Str())), nil
 	})
 
 	// Dynamic dispatch: invoke a top-level user method by a runtime string
@@ -105,7 +105,7 @@ func Install(in *interpreter.Interpreter) {
 		// both) so recursion that bounces through meta.call still trips the
 		// catchable guard, and a meta.call inside a spawn body resolves against
 		// that goroutine's snapshot rather than the live globals.
-		return ctx.CallByName(args[0].Str, args[1:]...)
+		return ctx.CallByName(args[0].Str(), args[1:]...)
 	})
 
 	// meta.defined(name) reports whether a top-level user method exists, so a
@@ -117,7 +117,7 @@ func Install(in *interpreter.Interpreter) {
 		if args[0].Kind != interpreter.KindString {
 			return interpreter.Null(), fmt.Errorf("meta.defined: name must be string, got %s", args[0].Kind)
 		}
-		return interpreter.BoolVal(in.HasMethod(args[0].Str)), nil
+		return interpreter.BoolVal(in.HasMethod(args[0].Str())), nil
 	})
 
 	// meta.callMain / meta.definedMain are the module-to-entry-program siblings
@@ -138,7 +138,7 @@ func Install(in *interpreter.Interpreter) {
 		// Thread the caller's call-depth counter (see meta.call) so a handler
 		// dispatched into the host keeps accumulating depth on the caller's
 		// goroutine-local counter and stays catchable under recursion.
-		return in.CallHostWithDepth(args[0].Str, ctx.Depth, args[1:]...)
+		return in.CallHostWithDepth(args[0].Str(), ctx.Depth, args[1:]...)
 	})
 
 	in.RegisterNamespaced(LibraryName, "definedMain", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
@@ -148,7 +148,7 @@ func Install(in *interpreter.Interpreter) {
 		if args[0].Kind != interpreter.KindString {
 			return interpreter.Null(), fmt.Errorf("meta.definedMain: name must be string, got %s", args[0].Kind)
 		}
-		return interpreter.BoolVal(in.Host().HasMethod(args[0].Str)), nil
+		return interpreter.BoolVal(in.Host().HasMethod(args[0].Str())), nil
 	})
 }
 

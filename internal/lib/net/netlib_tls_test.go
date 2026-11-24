@@ -164,8 +164,8 @@ func TestConnectTLSRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got.Bytes) != "ping" {
-		t.Errorf("echo = %q, want %q", got.Bytes, "ping")
+	if string(got.Bytes()) != "ping" {
+		t.Errorf("echo = %q, want %q", got.Bytes(), "ping")
 	}
 	if _, err := closeFn(ctx(), []Value{conn}); err != nil {
 		t.Error(err)
@@ -203,8 +203,8 @@ func TestConnectTLSSkipVerify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got.Bytes) != "x" {
-		t.Errorf("echo = %q, want %q", got.Bytes, "x")
+	if string(got.Bytes()) != "x" {
+		t.Errorf("echo = %q, want %q", got.Bytes(), "x")
 	}
 	closeFn(ctx(), []Value{conn})
 }
@@ -228,8 +228,8 @@ func TestConnectTLSWithCACert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got.Bytes) != "ca" {
-		t.Errorf("echo = %q, want %q", got.Bytes, "ca")
+	if string(got.Bytes()) != "ca" {
+		t.Errorf("echo = %q, want %q", got.Bytes(), "ca")
 	}
 	closeFn(ctx(), []Value{conn})
 }
@@ -262,8 +262,8 @@ func TestStartTLSUpgradesInPlace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(ack.Bytes) != "GO\n" {
-		t.Fatalf("ack = %q, want %q", ack.Bytes, "GO\n")
+	if string(ack.Bytes()) != "GO\n" {
+		t.Fatalf("ack = %q, want %q", ack.Bytes(), "GO\n")
 	}
 	// upgrade in place
 	up, err := startTLSFn(ctx(), []Value{conn})
@@ -271,8 +271,8 @@ func TestStartTLSUpgradesInPlace(t *testing.T) {
 		t.Fatalf("startTLS: %v", err)
 	}
 	// same handle id survives the upgrade
-	if up.Fields[0].Value.Int != conn.Fields[0].Value.Int {
-		t.Errorf("startTLS changed the handle id: %d -> %d", conn.Fields[0].Value.Int, up.Fields[0].Value.Int)
+	if up.Fields()[0].Value.Int() != conn.Fields()[0].Value.Int() {
+		t.Errorf("startTLS changed the handle id: %d -> %d", conn.Fields()[0].Value.Int(), up.Fields()[0].Value.Int())
 	}
 	// now encrypted
 	if _, err := writeBytesFn(ctx(), []Value{up, interpreter.BytesVal([]byte("secret"))}); err != nil {
@@ -282,8 +282,8 @@ func TestStartTLSUpgradesInPlace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got.Bytes) != "secret" {
-		t.Errorf("tls echo = %q, want %q", got.Bytes, "secret")
+	if string(got.Bytes()) != "secret" {
+		t.Errorf("tls echo = %q, want %q", got.Bytes(), "secret")
 	}
 	closeFn(ctx(), []Value{up})
 }
@@ -321,8 +321,8 @@ func echoes(t *testing.T, conn Value, msg string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got.Bytes) != msg {
-		t.Errorf("echo = %q, want %q", got.Bytes, msg)
+	if string(got.Bytes()) != msg {
+		t.Errorf("echo = %q, want %q", got.Bytes(), msg)
 	}
 }
 
@@ -402,7 +402,7 @@ func TestStartTLSRestoresDeadlines(t *testing.T) {
 	if _, err := readBytesFn(ctx(), []Value{conn, interpreter.IntVal(8)}); err != nil {
 		t.Fatal(err)
 	}
-	s, err := resolveConn("test", conn.Fields[0].Value.Int)
+	s, err := resolveConn("test", conn.Fields()[0].Value.Int())
 	if err != nil {
 		t.Fatal(err)
 	}

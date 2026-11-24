@@ -140,7 +140,7 @@ func Install(in *interpreter.Interpreter) {
 		if args[0].Kind != interpreter.KindString {
 			return interpreter.Null(), fmt.Errorf("toml.decode: argument must be string, got %s", args[0].Kind)
 		}
-		tree, err := decodeToml(args[0].Str)
+		tree, err := decodeToml(args[0].Str())
 		if err != nil {
 			return interpreter.Null(), err
 		}
@@ -178,7 +178,7 @@ func decodeWithFn(args []interpreter.Value) (node, error) {
 	if err != nil {
 		return node{}, err
 	}
-	return decodeTomlCaps(fn, args[0].Str, caps)
+	return decodeTomlCaps(fn, args[0].Str(), caps)
 }
 
 // parseDatetimeText parses stored RFC 3339 text into a Go time.Time, choosing

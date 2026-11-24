@@ -311,10 +311,10 @@ func fitTree(name string, args []interpreter.Value, regress bool) (interpreter.V
 	}
 	maxDepth := defaultMaxDepth
 	if len(args) == 3 {
-		if args[2].Kind != interpreter.KindInt || args[2].Int < 1 || args[2].Int > maxTreeDepth {
+		if args[2].Kind != interpreter.KindInt || args[2].Int() < 1 || args[2].Int() > maxTreeDepth {
 			return interpreter.Null(), fmt.Errorf("ml.%s: maxDepth must be in [1, %d]", name, maxTreeDepth)
 		}
-		maxDepth = int(args[2].Int)
+		maxDepth = int(args[2].Int())
 	}
 	return trainTree(x, y, maxDepth, regress), nil
 }
@@ -384,16 +384,16 @@ func fitForest(name string, args []interpreter.Value, regress bool) (interpreter
 	}
 	nTrees, maxDepth := defaultNTrees, defaultMaxDepth
 	if len(args) >= 3 {
-		if args[2].Kind != interpreter.KindInt || args[2].Int < 1 || args[2].Int > maxForestTrees {
+		if args[2].Kind != interpreter.KindInt || args[2].Int() < 1 || args[2].Int() > maxForestTrees {
 			return interpreter.Null(), fmt.Errorf("ml.%s: nTrees must be in [1, %d]", name, maxForestTrees)
 		}
-		nTrees = int(args[2].Int)
+		nTrees = int(args[2].Int())
 	}
 	if len(args) == 4 {
-		if args[3].Kind != interpreter.KindInt || args[3].Int < 1 || args[3].Int > maxTreeDepth {
+		if args[3].Kind != interpreter.KindInt || args[3].Int() < 1 || args[3].Int() > maxTreeDepth {
 			return interpreter.Null(), fmt.Errorf("ml.%s: maxDepth must be in [1, %d]", name, maxTreeDepth)
 		}
-		maxDepth = int(args[3].Int)
+		maxDepth = int(args[3].Int())
 	}
 	return trainForest(x, y, nTrees, maxDepth, regress), nil
 }

@@ -3,9 +3,9 @@
 
 // Package doctree is the compact document tree behind the `json`, `toml` and
 // `yaml` libraries' opaque `Value`. A decoded document is held as a tree of
-// Nodes - a 40-byte struct per value - rather than as interpreter Values (272
-// bytes each, so 544 bytes per map member before its strings), so a document's
-// in-memory size is a small multiple of its text instead of tens of times it.
+// Nodes - a 40-byte struct per value - rather than as interpreter Values (48
+// bytes each, so 96 bytes per map member before its strings, plus an index
+// per map), so a document's in-memory size is a small multiple of its text.
 //
 // The tree is immutable once built: accessors read it, the write surface copies
 // only the spine it edits, so every handle, its copies, and any sub-tree a `get`

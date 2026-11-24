@@ -17,7 +17,7 @@ func floatMatrix(rows ...[]float64) interpreter.Value {
 	for i, r := range rows {
 		xs[i] = floatList(r...)
 	}
-	return interpreter.Value{Kind: interpreter.KindList, List: xs}
+	return interpreter.GenericListVal(xs)
 }
 
 // TestCorrelationExtremeMagnitudes: sx*sy overflowed to +Inf (r = 0) for data
@@ -27,15 +27,15 @@ func TestCorrelationExtremeMagnitudes(t *testing.T) {
 	for _, s := range []float64{1, 1e150, 1e-170, 1e300} {
 		x, y := floatList(0, 2*s, s), floatList(0, 2*s, 1.1*s)
 		v, err := correlationFn(interpreter.BuiltinCtx{}, []interpreter.Value{x, y})
-		if err != nil || !near(v.Float, want, 1e-12) {
-			t.Errorf("scale %g: correlation = %v, %v; want %v", s, v.Float, err, want)
+		if err != nil || !near(v.Float(), want, 1e-12) {
+			t.Errorf("scale %g: correlation = %v, %v; want %v", s, v.Float(), err, want)
 		}
 	}
 	reg, err := linearRegressionFn(interpreter.BuiltinCtx{}, []interpreter.Value{floatList(0, 2e150, 1e150), floatList(0, 2e150, 1.1e150)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r := field(t, reg, "r").Float; !near(r, want, 1e-12) {
+	if r := field(t, reg, "r").Float(); !near(r, want, 1e-12) {
 		t.Errorf("linearRegression r = %v, want %v", r, want)
 	}
 }
@@ -74,8 +74,8 @@ func TestLargeParameterDensities(t *testing.T) {
 		{1.5, 1, 0.09794150344116637},
 	} {
 		v, err := tPdfFn(ctx, []interpreter.Value{sf(c[0]), sf(c[1])})
-		if err != nil || relErr(v.Float, c[2]) > 1e-13 {
-			t.Errorf("tPdf(%v, %v) = %v, %v; want %v", c[0], c[1], v.Float, err, c[2])
+		if err != nil || relErr(v.Float(), c[2]) > 1e-13 {
+			t.Errorf("tPdf(%v, %v) = %v, %v; want %v", c[0], c[1], v.Float(), err, c[2])
 		}
 	}
 	for _, c := range []struct {
@@ -90,8 +90,8 @@ func TestLargeParameterDensities(t *testing.T) {
 		{2, 5, 0.999999, 9.999980000872668e-18},
 	} {
 		v, err := binomialPmfFn(ctx, []interpreter.Value{si(c.k), si(c.n), sf(c.p)})
-		if err != nil || relErr(v.Float, c.want) > 1e-13 {
-			t.Errorf("binomialPmf(%d, %d, %v) = %v, %v; want %v", c.k, c.n, c.p, v.Float, err, c.want)
+		if err != nil || relErr(v.Float(), c.want) > 1e-13 {
+			t.Errorf("binomialPmf(%d, %d, %v) = %v, %v; want %v", c.k, c.n, c.p, v.Float(), err, c.want)
 		}
 	}
 	for _, c := range []struct {
@@ -106,8 +106,8 @@ func TestLargeParameterDensities(t *testing.T) {
 		{5, 1e-3, 8.325004165278126e-18},
 	} {
 		v, err := poissonPmfFn(ctx, []interpreter.Value{si(c.k), sf(c.lambda)})
-		if err != nil || relErr(v.Float, c.want) > 1e-13 {
-			t.Errorf("poissonPmf(%d, %v) = %v, %v; want %v", c.k, c.lambda, v.Float, err, c.want)
+		if err != nil || relErr(v.Float(), c.want) > 1e-13 {
+			t.Errorf("poissonPmf(%d, %v) = %v, %v; want %v", c.k, c.lambda, v.Float(), err, c.want)
 		}
 	}
 }
@@ -126,8 +126,8 @@ func TestTQuantileFarTail(t *testing.T) {
 		{0.999999, 3, 103.29946777942897},
 	} {
 		v, err := tQuantileFn(interpreter.BuiltinCtx{}, []interpreter.Value{sf(c[0]), sf(c[1])})
-		if err != nil || relErr(v.Float, c[2]) > 2e-13 {
-			t.Errorf("tQuantile(%v, %v) = %v, %v; want %v", c[0], c[1], v.Float, err, c[2])
+		if err != nil || relErr(v.Float(), c[2]) > 2e-13 {
+			t.Errorf("tQuantile(%v, %v) = %v, %v; want %v", c[0], c[1], v.Float(), err, c[2])
 		}
 	}
 }

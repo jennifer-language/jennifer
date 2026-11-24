@@ -57,7 +57,7 @@ func Install(in *interpreter.Interpreter) {
 // vector. This is what lets `norm` / `scale` / `add` / `sub` / `matmul` accept
 // either shape.
 func isMatrixArg(v interpreter.Value) bool {
-	return v.Kind == interpreter.KindList && len(v.List) > 0 && v.List[0].Kind == interpreter.KindList
+	return v.Kind == interpreter.KindList && len(v.List()) > 0 && v.List()[0].Kind == interpreter.KindList
 }
 
 // exceedsElementBudget reports whether an r-by-c value (c = 1 for a vector) would
@@ -65,7 +65,7 @@ func isMatrixArg(v interpreter.Value) bool {
 // dimension at or below the cap keeps r*c within int64 range (no overflow). This
 // is the single bound every linalg entry point shares: the constructors check it
 // before allocating from an integer argument, and the vector / matrix readers
-// check it before an oversized input is rebuilt as a 272-byte-per-cell Value tree
+// check it before an oversized input is rebuilt as a 48-byte-per-cell Value tree
 // - which also transitively bounds the O(n^3) routines, since a bounded element
 // count bounds the dimension.
 func exceedsElementBudget(r, c int64) bool {
@@ -82,11 +82,11 @@ func vector(name string, args []interpreter.Value, i int) ([]float64, error) {
 	if v.Kind != interpreter.KindList {
 		return nil, fmt.Errorf("linalg.%s: argument must be a vector (list of float), got %s", name, v.Kind)
 	}
-	if exceedsElementBudget(int64(len(v.List)), 1) {
-		return nil, limits.Capf("linalg.%s: vector too large (%d exceeds the %d-element limit)", name, len(v.List), limits.MaxMatrixElements)
+	if exceedsElementBudget(int64(len(v.List())), 1) {
+		return nil, limits.Capf("linalg.%s: vector too large (%d exceeds the %d-element limit)", name, len(v.List()), limits.MaxMatrixElements)
 	}
-	out := make([]float64, len(v.List))
-	for j, e := range v.List {
+	out := make([]float64, len(v.List()))
+	for j, e := range v.List() {
 		f, ok := e.AsFloat()
 		if !ok {
 			return nil, fmt.Errorf("linalg.%s: vector element %d must be int or float, got %s", name, j, e.Kind)
@@ -103,31 +103,31 @@ func matrix(name string, args []interpreter.Value, i int) ([][]float64, error) {
 	if v.Kind != interpreter.KindList {
 		return nil, fmt.Errorf("linalg.%s: argument must be a matrix (list of list of float), got %s", name, v.Kind)
 	}
-	if len(v.List) == 0 {
+	if len(v.List()) == 0 {
 		return nil, fmt.Errorf("linalg.%s: matrix has no rows", name)
 	}
-	out := make([][]float64, len(v.List))
+	out := make([][]float64, len(v.List()))
 	cols := -1
-	for r, rowv := range v.List {
+	for r, rowv := range v.List() {
 		if rowv.Kind != interpreter.KindList {
 			return nil, fmt.Errorf("linalg.%s: matrix row %d must be a list, got %s", name, r, rowv.Kind)
 		}
 		if cols == -1 {
-			cols = len(rowv.List)
+			cols = len(rowv.List())
 			if cols == 0 {
 				return nil, fmt.Errorf("linalg.%s: matrix rows are empty", name)
 			}
 			// Bound the element count once the shape is known, so an oversized
 			// input matrix is a positioned, catchable error rather than a fatal
-			// OOM when its 272-byte-per-cell Value tree is rebuilt.
-			if exceedsElementBudget(int64(len(v.List)), int64(cols)) {
-				return nil, limits.Capf("linalg.%s: matrix too large (%dx%d exceeds the %d-element limit)", name, len(v.List), cols, limits.MaxMatrixElements)
+			// OOM when its 48-byte-per-cell Value tree is rebuilt.
+			if exceedsElementBudget(int64(len(v.List())), int64(cols)) {
+				return nil, limits.Capf("linalg.%s: matrix too large (%dx%d exceeds the %d-element limit)", name, len(v.List()), cols, limits.MaxMatrixElements)
 			}
-		} else if len(rowv.List) != cols {
-			return nil, fmt.Errorf("linalg.%s: matrix is not rectangular (row 0 has %d columns, row %d has %d)", name, cols, r, len(rowv.List))
+		} else if len(rowv.List()) != cols {
+			return nil, fmt.Errorf("linalg.%s: matrix is not rectangular (row 0 has %d columns, row %d has %d)", name, cols, r, len(rowv.List()))
 		}
 		row := make([]float64, cols)
-		for c, e := range rowv.List {
+		for c, e := range rowv.List() {
 			f, ok := e.AsFloat()
 			if !ok {
 				return nil, fmt.Errorf("linalg.%s: matrix element [%d][%d] must be int or float, got %s", name, r, c, e.Kind)
@@ -377,7 +377,7 @@ func matmulFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		m, n, p := len(a), len(a[0]), len(b[0])
 		// Inputs within the element cap can still give an m x p result far
 		// past it (a column times a row). With m*n, n*p and m*p each at most
-		// E = MaxMatrixElements, the work m*n*p is at most E^1.5 (2^30).
+		// E = MaxMatrixElements, the work m*n*p is at most E^1.5 (2^33).
 		if exceedsElementBudget(int64(m), int64(p)) {
 			return interpreter.Null(), limits.Capf("linalg.matmul: result too large (%dx%d exceeds the %d-element limit)", m, p, limits.MaxMatrixElements)
 		}
@@ -528,7 +528,7 @@ func identityFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	if args[0].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("linalg.identity: n must be int, got %s", args[0].Kind)
 	}
-	n := args[0].Int
+	n := args[0].Int()
 	if n < 1 {
 		return interpreter.Null(), fmt.Errorf("linalg.identity: n must be >= 1, got %d", n)
 	}
@@ -589,7 +589,7 @@ func zerosFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("linalg.zeros: rows and cols must be int")
 	}
-	rows, cols := args[0].Int, args[1].Int
+	rows, cols := args[0].Int(), args[1].Int()
 	if rows < 1 || cols < 1 {
 		return interpreter.Null(), fmt.Errorf("linalg.zeros: rows and cols must be >= 1, got %dx%d", rows, cols)
 	}

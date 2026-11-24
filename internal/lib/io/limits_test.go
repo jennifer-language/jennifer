@@ -69,7 +69,7 @@ func TestReadLinesCaps(t *testing.T) {
 	assertLimitKind(t, err)
 	resetInputForTest()
 	v, err := callReadLines(in, stdinCtx(strings.NewReader(strings.Repeat("\n", 1000))))
-	if err != nil || len(v.List) != 1000 {
+	if err != nil || len(v.List()) != 1000 {
 		t.Fatalf("1000 lines: %v", err)
 	}
 }
@@ -88,8 +88,8 @@ func TestReadCharsCap(t *testing.T) {
 	_, err = in.LookupNamespacedBuiltin("io", "readBytes")(stdinCtx(strings.NewReader("abc")), []interpreter.Value{interpreter.IntVal(maxReadBytes + 1)})
 	assertLimitKind(t, err)
 	v, err := fn(stdinCtx(strings.NewReader("abc")), []interpreter.Value{interpreter.IntVal(limits.MaxAllocBytes / 4)})
-	if err != nil || v.Str != "abc" {
-		t.Fatalf("at cap: %q, %v", v.Str, err)
+	if err != nil || v.Str() != "abc" {
+		t.Fatalf("at cap: %q, %v", v.Str(), err)
 	}
 }
 

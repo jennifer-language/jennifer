@@ -42,8 +42,8 @@ func floats(t *testing.T, v interpreter.Value) []float64 {
 	if v.Kind != interpreter.KindList {
 		t.Fatalf("expected list result, got %s", v.Kind)
 	}
-	out := make([]float64, len(v.List))
-	for i, e := range v.List {
+	out := make([]float64, len(v.List()))
+	for i, e := range v.List() {
 		f, ok := e.AsFloat()
 		if !ok {
 			t.Fatalf("element %d is not numeric: %s", i, e.Kind)
@@ -56,13 +56,13 @@ func floats(t *testing.T, v interpreter.Value) []float64 {
 func approxEq(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
 
 func TestVectors(t *testing.T) {
-	if v, err := call(dotFn, vec(1, 2, 3), vec(4, 5, 6)); err != nil || v.Float != 32 {
+	if v, err := call(dotFn, vec(1, 2, 3), vec(4, 5, 6)); err != nil || v.Float() != 32 {
 		t.Fatalf("dot = %v, %v; want 32", v, err)
 	}
-	if v, err := call(normFn, vec(3, 4)); err != nil || v.Float != 5 {
+	if v, err := call(normFn, vec(3, 4)); err != nil || v.Float() != 5 {
 		t.Fatalf("norm = %v, %v; want 5", v, err)
 	}
-	if v, err := call(distanceFn, vec(0, 0), vec(3, 4)); err != nil || v.Float != 5 {
+	if v, err := call(distanceFn, vec(0, 0), vec(3, 4)); err != nil || v.Float() != 5 {
 		t.Fatalf("distance = %v, %v; want 5", v, err)
 	}
 	if v, err := call(scaleFn, vec(1, 2), interpreter.FloatVal(3)); err != nil {
@@ -93,20 +93,20 @@ func TestMatrices(t *testing.T) {
 	if v, err := call(matmulFn, a, mat([]float64{5, 6}, []float64{7, 8})); err != nil {
 		t.Fatalf("matmul err %v", err)
 	} else {
-		got := v.List
+		got := v.List()
 		r0 := floats(t, got[0])
 		r1 := floats(t, got[1])
 		if r0[0] != 19 || r0[1] != 22 || r1[0] != 43 || r1[1] != 50 {
 			t.Fatalf("matmul = [%v %v]; want [[19 22][43 50]]", r0, r1)
 		}
 	}
-	if v, err := call(determinantFn, a); err != nil || v.Float != -2 {
+	if v, err := call(determinantFn, a); err != nil || v.Float() != -2 {
 		t.Fatalf("det = %v, %v; want -2", v, err)
 	}
 	if v, err := call(transposeFn, a); err != nil {
 		t.Fatalf("transpose err %v", err)
 	} else {
-		r0 := floats(t, v.List[0])
+		r0 := floats(t, v.List()[0])
 		if r0[0] != 1 || r0[1] != 3 {
 			t.Fatalf("transpose row0 = %v; want [1 3]", r0)
 		}
@@ -120,7 +120,7 @@ func TestMatrices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("matmul(a, inv) err %v", err)
 	}
-	id := prod.List
+	id := prod.List()
 	if !approxEq(floats(t, id[0])[0], 1) || !approxEq(floats(t, id[0])[1], 0) ||
 		!approxEq(floats(t, id[1])[0], 0) || !approxEq(floats(t, id[1])[1], 1) {
 		t.Fatalf("a * inverse(a) is not identity: %v", prod)
@@ -144,10 +144,10 @@ func TestIdentityAndShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("identity err %v", err)
 	}
-	if len(id.List) != 3 {
-		t.Fatalf("identity rows = %d; want 3", len(id.List))
+	if len(id.List()) != 3 {
+		t.Fatalf("identity rows = %d; want 3", len(id.List()))
 	}
-	diag := floats(t, id.List[1])
+	diag := floats(t, id.List()[1])
 	if diag[0] != 0 || diag[1] != 1 || diag[2] != 0 {
 		t.Fatalf("identity row1 = %v; want [0 1 0]", diag)
 	}
@@ -155,8 +155,8 @@ func TestIdentityAndShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("shape err %v", err)
 	}
-	if sh.List[0].Int != 2 || sh.List[1].Int != 3 {
-		t.Fatalf("shape = [%d %d]; want [2 3]", sh.List[0].Int, sh.List[1].Int)
+	if sh.List()[0].Int() != 2 || sh.List()[1].Int() != 3 {
+		t.Fatalf("shape = [%d %d]; want [2 3]", sh.List()[0].Int(), sh.List()[1].Int())
 	}
 }
 
@@ -166,27 +166,27 @@ func TestMatrixArithmetic(t *testing.T) {
 	// add / sub / scale are polymorphic over matrices.
 	if v, err := call(addFn, a, b); err != nil {
 		t.Fatalf("mat add err %v", err)
-	} else if r := floats(t, v.List[0]); r[0] != 6 || r[1] != 8 {
+	} else if r := floats(t, v.List()[0]); r[0] != 6 || r[1] != 8 {
 		t.Fatalf("mat add row0 = %v; want [6 8]", r)
 	}
 	if v, err := call(subFn, b, a); err != nil {
 		t.Fatalf("mat sub err %v", err)
-	} else if r := floats(t, v.List[1]); r[0] != 4 || r[1] != 4 {
+	} else if r := floats(t, v.List()[1]); r[0] != 4 || r[1] != 4 {
 		t.Fatalf("mat sub row1 = %v; want [4 4]", r)
 	}
 	if v, err := call(scaleFn, a, interpreter.FloatVal(2)); err != nil {
 		t.Fatalf("mat scale err %v", err)
-	} else if r := floats(t, v.List[0]); r[0] != 2 || r[1] != 4 {
+	} else if r := floats(t, v.List()[0]); r[0] != 2 || r[1] != 4 {
 		t.Fatalf("mat scale row0 = %v; want [2 4]", r)
 	}
 	// trace of the main diagonal.
-	if v, err := call(traceFn, a); err != nil || v.Float != 5 {
+	if v, err := call(traceFn, a); err != nil || v.Float() != 5 {
 		t.Fatalf("trace = %v, %v; want 5", v, err)
 	}
 	// zeros builds a rows x cols matrix.
 	if v, err := call(zerosFn, interpreter.IntVal(2), interpreter.IntVal(3)); err != nil {
 		t.Fatalf("zeros err %v", err)
-	} else if len(v.List) != 2 || len(v.List[0].List) != 3 || floats(t, v.List[0])[2] != 0 {
+	} else if len(v.List()) != 2 || len(v.List()[0].List()) != 3 || floats(t, v.List()[0])[2] != 0 {
 		t.Fatalf("zeros = %v; want 2x3 of 0", v)
 	}
 }
@@ -223,7 +223,7 @@ func TestNormAndNormalize(t *testing.T) {
 		t.Error("normalize(zero): expected an error, got nil")
 	}
 	// norm is polymorphic: Frobenius norm of a matrix.
-	if v, err := call(normFn, mat([]float64{3, 0}, []float64{0, 4})); err != nil || v.Float != 5 {
+	if v, err := call(normFn, mat([]float64{3, 0}, []float64{0, 4})); err != nil || v.Float() != 5 {
 		t.Fatalf("frobenius norm = %v, %v; want 5", v, err)
 	}
 	// Strict: a magnitude overflow must error, not silently return a zero vector
@@ -281,7 +281,7 @@ func TestConstructorAllocationBounded(t *testing.T) {
 		t.Error("zeros with an oversized thin dimension: expected an error, got nil")
 	}
 	// A modest matrix still builds.
-	if v, err := call(identityFn, interpreter.IntVal(4)); err != nil || len(v.List) != 4 {
+	if v, err := call(identityFn, interpreter.IntVal(4)); err != nil || len(v.List()) != 4 {
 		t.Fatalf("identity(4) = %v, %v; want a 4x4 matrix", v, err)
 	}
 }
@@ -334,7 +334,7 @@ func TestStrictErrors(t *testing.T) {
 		}
 	}
 	// A singular matrix has determinant 0 (a valid, finite result), not an error.
-	if v, err := call(determinantFn, mat([]float64{1, 2}, []float64{2, 4})); err != nil || v.Float != 0 {
+	if v, err := call(determinantFn, mat([]float64{1, 2}, []float64{2, 4})); err != nil || v.Float() != 0 {
 		t.Errorf("determinant of singular = %v, %v; want 0, nil", v, err)
 	}
 }

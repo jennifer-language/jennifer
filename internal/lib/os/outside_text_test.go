@@ -25,11 +25,11 @@ func TestGetEnvInvalidUTF8(t *testing.T) {
 		t.Fatalf("getEnv: %v", err)
 	}
 	v, err := getEnvBytesFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("JENNIFER_T_BAD")})
-	if err != nil || v.Kind != interpreter.KindBytes || !bytes.Equal(v.Bytes, []byte("ab\xffc")) {
+	if err != nil || v.Kind != interpreter.KindBytes || !bytes.Equal(v.Bytes(), []byte("ab\xffc")) {
 		t.Fatalf("getEnvBytes: %v %v", v, err)
 	}
 	v, err = getEnvBytesFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("JENNIFER_T_UNSET_XYZ")})
-	if err != nil || v.Kind != interpreter.KindBytes || len(v.Bytes) != 0 {
+	if err != nil || v.Kind != interpreter.KindBytes || len(v.Bytes()) != 0 {
 		t.Fatalf("getEnvBytes unset: %v %v", v, err)
 	}
 	if _, err := getEnvBytesFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(1)}); err == nil {

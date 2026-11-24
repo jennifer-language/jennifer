@@ -57,7 +57,7 @@ func TestTQuantile(t *testing.T) {
 	}
 	// An upper-tail quantile is positive.
 	up := call(t, tQuantileFn, interpreter.FloatVal(0.975), interpreter.FloatVal(10))
-	if up.Kind != interpreter.KindFloat || up.Float <= 0 {
+	if up.Kind != interpreter.KindFloat || up.Float() <= 0 {
 		t.Errorf("tQuantile(0.975, 10) = %+v, want a positive float", up)
 	}
 	// p outside (0, 1) is an error.

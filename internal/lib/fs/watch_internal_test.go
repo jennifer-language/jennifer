@@ -138,7 +138,7 @@ func TestWatchBuiltinSurface(t *testing.T) {
 		if herr != nil {
 			t.Fatal(herr)
 		}
-		if has = hv.Bool; !has {
+		if has = hv.Bool(); !has {
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
@@ -150,7 +150,7 @@ func TestWatchBuiltinSurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fs.next: %v", err)
 	}
-	if ev.Kind != interpreter.KindStruct || ev.StructName != "Event" {
+	if ev.Kind != interpreter.KindStruct || ev.StructName() != "Event" {
 		t.Fatalf("fs.next did not return an fs.Event: %+v", ev)
 	}
 

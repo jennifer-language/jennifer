@@ -34,7 +34,7 @@ func errKind(err error) string {
 }
 
 func chans(cs ...interpreter.Value) interpreter.Value {
-	return interpreter.Value{Kind: interpreter.KindList, List: cs}
+	return interpreter.GenericListVal(cs)
 }
 
 // TestSelectTimeoutReturnsAReadyValue: a waiting value comes back at once,
@@ -43,12 +43,12 @@ func TestSelectTimeoutReturnsAReadyValue(t *testing.T) {
 	in := newLib(t)
 	a, b := makeChan(t, in, 1), makeChan(t, in, 1)
 	mustInvoke(t, in, "send", b, interpreter.IntVal(4))
-	if v := mustInvoke(t, in, "selectTimeout", chans(a, b), interpreter.IntVal(0)); v.Int != 4 {
-		t.Errorf("selectTimeout(.., 0) = %d, want 4", v.Int)
+	if v := mustInvoke(t, in, "selectTimeout", chans(a, b), interpreter.IntVal(0)); v.Int() != 4 {
+		t.Errorf("selectTimeout(.., 0) = %d, want 4", v.Int())
 	}
 	mustInvoke(t, in, "send", a, interpreter.IntVal(5))
-	if v := mustInvoke(t, in, "selectTimeout", chans(a, b), interpreter.IntVal(1000)); v.Int != 5 {
-		t.Errorf("selectTimeout(.., 1000) = %d, want 5", v.Int)
+	if v := mustInvoke(t, in, "selectTimeout", chans(a, b), interpreter.IntVal(1000)); v.Int() != 5 {
+		t.Errorf("selectTimeout(.., 1000) = %d, want 5", v.Int())
 	}
 }
 
@@ -73,8 +73,8 @@ func TestSelectTimeoutTimesOut(t *testing.T) {
 		t.Errorf("poll of empty channels: err = %v, want a timeout", err)
 	}
 	mustInvoke(t, in, "send", b, interpreter.IntVal(9))
-	if v := mustInvoke(t, in, "recv", b); v.Int != 9 {
-		t.Errorf("recv after the timeout = %d, want 9", v.Int)
+	if v := mustInvoke(t, in, "recv", b); v.Int() != 9 {
+		t.Errorf("recv after the timeout = %d, want 9", v.Int())
 	}
 }
 
@@ -89,8 +89,8 @@ func TestSelectTimeoutWakesOnLaterSend(t *testing.T) {
 			panic(err)
 		}
 	}()
-	if v := mustInvoke(t, in, "selectTimeout", chans(a, b), interpreter.IntVal(5000)); v.Int != 7 {
-		t.Errorf("selectTimeout = %d, want 7", v.Int)
+	if v := mustInvoke(t, in, "selectTimeout", chans(a, b), interpreter.IntVal(5000)); v.Int() != 7 {
+		t.Errorf("selectTimeout = %d, want 7", v.Int())
 	}
 }
 
@@ -149,7 +149,7 @@ func TestSelectTimeoutNoLeak(t *testing.T) {
 	}
 	// The wakers were unsubscribed: a send still lands in the buffer.
 	mustInvoke(t, in, "send", b, interpreter.IntVal(1))
-	if v := mustInvoke(t, in, "recv", b); v.Int != 1 {
-		t.Errorf("recv = %d", v.Int)
+	if v := mustInvoke(t, in, "recv", b); v.Int() != 1 {
+		t.Errorf("recv = %d", v.Int())
 	}
 }

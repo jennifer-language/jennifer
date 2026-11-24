@@ -135,8 +135,8 @@ func TestPointerRejectsBadTilde(t *testing.T) {
 		}
 	}
 	// `~01` is `~1` (decode ~0 first would wrongly give `/`).
-	if got := call(t, asIntFn, d, ptr("/~01x")); got.Int != 3 {
-		t.Errorf("/~01x = %d, want 3", got.Int)
+	if got := call(t, asIntFn, d, ptr("/~01x")); got.Int() != 3 {
+		t.Errorf("/~01x = %d, want 3", got.Int())
 	}
 }
 

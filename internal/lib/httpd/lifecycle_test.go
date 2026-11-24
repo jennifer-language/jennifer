@@ -40,12 +40,12 @@ func TestZeroValueHandlesRefused(t *testing.T) {
 	<-got
 	zeroSrv, zeroReq := makeServer(0), makeRequest(0)
 	if v, err := addressFn(noCtx, []Value{zeroSrv}); err == nil || !strings.Contains(err.Error(), "unset") {
-		t.Errorf("address(zero Server) = %q, %v; want an unset-handle error", v.Str, err)
+		t.Errorf("address(zero Server) = %q, %v; want an unset-handle error", v.Str(), err)
 	}
 	if v, err := methodFn(noCtx, []Value{zeroReq}); err == nil || !strings.Contains(err.Error(), "unset") {
-		t.Errorf("method(zero Request) = %q, %v; want an unset-handle error", v.Str, err)
+		t.Errorf("method(zero Request) = %q, %v; want an unset-handle error", v.Str(), err)
 	}
-	if v, _ := isOpenFn(noCtx, []Value{zeroReq}); v.Bool {
+	if v, _ := isOpenFn(noCtx, []Value{zeroReq}); v.Bool() {
 		t.Error("isOpen(zero Request) = true")
 	}
 	if _, err := shutdownFn(noCtx, []Value{zeroSrv}); err == nil {
@@ -128,7 +128,7 @@ func TestShutdownGraceExpires(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		v, _ := isOpenFn(noCtx, []Value{req})
-		if !v.Bool {
+		if !v.Bool() {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -168,7 +168,7 @@ func TestDirListingHidesDotfiles(t *testing.T) {
 	get := func(p string) (int, string) {
 		t.Helper()
 		c := &http.Client{Timeout: 3 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-		resp, err := c.Get("http://" + addrV.Str + p)
+		resp, err := c.Get("http://" + addrV.Str() + p)
 		if err != nil {
 			t.Fatalf("GET %s: %v", p, err)
 		}

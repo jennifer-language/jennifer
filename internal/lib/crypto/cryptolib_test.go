@@ -24,14 +24,14 @@ func TestRandBytesLengthAndBounds(t *testing.T) {
 		if err != nil {
 			t.Fatalf("randBytes(%d): %v", n, err)
 		}
-		if v.Kind != interpreter.KindBytes || int64(len(v.Bytes)) != n {
-			t.Errorf("randBytes(%d): got %d bytes", n, len(v.Bytes))
+		if v.Kind != interpreter.KindBytes || int64(len(v.Bytes())) != n {
+			t.Errorf("randBytes(%d): got %d bytes", n, len(v.Bytes()))
 		}
 	}
 	// Two draws of a decent width almost never collide.
 	a, _ := randBytesFn(noCtx, []interpreter.Value{interpreter.IntVal(32)})
 	b, _ := randBytesFn(noCtx, []interpreter.Value{interpreter.IntVal(32)})
-	if string(a.Bytes) == string(b.Bytes) {
+	if string(a.Bytes()) == string(b.Bytes()) {
 		t.Error("two 32-byte draws were identical")
 	}
 	if _, err := randBytesFn(noCtx, []interpreter.Value{interpreter.IntVal(-1)}); err == nil {
@@ -139,10 +139,10 @@ func TestRandIntUniformAndBounds(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if v.Int < 3 || v.Int > 9 {
-			t.Fatalf("randInt out of range: %d", v.Int)
+		if v.Int() < 3 || v.Int() > 9 {
+			t.Fatalf("randInt out of range: %d", v.Int())
 		}
-		seen[v.Int] = true
+		seen[v.Int()] = true
 	}
 	for want := int64(3); want <= 9; want++ {
 		if !seen[want] {
@@ -151,8 +151,8 @@ func TestRandIntUniformAndBounds(t *testing.T) {
 	}
 	// lo == hi is a fixed point; lo > hi errors.
 	v, _ := randIntFn(noCtx, []interpreter.Value{interpreter.IntVal(5), interpreter.IntVal(5)})
-	if v.Int != 5 {
-		t.Errorf("randInt(5,5) = %d, want 5", v.Int)
+	if v.Int() != 5 {
+		t.Errorf("randInt(5,5) = %d, want 5", v.Int())
 	}
 	if _, err := randIntFn(noCtx, []interpreter.Value{interpreter.IntVal(9), interpreter.IntVal(3)}); err == nil {
 		t.Error("lo > hi should error")
@@ -179,7 +179,7 @@ func TestHkdfKnownAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := hex.EncodeToString(v.Bytes); got != wantHex {
+	if got := hex.EncodeToString(v.Bytes()); got != wantHex {
 		t.Errorf("hkdf =\n %s\nwant\n %s", got, wantHex)
 	}
 	if _, err := hkdfFn(noCtx, []interpreter.Value{interpreter.StringVal("sha256"), bytesArg(ikm), bytesArg(salt), bytesArg(info), interpreter.IntVal(0)}); err == nil {
@@ -195,7 +195,7 @@ func TestHkdfKnownAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := hex.EncodeToString(v1.Bytes); got != want1 {
+	if got := hex.EncodeToString(v1.Bytes()); got != want1 {
 		t.Errorf("hkdf(sha1) =\n %s\nwant\n %s", got, want1)
 	}
 }
@@ -217,7 +217,7 @@ func TestPbkdf2KnownAnswer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := hex.EncodeToString(v.Bytes); got != c.wantHex {
+		if got := hex.EncodeToString(v.Bytes()); got != c.wantHex {
 			t.Errorf("pbkdf(%s) =\n %s\nwant\n %s", c.algo, got, c.wantHex)
 		}
 	}
@@ -270,15 +270,15 @@ func genKeypair(t *testing.T, algo string) (pub, priv []byte) {
 	if err != nil {
 		t.Fatalf("keypair(%q): %v", algo, err)
 	}
-	if v.StructName != "Keypair" || len(v.Fields) != 2 {
+	if v.StructName() != "Keypair" || len(v.Fields()) != 2 {
 		t.Fatalf("keypair(%q): got %s, want a crypto.Keypair", algo, v.Display())
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		switch f.Name {
 		case "public":
-			pub = f.Value.Bytes
+			pub = f.Value.Bytes()
 		case "private":
-			priv = f.Value.Bytes
+			priv = f.Value.Bytes()
 		}
 	}
 	return pub, priv
@@ -314,7 +314,7 @@ func mustGCMSeal(t *testing.T, key, pt, nonce, aad []byte) []byte {
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
-	return v.Bytes
+	return v.Bytes()
 }
 
 // NIST AES-256-GCM known-answer vectors (GCM spec test cases 13/14: zero key,
@@ -331,8 +331,8 @@ func TestGCMKnownAnswer(t *testing.T) {
 		t.Errorf("NIST case 13 encrypt = %x, want %x", got, tag13)
 	}
 	v, err := gcmOpen(key, tag13, iv, nil)
-	if err != nil || len(v.Bytes) != 0 {
-		t.Errorf("NIST case 13: got %x err=%v, want empty plaintext", v.Bytes, err)
+	if err != nil || len(v.Bytes()) != 0 {
+		t.Errorf("NIST case 13: got %x err=%v, want empty plaintext", v.Bytes(), err)
 	}
 	// Case 14: 16 zero bytes of plaintext.
 	ct14, _ := hex.DecodeString("cea7403d4d606b6e074ec5d3baf39d18")
@@ -342,8 +342,8 @@ func TestGCMKnownAnswer(t *testing.T) {
 		t.Errorf("NIST case 14 encrypt = %x, want %x", got, box)
 	}
 	v, err = gcmOpen(key, box, iv, nil)
-	if err != nil || !bytes.Equal(v.Bytes, make([]byte, 16)) {
-		t.Errorf("NIST case 14: got %x err=%v, want 16 zero bytes", v.Bytes, err)
+	if err != nil || !bytes.Equal(v.Bytes(), make([]byte, 16)) {
+		t.Errorf("NIST case 14: got %x err=%v, want 16 zero bytes", v.Bytes(), err)
 	}
 	// A box shorter than the tag (here empty, and 15 bytes) must fail cleanly.
 	for _, short := range [][]byte{nil, tag13[:15]} {
@@ -368,8 +368,8 @@ func TestEncryptRoundTrip(t *testing.T) {
 					t.Errorf("AES-%d: box len = %d, want %d", n*8, len(box), len(pt)+16)
 				}
 				v, err := gcmOpen(key, box, nonce, a)
-				if err != nil || !bytes.Equal(v.Bytes, pt) {
-					t.Errorf("AES-%d decrypt: %q err=%v, want %q", n*8, v.Bytes, err, pt)
+				if err != nil || !bytes.Equal(v.Bytes(), pt) {
+					t.Errorf("AES-%d decrypt: %q err=%v, want %q", n*8, v.Bytes(), err, pt)
 				}
 			}
 		}
@@ -494,15 +494,15 @@ func TestEd25519KnownAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
-	if !bytes.Equal(sv.Bytes, wantSig) {
-		t.Errorf("sign =\n %x\nwant\n %x", sv.Bytes, wantSig)
+	if !bytes.Equal(sv.Bytes(), wantSig) {
+		t.Errorf("sign =\n %x\nwant\n %x", sv.Bytes(), wantSig)
 	}
-	if v, err := edVerify(pub, msg, wantSig); err != nil || !v.Bool {
+	if v, err := edVerify(pub, msg, wantSig); err != nil || !v.Bool() {
 		t.Errorf("RFC 8032 signature should verify true (err %v)", err)
 	}
 	pv, err := publicKeyFn(noCtx, []interpreter.Value{strArg("ed25519"), bytesArg(priv)})
-	if err != nil || !bytes.Equal(pv.Bytes, pub) {
-		t.Errorf("publicKey = %x, %v; want %x", pv.Bytes, err, pub)
+	if err != nil || !bytes.Equal(pv.Bytes(), pub) {
+		t.Errorf("publicKey = %x, %v; want %x", pv.Bytes(), err, pub)
 	}
 }
 
@@ -512,25 +512,25 @@ func TestSignVerifyRoundTrip(t *testing.T) {
 		t.Fatalf("key sizes: pub=%d priv=%d", len(pub), len(priv))
 	}
 	pv, err := publicKeyFn(noCtx, []interpreter.Value{strArg("ed25519"), bytesArg(priv)})
-	if err != nil || !bytes.Equal(pv.Bytes, pub) {
+	if err != nil || !bytes.Equal(pv.Bytes(), pub) {
 		t.Errorf("publicKey does not match the keypair's public key (err %v)", err)
 	}
 	msg := []byte("sign this message")
 	sigV, err := edSign(priv, msg)
-	if err != nil || len(sigV.Bytes) != 64 {
-		t.Fatalf("sign: %v (len %d)", err, len(sigV.Bytes))
+	if err != nil || len(sigV.Bytes()) != 64 {
+		t.Fatalf("sign: %v (len %d)", err, len(sigV.Bytes()))
 	}
 	// valid
-	if v, _ := edVerify(pub, msg, sigV.Bytes); !v.Bool {
+	if v, _ := edVerify(pub, msg, sigV.Bytes()); !v.Bool() {
 		t.Error("valid signature should verify true")
 	}
 	// tampered message
-	if v, _ := edVerify(pub, []byte("sign that message"), sigV.Bytes); v.Bool {
+	if v, _ := edVerify(pub, []byte("sign that message"), sigV.Bytes()); v.Bool() {
 		t.Error("tampered message should verify false")
 	}
 	// cross-key: another keypair's public must reject this signature
 	pub2, _ := genKeypair(t, "ed25519")
-	if v, _ := edVerify(pub2, msg, sigV.Bytes); v.Bool {
+	if v, _ := edVerify(pub2, msg, sigV.Bytes()); v.Bool() {
 		t.Error("wrong public key should verify false")
 	}
 }
@@ -548,7 +548,7 @@ func TestEd25519LengthErrors(t *testing.T) {
 	// error (and not a panic).
 	for _, n := range []int{0, 10, 63, 65} {
 		v, err := edVerify(make([]byte, 32), msg, make([]byte, n))
-		if err != nil || v.Kind != interpreter.KindBool || v.Bool {
+		if err != nil || v.Kind != interpreter.KindBool || v.Bool() {
 			t.Errorf("verify with a %d-byte signature = %v (err %v), want false", n, v.Display(), err)
 		}
 	}
@@ -572,7 +572,7 @@ func TestConcurrentRandBytesDistinctNonces(t *testing.T) {
 				t.Errorf("randBytes: %v", err)
 				return
 			}
-			nonces[i] = v.Bytes
+			nonces[i] = v.Bytes()
 		}(i)
 	}
 	wg.Wait()

@@ -21,7 +21,7 @@ func TestToIntRejectsUnrepresentableFloats(t *testing.T) {
 		}
 	}
 	// In-range truncation still works.
-	if r, err := toIntFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.FloatVal(3.9)}); err != nil || r.Int != 3 {
+	if r, err := toIntFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.FloatVal(3.9)}); err != nil || r.Int() != 3 {
 		t.Errorf("toInt(3.9) = %+v, err %v; want 3", r, err)
 	}
 }
@@ -35,7 +35,7 @@ func TestToFloatRejectsNonFinite(t *testing.T) {
 		}
 	}
 	// A normal float string still parses.
-	if v, err := toFloatFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("3.5")}); err != nil || v.Float != 3.5 {
+	if v, err := toFloatFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("3.5")}); err != nil || v.Float() != 3.5 {
 		t.Errorf("toFloat(\"3.5\") = %+v, err %v", v, err)
 	}
 }
@@ -60,20 +60,20 @@ func mustErr(t *testing.T, label string, fn func(interpreter.BuiltinCtx, []inter
 
 func TestToIntAcrossKinds(t *testing.T) {
 	I, F, S, B := interpreter.IntVal, interpreter.FloatVal, interpreter.StringVal, interpreter.BoolVal
-	if v := mustVal(t, toIntFn, I(7)); v.Int != 7 {
-		t.Errorf("toInt(int 7) = %d", v.Int)
+	if v := mustVal(t, toIntFn, I(7)); v.Int() != 7 {
+		t.Errorf("toInt(int 7) = %d", v.Int())
 	}
-	if v := mustVal(t, toIntFn, F(-3.9)); v.Int != -3 { // truncate toward zero
-		t.Errorf("toInt(-3.9) = %d, want -3", v.Int)
+	if v := mustVal(t, toIntFn, F(-3.9)); v.Int() != -3 { // truncate toward zero
+		t.Errorf("toInt(-3.9) = %d, want -3", v.Int())
 	}
-	if v := mustVal(t, toIntFn, S("-42")); v.Int != -42 {
-		t.Errorf("toInt(\"-42\") = %d", v.Int)
+	if v := mustVal(t, toIntFn, S("-42")); v.Int() != -42 {
+		t.Errorf("toInt(\"-42\") = %d", v.Int())
 	}
-	if v := mustVal(t, toIntFn, B(true)); v.Int != 1 {
-		t.Errorf("toInt(true) = %d, want 1", v.Int)
+	if v := mustVal(t, toIntFn, B(true)); v.Int() != 1 {
+		t.Errorf("toInt(true) = %d, want 1", v.Int())
 	}
-	if v := mustVal(t, toIntFn, B(false)); v.Int != 0 {
-		t.Errorf("toInt(false) = %d, want 0", v.Int)
+	if v := mustVal(t, toIntFn, B(false)); v.Int() != 0 {
+		t.Errorf("toInt(false) = %d, want 0", v.Int())
 	}
 	mustErr(t, "toInt(\"abc\")", toIntFn, S("abc"))
 	mustErr(t, "toInt(\"3.5\")", toIntFn, S("3.5"))   // not an integer string
@@ -97,8 +97,8 @@ func TestToIntRadix(t *testing.T) {
 		{"41", 16, 65}, {"ff", 16, 255}, {"-ff", 16, -255},
 		{"17", 8, 15}, {"101", 2, 5}, {"42", 10, 42},
 	} {
-		if v := mustVal(t, toIntFn, S(c.s), I(c.base)); v.Int != c.want {
-			t.Errorf("toInt(%q, %d) = %d, want %d", c.s, c.base, v.Int, c.want)
+		if v := mustVal(t, toIntFn, S(c.s), I(c.base)); v.Int() != c.want {
+			t.Errorf("toInt(%q, %d) = %d, want %d", c.s, c.base, v.Int(), c.want)
 		}
 	}
 	// Errors: bad digit for the base, an unsupported radix, a radix on a non-string,
@@ -117,14 +117,14 @@ func TestToIntRadix(t *testing.T) {
 
 func TestToFloatAcrossKinds(t *testing.T) {
 	I, F, S, B := interpreter.IntVal, interpreter.FloatVal, interpreter.StringVal, interpreter.BoolVal
-	if v := mustVal(t, toFloatFn, I(5)); v.Float != 5.0 {
-		t.Errorf("toFloat(int 5) = %g", v.Float)
+	if v := mustVal(t, toFloatFn, I(5)); v.Float() != 5.0 {
+		t.Errorf("toFloat(int 5) = %g", v.Float())
 	}
-	if v := mustVal(t, toFloatFn, F(2.5)); v.Float != 2.5 {
-		t.Errorf("toFloat(2.5) = %g", v.Float)
+	if v := mustVal(t, toFloatFn, F(2.5)); v.Float() != 2.5 {
+		t.Errorf("toFloat(2.5) = %g", v.Float())
 	}
-	if v := mustVal(t, toFloatFn, B(true)); v.Float != 1.0 {
-		t.Errorf("toFloat(true) = %g", v.Float)
+	if v := mustVal(t, toFloatFn, B(true)); v.Float() != 1.0 {
+		t.Errorf("toFloat(true) = %g", v.Float())
 	}
 	mustErr(t, "toFloat(\"x\")", toFloatFn, S("x"))
 	mustErr(t, "toFloat(null)", toFloatFn, interpreter.Null())
@@ -143,8 +143,8 @@ func TestToString(t *testing.T) {
 		{interpreter.FloatVal(2.5), "2.5"},
 	}
 	for _, c := range cases {
-		if v := mustVal(t, toStringFn, c.in); v.Kind != interpreter.KindString || v.Str != c.want {
-			t.Errorf("toString(%+v) = %q, want %q", c.in, v.Str, c.want)
+		if v := mustVal(t, toStringFn, c.in); v.Kind != interpreter.KindString || v.Str() != c.want {
+			t.Errorf("toString(%+v) = %q, want %q", c.in, v.Str(), c.want)
 		}
 	}
 	mustErr(t, "toString() arity", toStringFn)
@@ -158,26 +158,26 @@ func TestToStringRadixRemoved(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `io.sprintf("%d|base=16", n)`) {
 		t.Errorf("toString(204, 16): want the removal error, got %v", err)
 	}
-	if v := mustVal(t, toIntFn, S("cc"), I(16)); v.Int != 204 {
-		t.Errorf("toInt(\"cc\", 16) = %d, want 204", v.Int)
+	if v := mustVal(t, toIntFn, S("cc"), I(16)); v.Int() != 204 {
+		t.Errorf("toInt(\"cc\", 16) = %d, want 204", v.Int())
 	}
 }
 
 func TestToBoolCanonicalOnly(t *testing.T) {
 	I, F, S, B := interpreter.IntVal, interpreter.FloatVal, interpreter.StringVal, interpreter.BoolVal
-	if v := mustVal(t, toBoolFn, B(true)); !v.Bool {
+	if v := mustVal(t, toBoolFn, B(true)); !v.Bool() {
 		t.Error("toBool(true) should be true")
 	}
-	if v := mustVal(t, toBoolFn, I(0)); v.Bool {
+	if v := mustVal(t, toBoolFn, I(0)); v.Bool() {
 		t.Error("toBool(0) should be false")
 	}
-	if v := mustVal(t, toBoolFn, I(1)); !v.Bool {
+	if v := mustVal(t, toBoolFn, I(1)); !v.Bool() {
 		t.Error("toBool(1) should be true")
 	}
-	if v := mustVal(t, toBoolFn, F(0.0)); v.Bool {
+	if v := mustVal(t, toBoolFn, F(0.0)); v.Bool() {
 		t.Error("toBool(0.0) should be false")
 	}
-	if v := mustVal(t, toBoolFn, S("false")); v.Bool {
+	if v := mustVal(t, toBoolFn, S("false")); v.Bool() {
 		t.Error("toBool(\"false\") should be false")
 	}
 	// Non-canonical inputs error (no truthiness coercion).
@@ -200,20 +200,20 @@ func TestTypeOf(t *testing.T) {
 		{interpreter.BytesVal(nil), "bytes"},
 	}
 	for _, c := range cases {
-		if v := mustVal(t, typeOfFn, c.in); v.Str != c.want {
-			t.Errorf("typeOf(%+v) = %q, want %q", c.in, v.Str, c.want)
+		if v := mustVal(t, typeOfFn, c.in); v.Str() != c.want {
+			t.Errorf("typeOf(%+v) = %q, want %q", c.in, v.Str(), c.want)
 		}
 	}
 }
 
 func TestObjectType(t *testing.T) {
 	obj := interpreter.ObjectVal("json", "Value", interpreter.Null())
-	if v := mustVal(t, objectTypeFn, obj); v.Str != "json.Value" {
-		t.Errorf("objectType(json.Value) = %q", v.Str)
+	if v := mustVal(t, objectTypeFn, obj); v.Str() != "json.Value" {
+		t.Errorf("objectType(json.Value) = %q", v.Str())
 	}
 	// typeOf of the same object reports the generic kind.
-	if v := mustVal(t, typeOfFn, obj); v.Str != "object" {
-		t.Errorf("typeOf(object) = %q, want \"object\"", v.Str)
+	if v := mustVal(t, typeOfFn, obj); v.Str() != "object" {
+		t.Errorf("typeOf(object) = %q, want \"object\"", v.Str())
 	}
 	mustErr(t, "objectType(int)", objectTypeFn, interpreter.IntVal(1))
 }
@@ -224,11 +224,11 @@ func TestCodepointRoundTrip(t *testing.T) {
 		s string
 		n int64
 	}{{"A", 65}, {"\u00e9", 0xE9}, {"\u20ac", 0x20AC}, {"\U0001F600", 0x1F600}} {
-		if v := mustVal(t, toCodepointFn, interpreter.StringVal(c.s)); v.Int != c.n {
-			t.Errorf("toCodepoint(%q) = %d, want %d", c.s, v.Int, c.n)
+		if v := mustVal(t, toCodepointFn, interpreter.StringVal(c.s)); v.Int() != c.n {
+			t.Errorf("toCodepoint(%q) = %d, want %d", c.s, v.Int(), c.n)
 		}
-		if v := mustVal(t, fromCodepointFn, interpreter.IntVal(c.n)); v.Str != c.s {
-			t.Errorf("fromCodepoint(%d) = %q, want %q", c.n, v.Str, c.s)
+		if v := mustVal(t, fromCodepointFn, interpreter.IntVal(c.n)); v.Str() != c.s {
+			t.Errorf("fromCodepoint(%d) = %q, want %q", c.n, v.Str(), c.s)
 		}
 	}
 	// toCodepoint requires exactly one code point.
@@ -263,8 +263,8 @@ func TestToFloatDecimalOnly(t *testing.T) {
 	}
 	for s, want := range ok {
 		v, err := toFloatFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal(s)})
-		if err != nil || v.Float != want {
-			t.Errorf("toFloat(%q) = %v, %v; want %g", s, v.Float, err, want)
+		if err != nil || v.Float() != want {
+			t.Errorf("toFloat(%q) = %v, %v; want %g", s, v.Float(), err, want)
 		}
 	}
 	for _, s := range []string{
@@ -282,11 +282,11 @@ func TestToFloatDecimalOnly(t *testing.T) {
 func TestToCodepointInvalidUTF8(t *testing.T) {
 	for _, s := range []string{"\xff", "\x80", "\xc3"} {
 		if v, err := toCodepointFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal(s)}); err == nil {
-			t.Errorf("toCodepoint(%q) = %d, want an error", s, v.Int)
+			t.Errorf("toCodepoint(%q) = %d, want an error", s, v.Int())
 		}
 	}
-	if v, err := toCodepointFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("\uFFFD")}); err != nil || v.Int != 0xFFFD {
-		t.Errorf("toCodepoint(U+FFFD) = %v, %v", v.Int, err)
+	if v, err := toCodepointFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("\uFFFD")}); err != nil || v.Int() != 0xFFFD {
+		t.Errorf("toCodepoint(U+FFFD) = %v, %v", v.Int(), err)
 	}
 }
 

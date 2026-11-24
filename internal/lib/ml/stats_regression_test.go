@@ -25,7 +25,7 @@ func TestMultipleRegressionReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := ok(t, linearRegressionFn, X, y)
-	icpt := ok(t, interceptFn, m).Float
+	icpt := ok(t, interceptFn, m).Float()
 	coef := fvals(ok(t, coefficientsFn, m))
 	got := append([]float64{icpt}, coef...)
 	want := fvals(beta)

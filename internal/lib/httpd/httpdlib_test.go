@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/memlimit"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -56,7 +57,7 @@ func startServer(t *testing.T) (Value, string) {
 	if err != nil {
 		t.Fatalf("address: %v", err)
 	}
-	return srv, addrV.Str
+	return srv, addrV.Str()
 }
 
 // serveOnce runs one accept + handler(req) pass in a goroutine.
@@ -108,8 +109,8 @@ func TestRequestAccessors(t *testing.T) {
 		q, _ := queryFn(noCtx, []Value{req, interpreter.StringVal("x")})
 		h, _ := headerFn(noCtx, []Value{req, interpreter.StringVal("X-Test")})
 		b, _ := bodyFn(noCtx, []Value{req})
-		gotMethod, gotPath, gotQuery, gotHeader = m.Str, p.Str, q.Str, h.Str
-		gotBody = string(b.Bytes)
+		gotMethod, gotPath, gotQuery, gotHeader = m.Str(), p.Str(), q.Str(), h.Str()
+		gotBody = string(b.Bytes())
 		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("ok")})
 	})
 
@@ -262,8 +263,8 @@ func TestUnixSocketListen(t *testing.T) {
 
 	// The bound address is the socket path.
 	addrV, _ := addressFn(noCtx, []Value{srv})
-	if addrV.Str != sock {
-		t.Errorf("address = %q, want %q", addrV.Str, sock)
+	if addrV.Str() != sock {
+		t.Errorf("address = %q, want %q", addrV.Str(), sock)
 	}
 
 	serveOnce(srv, func(req Value) {
@@ -315,8 +316,8 @@ func TestRequestScratch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("requestValue (absent): %v", err)
 	}
-	if got.Kind != interpreter.KindString || got.Str != "" {
-		t.Fatalf("absent key: want empty string, got %v %q", got.Kind, got.Str)
+	if got.Kind != interpreter.KindString || got.Str() != "" {
+		t.Fatalf("absent key: want empty string, got %v %q", got.Kind, got.Str())
 	}
 
 	// Set then read back.
@@ -327,8 +328,8 @@ func TestRequestScratch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("requestValue (set): %v", err)
 	}
-	if got.Str != "v1" {
-		t.Fatalf("after set: want %q, got %q", "v1", got.Str)
+	if got.Str() != "v1" {
+		t.Fatalf("after set: want %q, got %q", "v1", got.Str())
 	}
 
 	// Overwrite.
@@ -336,8 +337,8 @@ func TestRequestScratch(t *testing.T) {
 		t.Fatalf("setRequestValue (overwrite): %v", err)
 	}
 	got, _ = requestValueFn(noCtx, []Value{req, interpreter.StringVal("k")})
-	if got.Str != "v2" {
-		t.Fatalf("after overwrite: want %q, got %q", "v2", got.Str)
+	if got.Str() != "v2" {
+		t.Fatalf("after overwrite: want %q, got %q", "v2", got.Str())
 	}
 }
 
@@ -402,7 +403,7 @@ func TestRespondCopiesBytesBody(t *testing.T) {
 		buf := interpreter.BytesVal([]byte("hello"))
 		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), buf})
 		// Simulates `$buf[0] = 88;` right after httpd.respond returns.
-		buf.Bytes[0] = 'X'
+		buf.Bytes()[0] = 'X'
 	})
 
 	resp, err := http.Get("http://" + addr + "/")
@@ -443,7 +444,7 @@ func TestOversizeBodyRejectedNotTruncated(t *testing.T) {
 	serveOnce(srv, func(req Value) {
 		b, err := bodyFn(noCtx, []Value{req})
 		if err == nil {
-			gotLen = int64(len(b.Bytes))
+			gotLen = int64(len(b.Bytes()))
 		}
 		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("ok")})
 	})
@@ -556,7 +557,7 @@ func TestListenWithEnforcesPerServerBodyCap(t *testing.T) {
 	}
 	defer shutdownFn(noCtx, []Value{srvV})
 	addrV, _ := addressFn(noCtx, []Value{srvV})
-	addr := addrV.Str
+	addr := addrV.Str()
 
 	// Over the 1 KiB per-server cap: 413 on its own, and the message names the
 	// actual limit so it is self-explaining.
@@ -579,7 +580,7 @@ func TestListenWithEnforcesPerServerBodyCap(t *testing.T) {
 	serveOnce(srvV, func(req Value) {
 		b, err := bodyFn(noCtx, []Value{req})
 		if err == nil {
-			gotLen = int64(len(b.Bytes))
+			gotLen = int64(len(b.Bytes()))
 		}
 		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("ok")})
 	})
@@ -656,44 +657,6 @@ func TestSetMaxBufferBudget(t *testing.T) {
 	}
 }
 
-// The cgroup / meminfo parsers that back setMaxBufferBudgetFromRAM.
-func TestMemLimitParsers(t *testing.T) {
-	// /proc/meminfo -> bytes.
-	if got, ok := parseMemTotalBytes("MemFree: 100 kB\nMemTotal:   16384000 kB\nBuffers: 1 kB\n"); !ok || got != 16384000*1024 {
-		t.Errorf("parseMemTotalBytes = (%d, %v), want (%d, true)", got, ok, int64(16384000)*1024)
-	}
-	if _, ok := parseMemTotalBytes("Buffers: 1 kB\n"); ok {
-		t.Error("parseMemTotalBytes should fail when MemTotal is absent")
-	}
-
-	// cgroup v2 memory.max: "max" = unlimited, a number = a cap.
-	if _, ok := parseCgroupV2MemoryMax("max\n"); ok {
-		t.Error(`parseCgroupV2MemoryMax("max") should report no limit`)
-	}
-	if got, ok := parseCgroupV2MemoryMax(" 536870912 \n"); !ok || got != 536870912 {
-		t.Errorf("parseCgroupV2MemoryMax = (%d, %v), want (536870912, true)", got, ok)
-	}
-
-	// cgroup v1 limit_in_bytes: a near-int64-max sentinel = unlimited.
-	if _, ok := parseCgroupV1Limit("9223372036854771712\n"); ok {
-		t.Error("parseCgroupV1Limit should treat the sentinel as unlimited")
-	}
-	if got, ok := parseCgroupV1Limit("268435456"); !ok || got != 268435456 {
-		t.Errorf("parseCgroupV1Limit = (%d, %v), want (268435456, true)", got, ok)
-	}
-
-	// /proc/self/cgroup path extraction.
-	if p, ok := cgroupV2Path("0::/system.slice/app.service\n"); !ok || p != "/system.slice/app.service" {
-		t.Errorf("cgroupV2Path = (%q, %v)", p, ok)
-	}
-	if p, ok := cgroupV1MemoryPath("9:cpu,cpuacct:/x\n8:memory:/system.slice/app\n"); !ok || p != "/system.slice/app" {
-		t.Errorf("cgroupV1MemoryPath = (%q, %v)", p, ok)
-	}
-	if _, ok := cgroupV1MemoryPath("9:cpu,cpuacct:/x\n"); ok {
-		t.Error("cgroupV1MemoryPath should fail when no memory controller line is present")
-	}
-}
-
 // budgetFromLimit applies the fraction and floors at one default body.
 func TestBudgetFromLimit(t *testing.T) {
 	if got := budgetFromLimit(8<<30, 0.5); got != 4<<30 {
@@ -723,7 +686,7 @@ func TestSetMaxBufferBudgetFromRAM(t *testing.T) {
 
 	// On this Linux host, detection should succeed and set a floored, positive
 	// budget no larger than the detected machine limit.
-	limit, derr := detectMemoryLimitBytes()
+	limit, derr := memlimit.Detect()
 	res, err := setMaxBufferBudgetFromRAMFn(noCtx, []Value{interpreter.FloatVal(0.5)})
 	if derr != nil {
 		// Non-Linux / unusual host: the builtin must error cleanly, not panic.
@@ -735,11 +698,11 @@ func TestSetMaxBufferBudgetFromRAM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setMaxBufferBudgetFromRAM(0.5): %v", err)
 	}
-	if res.Kind != interpreter.KindInt || res.Int < minBufferBudget || res.Int > limit {
+	if res.Kind != interpreter.KindInt || res.Int() < minBufferBudget || res.Int() > limit {
 		t.Fatalf("budget = %v (%s), want an int in [%d, %d]", res, res.Kind, int64(minBufferBudget), limit)
 	}
-	if bufferBudget.Load() != res.Int {
-		t.Fatalf("live budget %d != returned %d", bufferBudget.Load(), res.Int)
+	if bufferBudget.Load() != res.Int() {
+		t.Fatalf("live budget %d != returned %d", bufferBudget.Load(), res.Int())
 	}
 }
 
@@ -835,7 +798,7 @@ func TestSlowBodiesDoNotBlockOtherRequests(t *testing.T) {
 	}
 	defer shutdownFn(noCtx, []Value{srv})
 	addrV, _ := addressFn(noCtx, []Value{srv})
-	addr := addrV.Str
+	addr := addrV.Str()
 	for i := 0; i < 6; i++ {
 		c := trickle(t, addr, 60000)
 		defer c.Close()
@@ -865,7 +828,7 @@ func TestBodyTimeoutOption(t *testing.T) {
 	}
 	defer shutdownFn(noCtx, []Value{srv})
 	addrV, _ := addressFn(noCtx, []Value{srv})
-	c := trickle(t, addrV.Str, 1000)
+	c := trickle(t, addrV.Str(), 1000)
 	defer c.Close()
 	start := time.Now()
 	c.SetReadDeadline(time.Now().Add(5 * time.Second))
@@ -894,8 +857,8 @@ func TestBodyBufferBudget(t *testing.T) {
 	}
 	defer shutdownFn(noCtx, []Value{srv})
 	addrV, _ := addressFn(noCtx, []Value{srv})
-	addr := addrV.Str
-	st, err := resolveServer("test", srv.Fields[0].Value.Int)
+	addr := addrV.Str()
+	st, err := resolveServer("test", srv.Fields()[0].Value.Int())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -976,7 +939,7 @@ func TestWriteTimeoutOption(t *testing.T) {
 	}
 	defer shutdownFn(noCtx, []Value{srv})
 	addrV, _ := addressFn(noCtx, []Value{srv})
-	assertStalledWriteAborted(t, srv, addrV.Str, "writeTimeoutMs (300ms)")
+	assertStalledWriteAborted(t, srv, addrV.Str(), "writeTimeoutMs (300ms)")
 
 	_, err = listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), interpreter.NamespacedStructVal(LibraryName, "Options", []interpreter.StructField{
 		{Name: "writeTimeoutMs", Value: interpreter.IntVal(-1)},
@@ -1120,7 +1083,7 @@ func TestEtagConditionalGET(t *testing.T) {
 	serveOnce(srv, func(req Value) {
 		defer wg.Done()
 		firstRet, _ = etagFn(noCtx, []Value{req, interpreter.StringVal("v1")})
-		if !firstRet.Bool {
+		if !firstRet.Bool() {
 			_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("full body")})
 		}
 	})
@@ -1131,7 +1094,7 @@ func TestEtagConditionalGET(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	wg.Wait()
-	if firstRet.Bool {
+	if firstRet.Bool() {
 		t.Errorf("first etag() = true, want false (no If-None-Match)")
 	}
 	if resp.StatusCode != 200 || string(body) != "full body" {
@@ -1148,7 +1111,7 @@ func TestEtagConditionalGET(t *testing.T) {
 	serveOnce(srv, func(req Value) {
 		defer wg.Done()
 		secondRet, _ = etagFn(noCtx, []Value{req, interpreter.StringVal("v1")})
-		if !secondRet.Bool {
+		if !secondRet.Bool() {
 			_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("full body")})
 		}
 	})
@@ -1161,7 +1124,7 @@ func TestEtagConditionalGET(t *testing.T) {
 	body2, _ := io.ReadAll(resp2.Body)
 	resp2.Body.Close()
 	wg.Wait()
-	if !secondRet.Bool {
+	if !secondRet.Bool() {
 		t.Errorf("second etag() = false, want true (If-None-Match matched)")
 	}
 	if resp2.StatusCode != http.StatusNotModified {
@@ -1313,11 +1276,11 @@ func TestRespondTimeoutOption(t *testing.T) {
 		after, _ := isOpenFn(noCtx, []Value{req})
 		tAfter, _ := timedOutFn(noCtx, []Value{req})
 		_, rerr := respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("late")})
-		got <- late{before.Bool, after.Bool, tBefore.Bool, tAfter.Bool, rerr}
+		got <- late{before.Bool(), after.Bool(), tBefore.Bool(), tAfter.Bool(), rerr}
 	}()
 
 	start := time.Now()
-	resp, err := http.Get("http://" + addrV.Str + "/")
+	resp, err := http.Get("http://" + addrV.Str() + "/")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -1390,8 +1353,8 @@ func TestBodilessRequestServedWhenBudgetFull(t *testing.T) {
 	}
 	defer shutdownFn(noCtx, []Value{srv})
 	addrV, _ := addressFn(noCtx, []Value{srv})
-	st, _ := resolveServer("test", srv.Fields[0].Value.Int)
-	c := trickle(t, addrV.Str, 900)
+	st, _ := resolveServer("test", srv.Fields()[0].Value.Int())
+	c := trickle(t, addrV.Str(), 900)
 	defer c.Close()
 	for i := 0; st.buffered.Load() == 0; i++ {
 		if i > 200 {
@@ -1402,7 +1365,7 @@ func TestBodilessRequestServedWhenBudgetFull(t *testing.T) {
 	serveOnce(srv, func(req Value) {
 		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("ok")})
 	})
-	if got := rawRequest(t, addrV.Str, "GET /health HTTP/1.1"); got != http.StatusOK {
+	if got := rawRequest(t, addrV.Str(), "GET /health HTTP/1.1"); got != http.StatusOK {
 		t.Errorf("GET while the budget is in use = %d, want 200", got)
 	}
 }
@@ -1449,7 +1412,7 @@ func TestServeDirNoListingNoDotfiles(t *testing.T) {
 		t.Cleanup(func() { shutdownFn(noCtx, []Value{srv}) })
 		serveLoop(srv, func(req Value) { _, _ = serveDirFn(noCtx, []Value{req, interpreter.StringVal(dir)}) })
 		addrV, _ := addressFn(noCtx, []Value{srv})
-		return addrV.Str
+		return addrV.Str()
 	}
 	addr := serve(optionsVal(0, 0))
 	for path, want := range map[string]int{
@@ -1487,7 +1450,7 @@ func TestDotSegmentsRejected(t *testing.T) {
 	seen := make(chan string, 8)
 	serveLoop(srv, func(req Value) {
 		p, _ := pathFn(noCtx, []Value{req})
-		seen <- p.Str
+		seen <- p.Str()
 		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("ok")})
 	})
 	for _, line := range []string{
@@ -1672,11 +1635,11 @@ func TestQueryParsedOnce(t *testing.T) {
 	id := registerReq(rs)
 	defer unregisterReq(id)
 	args := []Value{makeRequest(id), interpreter.StringVal("p25")}
-	if v, err := queryFn(noCtx, args); err != nil || v.Str != "v25" {
-		t.Fatalf("query p25 = %q, %v", v.Str, err)
+	if v, err := queryFn(noCtx, args); err != nil || v.Str() != "v25" {
+		t.Fatalf("query p25 = %q, %v", v.Str(), err)
 	}
-	if v, _ := queryFn(noCtx, []Value{args[0], interpreter.StringVal("missing")}); v.Str != "" {
-		t.Errorf("query missing = %q", v.Str)
+	if v, _ := queryFn(noCtx, []Value{args[0], interpreter.StringVal("missing")}); v.Str() != "" {
+		t.Errorf("query missing = %q", v.Str())
 	}
 	allocs := testing.AllocsPerRun(100, func() { _, _ = queryFn(noCtx, args) })
 	if allocs > 2 {
@@ -1696,8 +1659,8 @@ func TestRawQuery(t *testing.T) {
 		id := registerReq(rs)
 		v, err := rawQueryFn(noCtx, []Value{makeRequest(id)})
 		unregisterReq(id)
-		if err != nil || v.Str != want {
-			t.Errorf("rawQuery(%s) = %q, %v; want %q", target, v.Str, err, want)
+		if err != nil || v.Str() != want {
+			t.Errorf("rawQuery(%s) = %q, %v; want %q", target, v.Str(), err, want)
 		}
 	}
 }
@@ -1816,7 +1779,7 @@ func TestMaxHeaderBytes(t *testing.T) {
 	serveLoop(big, func(req Value) {
 		_, _ = respondFn(noCtx, []Value{req, interpreter.IntVal(200), interpreter.StringVal("ok")})
 	})
-	if got := headerRequest(t, bigAddr.Str, 200<<10); got != 200 {
+	if got := headerRequest(t, bigAddr.Str(), 200<<10); got != 200 {
 		t.Errorf("200 KiB header under a 512 KiB cap: status %d, want 200", got)
 	}
 	for _, bad := range []int64{-1, 2 << 20} {
@@ -1858,7 +1821,7 @@ func TestEtagWriteIsPreconditionFailed(t *testing.T) {
 	} {
 		rs, req := bareReq(t, c.method, "/x", http.Header{"If-None-Match": {"*"}})
 		ret, err := etagFn(noCtx, []Value{req, interpreter.StringVal("v1")})
-		if err != nil || !ret.Bool {
+		if err != nil || !ret.Bool() {
 			t.Fatalf("%s: etag = %v, %v; want true", c.method, ret, err)
 		}
 		if rs.status != c.want {
@@ -1941,7 +1904,7 @@ func thrownKind(t *testing.T, err error) string {
 	var kind string
 	in.RegisterNamespaced("probe", "fail", func(interpreter.BuiltinCtx, []Value) (Value, error) { return interpreter.Null(), err })
 	in.RegisterNamespaced("probe", "record", func(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-		kind = args[0].Str
+		kind = args[0].Str()
 		return interpreter.Null(), nil
 	})
 	if rerr := in.Run(prog); rerr != nil {

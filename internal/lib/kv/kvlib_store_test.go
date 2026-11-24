@@ -58,15 +58,15 @@ func TestOpenFileSamePathSharesStore(t *testing.T) {
 	// M29.46: a second close of one handle does nothing; it must not drop the
 	// other handle's reference to the shared store.
 	call(t, r.closeFn, a)
-	if got := call(t, r.getFn, b, str("x")); got.Str != "1" {
-		t.Errorf("get x via b = %q, want 1", got.Str)
+	if got := call(t, r.getFn, b, str("x")); got.Str() != "1" {
+		t.Errorf("get x via b = %q, want 1", got.Str())
 	}
 	call(t, r.closeFn, b)
 	r2 := &registry{stores: map[int64]*store{}}
 	c := call(t, r2.openFileFn, str(path))
 	for k, want := range map[string]string{"x": "1", "y": "2"} {
-		if got := call(t, r2.getFn, c, str(k)); got.Str != want {
-			t.Errorf("reopened get %s = %q, want %q", k, got.Str, want)
+		if got := call(t, r2.getFn, c, str(k)); got.Str() != want {
+			t.Errorf("reopened get %s = %q, want %q", k, got.Str(), want)
 		}
 	}
 	if _, err := r.setFn(ctx, []interpreter.Value{b, str("z"), str("3"), iv(0)}); closedKind(err) != "closed" {

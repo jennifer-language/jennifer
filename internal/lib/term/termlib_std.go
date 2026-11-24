@@ -110,7 +110,7 @@ func streamArg(fnName string, args []Value) (*os.File, error) {
 	if args[0].Kind != interpreter.KindString {
 		return nil, fmt.Errorf("%s: stream must be string, got %s", fnName, args[0].Kind)
 	}
-	return streamFile(fnName, args[0].Str)
+	return streamFile(fnName, args[0].Str())
 }
 
 // makeRawFn implements term.makeRaw(stream) -> term.State. Raw mode disables line
@@ -127,8 +127,8 @@ func makeRawFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	// Raw mode governs input processing (echo, line buffering), so it is a
 	// stdin concept. Refuse stdout / stderr rather than silently reconfiguring
 	// the shared terminal device through the wrong fd.
-	if args[0].Str != "stdin" {
-		return interpreter.Null(), fmt.Errorf("term.makeRaw: raw mode applies to input; use \"stdin\" (got %q)", args[0].Str)
+	if args[0].Str() != "stdin" {
+		return interpreter.Null(), fmt.Errorf("term.makeRaw: raw mode applies to input; use \"stdin\" (got %q)", args[0].Str())
 	}
 	fd := int(f.Fd())
 	// Hold the lock across MakeRaw so the cap check and the insert are atomic and
@@ -140,7 +140,7 @@ func makeRawFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	prev, rerr := term.MakeRaw(fd)
 	if rerr != nil {
-		return interpreter.Null(), fmt.Errorf("term.makeRaw: %s is not a terminal or cannot enter raw mode: %v", args[0].Str, rerr)
+		return interpreter.Null(), fmt.Errorf("term.makeRaw: %s is not a terminal or cannot enter raw mode: %v", args[0].Str(), rerr)
 	}
 	id := nextID
 	nextID++
@@ -184,14 +184,14 @@ func sizeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	cols, rows, gerr := term.GetSize(int(f.Fd()))
 	if gerr != nil {
-		return interpreter.Null(), fmt.Errorf("term.size: %s is not a terminal: %v", args[0].Str, gerr)
+		return interpreter.Null(), fmt.Errorf("term.size: %s is not a terminal: %v", args[0].Str(), gerr)
 	}
 	// A pty whose window size was never set (a `script` / CI / test-harness
 	// pty) reports 0 x 0 without an error. That is no more an answer than the
 	// pipe case above, so it fails the same way rather than handing back a
 	// zero-sized screen.
 	if rows <= 0 || cols <= 0 {
-		return interpreter.Null(), fmt.Errorf("term.size: %s is a terminal with no window size set (%d x %d)", args[0].Str, rows, cols)
+		return interpreter.Null(), fmt.Errorf("term.size: %s is a terminal with no window size set (%d x %d)", args[0].Str(), rows, cols)
 	}
 	return interpreter.NamespacedStructVal(LibraryName, "Size", []interpreter.StructField{
 		{Name: "rows", Value: interpreter.IntVal(int64(rows))},
@@ -261,7 +261,7 @@ func readByteTimeoutFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) 
 	if len(args) != 1 || args[0].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("term.readByteTimeout expects 1 int argument (ms)")
 	}
-	ms := args[0].Int
+	ms := args[0].Int()
 	if ms < 0 || ms > maxTimeoutMs {
 		return interpreter.Null(), fmt.Errorf("term.readByteTimeout: ms must be 0 to %d, got %d", maxTimeoutMs, ms)
 	}
@@ -274,12 +274,17 @@ const maxTimeoutMs = int64(math.MaxInt64) / int64(time.Millisecond)
 
 // stateID extracts the registry id from a term.State handle.
 func stateID(fnName string, v Value) (int, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "State" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "State" {
 		return 0, fmt.Errorf("%s: argument must be a term.State, got %s", fnName, v.Kind)
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == "id" {
-			return int(f.Value.Int), nil
+			// Out of int range is no live id; reject it rather than let a
+			// 32-bit int truncate it onto one.
+			if id := f.Value.Int(); id < 0 || id > math.MaxInt {
+				return -1, nil
+			}
+			return int(f.Value.Int()), nil
 		}
 	}
 	return 0, fmt.Errorf("%s: invalid term.State", fnName)

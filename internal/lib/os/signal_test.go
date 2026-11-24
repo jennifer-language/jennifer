@@ -22,8 +22,8 @@ func TestCatchAndPollSignal(t *testing.T) {
 	defer resetSignalsForTest()
 
 	// Not caught yet: never pending.
-	if v, err := gotSignalFn(interpreter.BuiltinCtx{}, []interpreter.Value{sv("usr2")}); err != nil || v.Bool {
-		t.Fatalf("gotSignal before catch = (%v, %v), want (false, nil)", v.Bool, err)
+	if v, err := gotSignalFn(interpreter.BuiltinCtx{}, []interpreter.Value{sv("usr2")}); err != nil || v.Bool() {
+		t.Fatalf("gotSignal before catch = (%v, %v), want (false, nil)", v.Bool(), err)
 	}
 
 	if _, err := catchSignalFn(interpreter.BuiltinCtx{}, []interpreter.Value{sv("usr2")}); err != nil {
@@ -44,7 +44,7 @@ func TestCatchAndPollSignal(t *testing.T) {
 		if err != nil {
 			t.Fatalf("gotSignal: %v", err)
 		}
-		if v.Bool {
+		if v.Bool() {
 			got = true
 			break
 		}
@@ -54,7 +54,7 @@ func TestCatchAndPollSignal(t *testing.T) {
 		t.Fatal("SIGUSR2 was never observed via gotSignal")
 	}
 	// The poll cleared the flag: the next poll is false.
-	if v, _ := gotSignalFn(interpreter.BuiltinCtx{}, []interpreter.Value{sv("usr2")}); v.Bool {
+	if v, _ := gotSignalFn(interpreter.BuiltinCtx{}, []interpreter.Value{sv("usr2")}); v.Bool() {
 		t.Error("gotSignal did not clear the flag")
 	}
 }

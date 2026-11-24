@@ -117,7 +117,7 @@ func opArgs(fn, shape string, args []interpreter.Value, want int, nullable int) 
 			return "", fmt.Errorf("crypto.%s: argument %d must be bytes, got %s %s", fn, i+1, args[i].Kind, shape)
 		}
 	}
-	return args[0].Str, nil
+	return args[0].Str(), nil
 }
 
 // ----- authenticated encryption: encrypt / decrypt -------------------------
@@ -167,7 +167,7 @@ func encryptFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	plaintext, key, nonce, aad := args[1].Bytes, args[2].Bytes, args[3].Bytes, args[4].Bytes
+	plaintext, key, nonce, aad := args[1].Bytes(), args[2].Bytes(), args[3].Bytes(), args[4].Bytes()
 	aead, most, err := aeadFor("encrypt", algo, key, nonce)
 	if err != nil {
 		return interpreter.Null(), err
@@ -185,7 +185,7 @@ func decryptFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	box, key, nonce, aad := args[1].Bytes, args[2].Bytes, args[3].Bytes, args[4].Bytes
+	box, key, nonce, aad := args[1].Bytes(), args[2].Bytes(), args[3].Bytes(), args[4].Bytes()
 	aead, _, err := aeadFor("decrypt", algo, key, nonce)
 	if err != nil {
 		return interpreter.Null(), err
@@ -227,7 +227,7 @@ func blockFn(fn string, encrypt bool, args []interpreter.Value) (interpreter.Val
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	data, key := args[1].Bytes, args[2].Bytes
+	data, key := args[1].Bytes(), args[2].Bytes()
 	if err := aesKey(fn, key); err != nil {
 		return interpreter.Null(), err
 	}
@@ -239,15 +239,15 @@ func blockFn(fn string, encrypt bool, args []interpreter.Value) (interpreter.Val
 		if ivNull {
 			return interpreter.Null(), fmt.Errorf("crypto.%s: %q needs a %d-byte IV", fn, algo, aes.BlockSize)
 		}
-		if len(args[3].Bytes) != aes.BlockSize {
-			return interpreter.Null(), fmt.Errorf("crypto.%s: IV must be %d bytes, got %d", fn, aes.BlockSize, len(args[3].Bytes))
+		if len(args[3].Bytes()) != aes.BlockSize {
+			return interpreter.Null(), fmt.Errorf("crypto.%s: IV must be %d bytes, got %d", fn, aes.BlockSize, len(args[3].Bytes()))
 		}
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("crypto.%s: %v", fn, err)
 	}
-	out, err := runBlock(fn, block, mode, pkcs7, encrypt, data, args[3].Bytes)
+	out, err := runBlock(fn, block, mode, pkcs7, encrypt, data, args[3].Bytes())
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -339,7 +339,7 @@ func signFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	msg, key := args[1].Bytes, args[2].Bytes
+	msg, key := args[1].Bytes(), args[2].Bytes()
 	var sig []byte
 	switch algo {
 	case "ed25519":
@@ -370,7 +370,7 @@ func verifyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	msg, sig, key := args[1].Bytes, args[2].Bytes, args[3].Bytes
+	msg, sig, key := args[1].Bytes(), args[2].Bytes(), args[3].Bytes()
 	var ok bool
 	switch algo {
 	case "ed25519":
@@ -470,7 +470,7 @@ func publicKeyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	key := args[1].Bytes
+	key := args[1].Bytes()
 	var pub []byte
 	switch algo {
 	case "ed25519":
@@ -526,14 +526,14 @@ func agreeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if algo != "x25519" {
 		return interpreter.Null(), unknownAlgo("agree", algo, agreeAlgos)
 	}
-	priv, err := x25519Private("agree", args[1].Bytes)
+	priv, err := x25519Private("agree", args[1].Bytes())
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if len(args[2].Bytes) != x25519KeyLen {
-		return interpreter.Null(), fmt.Errorf("crypto.agree: an x25519 peer public key is %d raw bytes, got %d", x25519KeyLen, len(args[2].Bytes))
+	if len(args[2].Bytes()) != x25519KeyLen {
+		return interpreter.Null(), fmt.Errorf("crypto.agree: an x25519 peer public key is %d raw bytes, got %d", x25519KeyLen, len(args[2].Bytes()))
 	}
-	pub, err := ecdh.X25519().NewPublicKey(args[2].Bytes)
+	pub, err := ecdh.X25519().NewPublicKey(args[2].Bytes())
 	if err != nil {
 		return interpreter.Null(), dataerr.New("crypto", "crypto.agree: invalid peer public key: %v", err)
 	}
@@ -556,7 +556,7 @@ func encapsulateFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpre
 	if algo != "mlkem768" {
 		return interpreter.Null(), unknownAlgo("encapsulate", algo, kemAlgos)
 	}
-	ct, secret, err := mlkemEncapsulate("encapsulate", args[1].Bytes)
+	ct, secret, err := mlkemEncapsulate("encapsulate", args[1].Bytes())
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -577,7 +577,7 @@ func decapsulateFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpre
 	if algo != "mlkem768" {
 		return interpreter.Null(), unknownAlgo("decapsulate", algo, kemAlgos)
 	}
-	secret, err := mlkemDecapsulate("decapsulate", args[1].Bytes, args[2].Bytes)
+	secret, err := mlkemDecapsulate("decapsulate", args[1].Bytes(), args[2].Bytes())
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -593,12 +593,12 @@ func wrapFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 		return interpreter.Null(), err
 	}
 	if algo == "nacl-sealedbox" {
-		return sealedBoxSeal(args[1].Bytes, args[2].Bytes)
+		return sealedBoxSeal(args[1].Bytes(), args[2].Bytes())
 	}
 	if algo != "rsa-oaep-sha1" && algo != "rsa-oaep-sha256" {
 		return interpreter.Null(), unknownAlgo("wrap", algo, wrapAlgos)
 	}
-	out, err := rsaOAEP("wrap", algo, true, args[1].Bytes, args[2].Bytes)
+	out, err := rsaOAEP("wrap", algo, true, args[1].Bytes(), args[2].Bytes())
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -612,12 +612,12 @@ func unwrapFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		return interpreter.Null(), err
 	}
 	if algo == "nacl-sealedbox" {
-		return sealedBoxOpen(args[1].Bytes, args[2].Bytes)
+		return sealedBoxOpen(args[1].Bytes(), args[2].Bytes())
 	}
 	if algo != "rsa-oaep-sha1" && algo != "rsa-oaep-sha256" {
 		return interpreter.Null(), unknownAlgo("unwrap", algo, wrapAlgos)
 	}
-	out, err := rsaOAEP("unwrap", algo, false, args[1].Bytes, args[2].Bytes)
+	out, err := rsaOAEP("unwrap", algo, false, args[1].Bytes(), args[2].Bytes())
 	if err != nil {
 		return interpreter.Null(), err
 	}

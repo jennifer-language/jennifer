@@ -100,15 +100,15 @@ func makeFile(id int64) Value {
 // Every handle-consuming builtin routes through this to keep the
 // boundary errors uniform.
 func extractFileID(fnName string, v Value) (int64, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "File" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "File" {
 		return 0, fmt.Errorf("%s: argument must be an fs.File, got %s", fnName, v.Kind)
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == "id" {
 			if f.Value.Kind != interpreter.KindInt {
 				return 0, fmt.Errorf("%s: fs.File.id is not int (got %s)", fnName, f.Value.Kind)
 			}
-			return f.Value.Int, nil
+			return f.Value.Int(), nil
 		}
 	}
 	return 0, fmt.Errorf("%s: fs.File has no id field", fnName)
@@ -315,7 +315,7 @@ func readCharsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if args[1].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("fs.readChars: n must be int, got %s", args[1].Kind)
 	}
-	n := args[1].Int
+	n := args[1].Int()
 	if n < 0 {
 		return interpreter.Null(), fmt.Errorf("fs.readChars: n must be non-negative, got %d", n)
 	}
@@ -370,7 +370,7 @@ func readBytesDispatchFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error
 	if args[1].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("fs.readBytes: n must be int, got %s", args[1].Kind)
 	}
-	n := args[1].Int
+	n := args[1].Int()
 	if n < 0 {
 		return interpreter.Null(), fmt.Errorf("fs.readBytes: n must be non-negative, got %d", n)
 	}
@@ -435,7 +435,7 @@ func writeHandleStringFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) 
 	if err := requireWriteMode("fs.writeString", h); err != nil {
 		return interpreter.Null(), err
 	}
-	if _, werr := h.f.WriteString(args[1].Str); werr != nil {
+	if _, werr := h.f.WriteString(args[1].Str()); werr != nil {
 		return interpreter.Null(), fmt.Errorf("fs.writeString: %s: %s", h.path, osErr(werr, h.path))
 	}
 	return interpreter.Null(), nil
@@ -464,7 +464,7 @@ func writeHandleBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err := requireWriteMode("fs.writeBytes", h); err != nil {
 		return interpreter.Null(), err
 	}
-	if _, werr := h.f.Write(args[1].Bytes); werr != nil {
+	if _, werr := h.f.Write(args[1].Bytes()); werr != nil {
 		return interpreter.Null(), fmt.Errorf("fs.writeBytes: %s: %s", h.path, osErr(werr, h.path))
 	}
 	return interpreter.Null(), nil

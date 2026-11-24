@@ -76,42 +76,42 @@ const MaxDecodedNodes = 1 << 21
 // huge (or, on int64 span overflow, negative) capacity and trigger Go's
 // "makeslice: cap out of range" panic - which the interpreter, having no
 // recover(), cannot catch - or a multi-gigabyte single allocation just below
-// it. At 1<<22 (~4.2M ints) the materialised list is ~1.1 GB of Value (272 bytes
+// it. At 1<<24 (~16.8M ints) the materialised list is ~800 MB of Value (48 bytes
 // each), far past any reasonable materialised range yet bounded and catchable;
 // a larger span should iterate lazily with `for (def i in lo..hi)`, which
 // allocates nothing. lists.range shares this cap.
-const MaxRangeElements = 1 << 22
+const MaxRangeElements = 1 << 24
 
 // MaxChannelCapacity caps the buffer a single channel.make can allocate, in the
-// same spirit as MaxRangeElements: a buffered `chan Value` (Value is ~272 bytes)
+// same spirit as MaxRangeElements: a buffered `chan Value` (Value is 48 bytes)
 // allocates its whole buffer eagerly, so an unbounded capacity gives program-
 // (or attacker-)controlled input a fresh multi-gigabyte single-allocation path -
 // which, below Go's makechan "size out of range" panic, is a real commit that
 // OOM-kills the process (a fatal, unrecoverable failure the makeFn recover cannot
-// catch). At 1<<20 elements a buffer is ~285 MiB on the default binary - far past
+// catch). At 1<<22 elements a buffer is ~192 MiB on the default binary - far past
 // any real channel use, yet well below the multi-GB allocation cliff. A larger
 // capacity is a catchable error.
-const MaxChannelCapacity = 1 << 20
+const MaxChannelCapacity = 1 << 22
 
 // MaxMatrixElements caps how many elements a single `linalg` vector or matrix
 // may hold - enforced both where a constructor (`identity(n)`, `zeros(rows,
 // cols)`) sizes its allocation from an integer argument and where the `vector` /
 // `matrix` readers accept an operation's input, so every entry point is bounded.
 // Its sibling is MaxChannelCapacity, not MaxRangeElements: a `linalg` value is
-// *always fully materialised* as a tree of interpreter Values (each 272 bytes),
+// *always fully materialised* as a tree of interpreter Values (each 48 bytes),
 // exactly like a channel buffer and unlike a range, whose common form is lazy and
 // allocates nothing. So the budget is sized in Value cells, not raw float64s:
-// `identity(100000)` would otherwise reach `make` for a ~10^10-cell matrix (~2.7
-// TB of Value, a fatal uncatchable OOM the interpreter has no recover() to trap),
-// and even a 4096x4096 matrix is ~4.5 GiB of Value (~9 GiB after the value-
+// `identity(100000)` would otherwise reach `make` for a ~10^10-cell matrix (~480
+// GB of Value, a fatal uncatchable OOM the interpreter has no recover() to trap),
+// and even a 4096x4096 matrix is ~0.8 GiB of Value (~1.6 GiB after the value-
 // semantics store-boundary copy), not the ~128 MiB a float64-per-cell reading
-// would suggest. At 1<<20 the materialised tree is ~285 MiB (matching
-// MaxChannelCapacity's budget), a 1024x1024 matrix sits at the ceiling - far past
+// would suggest. At 1<<22 the materialised tree is ~192 MiB (matching
+// MaxChannelCapacity's budget), a 2048x2048 matrix sits at the ceiling - far past
 // any real dense-matrix use in a tree-walker - and a larger vector or matrix is a
 // catchable error. The cap also transitively bounds the O(n^3) routines (matmul /
-// inverse / solve): with n <= 1024 the worst case is ~1e9 operations, seconds of
-// CPU, not an unbounded stall.
-const MaxMatrixElements = 1 << 20
+// inverse / solve): with n <= 2048 the worst case is ~8.6e9 operations, tens of
+// seconds of CPU at most, not an unbounded stall.
+const MaxMatrixElements = 1 << 22
 
 // MaxTokens caps how many tokens a single source file lexes into, bounding the
 // front of the pipeline against a "token bomb": a small, dense file (a few MB of

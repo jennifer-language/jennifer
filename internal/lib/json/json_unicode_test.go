@@ -29,7 +29,7 @@ func TestDecodeUnicodeEscapes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("asString(%q): %v", ptr, err)
 		}
-		return v.Str
+		return v.Str()
 	}
 
 	// BMP escape: {"k": "é"} -> é (U+00E9).

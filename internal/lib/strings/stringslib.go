@@ -82,7 +82,7 @@ func requireString(name string, args []interpreter.Value, i int) (string, error)
 	if v.Kind != interpreter.KindString {
 		return "", fmt.Errorf("strings.%s: argument %d must be string, got %s", name, i+1, v.Kind)
 	}
-	return v.Str, nil
+	return v.Str(), nil
 }
 
 // requireInt returns the int value at args[i] or an error.
@@ -91,7 +91,7 @@ func requireInt(name string, args []interpreter.Value, i int) (int64, error) {
 	if v.Kind != interpreter.KindInt {
 		return 0, fmt.Errorf("strings.%s: argument %d must be int, got %s", name, i+1, v.Kind)
 	}
-	return v.Int, nil
+	return v.Int(), nil
 }
 
 // requireIndex returns the int at args[i] narrowed to int. A value outside
@@ -115,24 +115,6 @@ func runeIndex(s string, byteOffset int) int {
 		return -1
 	}
 	return utf8.RuneCountInString(s[:byteOffset])
-}
-
-// skipRunes advances n runes from byte offset off in s and returns the new
-// byte offset and the number of runes skipped (fewer than n when s ends
-// first). ASCII bytes advance without decoding. An invalid byte counts as one
-// rune, as in utf8.RuneCountInString.
-func skipRunes(s string, off, n int) (int, int) {
-	k := 0
-	for k < n && off < len(s) {
-		if s[off] < utf8.RuneSelf {
-			off++
-		} else {
-			_, size := utf8.DecodeRuneInString(s[off:])
-			off += size
-		}
-		k++
-	}
-	return off, k
 }
 
 // ---- functions ----
@@ -289,8 +271,9 @@ func endsWithFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 // after the rune offset `from` (default 0), or -1 if sub is not present in that
 // range. `from` must be in [0, len(s)] (runes), like binary.indexOf's offset.
 // On a string of one-byte runes (Value.RuneLen() == byte length) `from` is a
-// byte offset, O(1) to locate; otherwise each call walks from the start of s
-// to `from`, then counts only the runes between `from` and the hit.
+// byte offset, O(1) to locate; otherwise the walk to `from` resumes from the
+// string's rune cursor (interpreter.RuneOffset), then counts only the runes
+// between `from` and the hit, and leaves the cursor at the hit.
 func indexOfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 && len(args) != 3 {
 		return interpreter.Null(), fmt.Errorf("strings.indexOf expects 2 or 3 arguments (s, sub[, from]), got %d", len(args))
@@ -324,7 +307,7 @@ func indexOfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 		}
 		return interpreter.IntVal(int64(from + rel)), nil
 	}
-	byteFrom, k := skipRunes(s, 0, from)
+	byteFrom, k := interpreter.RuneOffset(s, from)
 	if k < from {
 		return interpreter.Null(), fmt.Errorf("strings.indexOf: from index %d out of range (length %d)", from, k)
 	}
@@ -332,7 +315,9 @@ func indexOfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if rel < 0 {
 		return interpreter.IntVal(-1), nil
 	}
-	return interpreter.IntVal(int64(from + utf8.RuneCountInString(s[byteFrom:byteFrom+rel]))), nil
+	at := from + utf8.RuneCountInString(s[byteFrom:byteFrom+rel])
+	interpreter.NoteRuneOffset(s, at, byteFrom+rel)
+	return interpreter.IntVal(int64(at)), nil
 }
 
 // lastIndexOfFn returns the rune index of the last occurrence of sub in s, or
@@ -570,7 +555,7 @@ func splitFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if sep == "" {
 		return interpreter.Null(), fmt.Errorf("strings.split: separator must be non-empty; use strings.chars to split into runes")
 	}
-	// Each part is a full Value (~270 B with its string): cap the count
+	// Each part is a full Value (48 B plus its string): cap the count
 	// before splitting, like binary.split.
 	if n := gostrings.Count(s, sep) + 1; n > limits.MaxRangeElements {
 		return interpreter.Null(), limits.Capf("strings.split: %d parts exceed the limit of %d", n, limits.MaxRangeElements)
@@ -625,20 +610,20 @@ func joinFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 		}
 		sep = s
 	}
-	strs := make([]string, len(parts.List))
+	strs := make([]string, len(parts.List()))
 	// Result size: sum of the parts plus len(sep) per gap, checked before
 	// gostrings.Join allocates it.
 	total, ok := int64(0), true
-	if len(parts.List) > 1 {
-		total, ok = limits.MulInt64(int64(len(sep)), int64(len(parts.List)-1))
+	if len(parts.List()) > 1 {
+		total, ok = limits.MulInt64(int64(len(sep)), int64(len(parts.List())-1))
 	}
-	for i, e := range parts.List {
+	for i, e := range parts.List() {
 		if e.Kind != interpreter.KindString {
 			return interpreter.Null(), fmt.Errorf("strings.join: element %d is %s, expected string", i, e.Kind)
 		}
-		strs[i] = e.Str
+		strs[i] = e.Str()
 		if ok {
-			total, ok = limits.AddInt64(total, int64(len(e.Str)))
+			total, ok = limits.AddInt64(total, int64(len(e.Str())))
 		}
 	}
 	if !ok || total > maxRepeatBytes {

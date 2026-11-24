@@ -59,7 +59,7 @@ func takeBytes(fn string, args []Value, idx int, role string) ([]byte, error) {
 	if args[idx].Kind != interpreter.KindBytes {
 		return nil, fmt.Errorf("%s: %s must be bytes, got %s", fn, role, args[idx].Kind)
 	}
-	return args[idx].Bytes, nil
+	return args[idx].Bytes(), nil
 }
 
 // takeInt reads a positional int argument.
@@ -67,7 +67,7 @@ func takeInt(fn string, args []Value, idx int, role string) (int64, error) {
 	if args[idx].Kind != interpreter.KindInt {
 		return 0, fmt.Errorf("%s: %s must be int, got %s", fn, role, args[idx].Kind)
 	}
-	return args[idx].Int, nil
+	return args[idx].Int(), nil
 }
 
 // makeFn allocates n bytes set to fill (default 0): binary.make(n[, fill]).
@@ -156,27 +156,27 @@ func joinFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	// int64 and checked per step: the sum cannot overflow, even on 32-bit.
 	total := int64(0)
-	for i, e := range parts.List {
+	for i, e := range parts.List() {
 		if e.Kind != interpreter.KindBytes {
 			return interpreter.Null(), fmt.Errorf("binary.join: element %d is %s, expected bytes", i, e.Kind)
 		}
-		total += int64(len(e.Bytes))
+		total += int64(len(e.Bytes()))
 		if total > maxMakeBytes {
 			return interpreter.Null(), limits.Capf("binary.join: result exceeds the %d-byte limit", maxMakeBytes)
 		}
 	}
-	if gaps := int64(len(parts.List)) - 1; gaps > 0 && len(sep) > 0 {
+	if gaps := int64(len(parts.List())) - 1; gaps > 0 && len(sep) > 0 {
 		if gaps > (maxMakeBytes-total)/int64(len(sep)) {
 			return interpreter.Null(), limits.Capf("binary.join: result exceeds the %d-byte limit", maxMakeBytes)
 		}
 		total += gaps * int64(len(sep))
 	}
 	out := make([]byte, 0, total)
-	for i, e := range parts.List {
+	for i, e := range parts.List() {
 		if i > 0 {
 			out = append(out, sep...)
 		}
-		out = append(out, e.Bytes...)
+		out = append(out, e.Bytes()...)
 	}
 	return interpreter.BytesVal(out), nil
 }

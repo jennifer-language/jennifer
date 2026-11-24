@@ -18,7 +18,7 @@ func jstr(t *testing.T, v interpreter.Value) string {
 	if err != nil {
 		t.Fatalf("encode result: %v", err)
 	}
-	return out.Str
+	return out.Str()
 }
 
 func TestConstructors(t *testing.T) {

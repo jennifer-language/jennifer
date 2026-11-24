@@ -16,9 +16,9 @@ import (
 // an unknown format, filter or color string) stays "runtime" ("").
 func TestErrorKinds(t *testing.T) {
 	m := call(t, createFn, num(16), num(16), col(color.NRGBA{10, 20, 30, 255}))
-	pngData := call(t, encodeFn, str("png"), m).Bytes
-	jpgData := call(t, encodeFn, str("jpeg"), m).Bytes
-	gifData := call(t, encodeFn, str("gif"), m).Bytes
+	pngData := call(t, encodeFn, str("png"), m).Bytes()
+	jpgData := call(t, encodeFn, str("jpeg"), m).Bytes()
+	gifData := call(t, encodeFn, str("gif"), m).Bytes()
 	run := func(fn interpreter.Builtin, args ...Value) func() error {
 		return func() error { _, err := fn(interpreter.BuiltinCtx{}, args); return err }
 	}

@@ -17,7 +17,7 @@ func intList(vs ...int64) interpreter.Value {
 	for i, v := range vs {
 		out[i] = interpreter.IntVal(v)
 	}
-	return interpreter.Value{Kind: interpreter.KindList, List: out}
+	return interpreter.GenericListVal(out)
 }
 
 func TestPushIsNonMutating(t *testing.T) {
@@ -26,18 +26,18 @@ func TestPushIsNonMutating(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if len(a.List) != 3 {
-		t.Errorf("input was mutated: len=%d", len(a.List))
+	if len(a.List()) != 3 {
+		t.Errorf("input was mutated: len=%d", len(a.List()))
 	}
-	if len(b.List) != 4 || b.List[3].Int != 4 {
-		t.Errorf("bad result: %+v", b.List)
+	if len(b.List()) != 4 || b.List()[3].Int() != 4 {
+		t.Errorf("bad result: %+v", b.List())
 	}
 }
 
 func TestSortMixedKindRejected(t *testing.T) {
-	mixed := interpreter.Value{Kind: interpreter.KindList, List: []interpreter.Value{
+	mixed := interpreter.GenericListVal([]interpreter.Value{
 		interpreter.IntVal(1), interpreter.StringVal("a"),
-	}}
+	})
 	_, err := sortFn(interpreter.BuiltinCtx{}, []interpreter.Value{mixed})
 	if err == nil || !strings.Contains(err.Error(), "mixed-kind") {
 		t.Errorf("err = %v", err)
@@ -45,29 +45,29 @@ func TestSortMixedKindRejected(t *testing.T) {
 }
 
 func TestSortPromotesIntFloat(t *testing.T) {
-	mixed := interpreter.Value{Kind: interpreter.KindList, List: []interpreter.Value{
+	mixed := interpreter.GenericListVal([]interpreter.Value{
 		interpreter.IntVal(3), interpreter.FloatVal(1.5), interpreter.IntVal(2),
-	}}
+	})
 	out, err := sortFn(interpreter.BuiltinCtx{}, []interpreter.Value{mixed})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if len(out.List) != 3 {
-		t.Fatalf("bad len: %d", len(out.List))
+	if len(out.List()) != 3 {
+		t.Fatalf("bad len: %d", len(out.List()))
 	}
-	if !(out.List[0].Kind == interpreter.KindFloat && out.List[0].Float == 1.5) {
-		t.Errorf("first = %+v", out.List[0])
+	if !(out.List()[0].Kind == interpreter.KindFloat && out.List()[0].Float() == 1.5) {
+		t.Errorf("first = %+v", out.List()[0])
 	}
 }
 
 func TestContainsHaystackNeedleOrder(t *testing.T) {
 	xs := intList(10, 20, 30)
 	got, _ := containsFn(interpreter.BuiltinCtx{}, []interpreter.Value{xs, interpreter.IntVal(20)})
-	if !got.Bool {
+	if !got.Bool() {
 		t.Errorf("expected true")
 	}
 	got, _ = containsFn(interpreter.BuiltinCtx{}, []interpreter.Value{xs, interpreter.IntVal(99)})
-	if got.Bool {
+	if got.Bool() {
 		t.Errorf("expected false")
 	}
 }
@@ -75,12 +75,12 @@ func TestContainsHaystackNeedleOrder(t *testing.T) {
 func TestIndexOf(t *testing.T) {
 	xs := intList(10, 20, 30, 20)
 	got, _ := indexOfFn(interpreter.BuiltinCtx{}, []interpreter.Value{xs, interpreter.IntVal(20)})
-	if got.Int != 1 {
-		t.Errorf("indexOf first match: got %d, want 1", got.Int)
+	if got.Int() != 1 {
+		t.Errorf("indexOf first match: got %d, want 1", got.Int())
 	}
 	got, _ = indexOfFn(interpreter.BuiltinCtx{}, []interpreter.Value{xs, interpreter.IntVal(99)})
-	if got.Int != -1 {
-		t.Errorf("indexOf absent: got %d, want -1", got.Int)
+	if got.Int() != -1 {
+		t.Errorf("indexOf absent: got %d, want -1", got.Int())
 	}
 	if _, err := indexOfFn(interpreter.BuiltinCtx{}, []interpreter.Value{xs}); err == nil {
 		t.Errorf("indexOf arity: expected error")
@@ -96,12 +96,12 @@ func TestRangeAscendingHalfOpen(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	want := []int64{1, 2, 3, 4}
-	if len(out.List) != len(want) {
-		t.Fatalf("len=%d, want %d (%+v)", len(out.List), len(want), out.List)
+	if len(out.List()) != len(want) {
+		t.Fatalf("len=%d, want %d (%+v)", len(out.List()), len(want), out.List())
 	}
 	for i, w := range want {
-		if out.List[i].Int != w {
-			t.Errorf("[%d] = %d, want %d", i, out.List[i].Int, w)
+		if out.List()[i].Int() != w {
+			t.Errorf("[%d] = %d, want %d", i, out.List()[i].Int(), w)
 		}
 	}
 }
@@ -112,8 +112,8 @@ func TestRangeCoincidentBoundsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if len(out.List) != 0 {
-		t.Errorf("got %+v, want []", out.List)
+	if len(out.List()) != 0 {
+		t.Errorf("got %+v, want []", out.List())
 	}
 }
 
@@ -125,12 +125,12 @@ func TestRangeIndexAlignment(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	want := []int64{0, 1, 2, 3, 4}
-	if len(out.List) != len(want) {
-		t.Fatalf("got %+v, want %v", out.List, want)
+	if len(out.List()) != len(want) {
+		t.Fatalf("got %+v, want %v", out.List(), want)
 	}
 	for i, w := range want {
-		if out.List[i].Int != w {
-			t.Errorf("[%d] = %d, want %d", i, out.List[i].Int, w)
+		if out.List()[i].Int() != w {
+			t.Errorf("[%d] = %d, want %d", i, out.List()[i].Int(), w)
 		}
 	}
 }
@@ -142,14 +142,14 @@ func TestRangeCompositionInvariant(t *testing.T) {
 	left, _ := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(a), interpreter.IntVal(b)})
 	right, _ := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(b), interpreter.IntVal(c)})
 	whole, _ := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(a), interpreter.IntVal(c)})
-	combined := append([]interpreter.Value{}, left.List...)
-	combined = append(combined, right.List...)
-	if len(combined) != len(whole.List) {
-		t.Fatalf("len mismatch: combined=%d whole=%d", len(combined), len(whole.List))
+	combined := append([]interpreter.Value{}, left.List()...)
+	combined = append(combined, right.List()...)
+	if len(combined) != len(whole.List()) {
+		t.Fatalf("len mismatch: combined=%d whole=%d", len(combined), len(whole.List()))
 	}
 	for i := range combined {
-		if combined[i].Int != whole.List[i].Int {
-			t.Errorf("[%d]: combined=%d whole=%d", i, combined[i].Int, whole.List[i].Int)
+		if combined[i].Int() != whole.List()[i].Int() {
+			t.Errorf("[%d]: combined=%d whole=%d", i, combined[i].Int(), whole.List()[i].Int())
 		}
 	}
 }
@@ -161,12 +161,12 @@ func TestRangeStepHalfOpen(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	want := []int64{0, 3, 6}
-	if len(out.List) != len(want) {
-		t.Fatalf("len=%d, want %d (%+v)", len(out.List), len(want), out.List)
+	if len(out.List()) != len(want) {
+		t.Fatalf("len=%d, want %d (%+v)", len(out.List()), len(want), out.List())
 	}
 	for i, w := range want {
-		if out.List[i].Int != w {
-			t.Errorf("[%d] = %d, want %d", i, out.List[i].Int, w)
+		if out.List()[i].Int() != w {
+			t.Errorf("[%d] = %d, want %d", i, out.List()[i].Int(), w)
 		}
 	}
 }
@@ -179,12 +179,12 @@ func TestRangeStepStopsBeforeEnd(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	want := []int64{1, 4, 7}
-	if len(out.List) != len(want) {
-		t.Fatalf("len=%d, want %d (%+v)", len(out.List), len(want), out.List)
+	if len(out.List()) != len(want) {
+		t.Fatalf("len=%d, want %d (%+v)", len(out.List()), len(want), out.List())
 	}
 	for i, w := range want {
-		if out.List[i].Int != w {
-			t.Errorf("[%d] = %d, want %d", i, out.List[i].Int, w)
+		if out.List()[i].Int() != w {
+			t.Errorf("[%d] = %d, want %d", i, out.List()[i].Int(), w)
 		}
 	}
 }
@@ -197,12 +197,12 @@ func TestRangeDescendingHalfOpen(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	want := []int64{10, 7, 4}
-	if len(out.List) != len(want) {
-		t.Fatalf("len=%d, want %d (%+v)", len(out.List), len(want), out.List)
+	if len(out.List()) != len(want) {
+		t.Fatalf("len=%d, want %d (%+v)", len(out.List()), len(want), out.List())
 	}
 	for i, w := range want {
-		if out.List[i].Int != w {
-			t.Errorf("[%d] = %d, want %d", i, out.List[i].Int, w)
+		if out.List()[i].Int() != w {
+			t.Errorf("[%d] = %d, want %d", i, out.List()[i].Int(), w)
 		}
 	}
 }
@@ -213,8 +213,8 @@ func TestRangeDescendingDefaultStep(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	want := []int64{3, 2, 1}
-	if len(out.List) != len(want) {
-		t.Fatalf("got %+v, want %v", out.List, want)
+	if len(out.List()) != len(want) {
+		t.Fatalf("got %+v, want %v", out.List(), want)
 	}
 }
 
@@ -243,17 +243,17 @@ func TestShuffleIsNonMutating(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	for i, want := range []int64{1, 2, 3, 4, 5} {
-		if a.List[i].Int != want {
-			t.Errorf("input mutated at %d: %d != %d", i, a.List[i].Int, want)
+		if a.List()[i].Int() != want {
+			t.Errorf("input mutated at %d: %d != %d", i, a.List()[i].Int(), want)
 		}
 	}
-	if len(b.List) != 5 {
-		t.Errorf("result len=%d", len(b.List))
+	if len(b.List()) != 5 {
+		t.Errorf("result len=%d", len(b.List()))
 	}
 	// All five elements preserved (sum invariant).
 	sum := int64(0)
-	for _, v := range b.List {
-		sum += v.Int
+	for _, v := range b.List() {
+		sum += v.Int()
 	}
 	if sum != 15 {
 		t.Errorf("sum=%d, want 15", sum)
@@ -265,8 +265,8 @@ func TestShuffleEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if len(out.List) != 0 {
-		t.Errorf("expected empty, got %+v", out.List)
+	if len(out.List()) != 0 {
+		t.Errorf("expected empty, got %+v", out.List())
 	}
 }
 
@@ -275,8 +275,8 @@ func TestShuffleSingleElement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if len(out.List) != 1 || out.List[0].Int != 42 {
-		t.Errorf("got %+v, want [42]", out.List)
+	if len(out.List()) != 1 || out.List()[0].Int() != 42 {
+		t.Errorf("got %+v, want [42]", out.List())
 	}
 }
 
@@ -291,8 +291,8 @@ func TestRangeNearMaxIntTerminates(t *testing.T) {
 		t.Fatalf("err: %v", err)
 	}
 	// [max-2, max) with step 3 contains only max-2.
-	if len(out.List) != 1 || out.List[0].Int != max-2 {
-		t.Errorf("got %d elements (%+v), want [max-2]", len(out.List), out.List)
+	if len(out.List()) != 1 || out.List()[0].Int() != max-2 {
+		t.Errorf("got %d elements (%+v), want [max-2]", len(out.List()), out.List())
 	}
 }
 
@@ -305,8 +305,8 @@ func TestRangeElementCap(t *testing.T) {
 		t.Errorf("over-cap range: expected a limit error, got %v", err)
 	}
 	out, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(0), interpreter.IntVal(5), interpreter.IntVal(1)})
-	if err != nil || len(out.List) != 5 {
-		t.Errorf("small range should build, got len=%d err=%v", len(out.List), err)
+	if err != nil || len(out.List()) != 5 {
+		t.Errorf("small range should build, got len=%d err=%v", len(out.List()), err)
 	}
 }
 
@@ -320,8 +320,8 @@ func TestSortLargeInts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.List[0].Int != 9007199254740992 || out.List[1].Int != 9007199254740993 {
-		t.Errorf("large ints sorted wrong: %d, %d", out.List[0].Int, out.List[1].Int)
+	if out.List()[0].Int() != 9007199254740992 || out.List()[1].Int() != 9007199254740993 {
+		t.Errorf("large ints sorted wrong: %d, %d", out.List()[0].Int(), out.List()[1].Int())
 	}
 }
 
@@ -331,26 +331,26 @@ func TestSortLargeInts(t *testing.T) {
 func TestSortComparisonPaths(t *testing.T) {
 	sorted := func(vs ...interpreter.Value) []interpreter.Value {
 		t.Helper()
-		out, err := sortFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.Value{Kind: interpreter.KindList, List: vs}})
+		out, err := sortFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.GenericListVal(vs)})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return out.List
+		return out.List()
 	}
-	if got := sorted(interpreter.IntVal(3), interpreter.IntVal(-1), interpreter.IntVal(2)); got[0].Int != -1 || got[2].Int != 3 {
+	if got := sorted(interpreter.IntVal(3), interpreter.IntVal(-1), interpreter.IntVal(2)); got[0].Int() != -1 || got[2].Int() != 3 {
 		t.Errorf("ints: %v", got)
 	}
-	if got := sorted(interpreter.FloatVal(2.5), interpreter.FloatVal(-0.5), interpreter.FloatVal(1)); got[0].Float != -0.5 || got[2].Float != 2.5 {
+	if got := sorted(interpreter.FloatVal(2.5), interpreter.FloatVal(-0.5), interpreter.FloatVal(1)); got[0].Float() != -0.5 || got[2].Float() != 2.5 {
 		t.Errorf("floats: %v", got)
 	}
-	if got := sorted(interpreter.StringVal("b"), interpreter.StringVal("a")); got[0].Str != "a" {
+	if got := sorted(interpreter.StringVal("b"), interpreter.StringVal("a")); got[0].Str() != "a" {
 		t.Errorf("strings: %v", got)
 	}
-	if got := sorted(interpreter.BoolVal(true), interpreter.BoolVal(false)); got[0].Bool {
+	if got := sorted(interpreter.BoolVal(true), interpreter.BoolVal(false)); got[0].Bool() {
 		t.Errorf("bools: %v", got)
 	}
 	got := sorted(interpreter.IntVal(9007199254740993), interpreter.FloatVal(9007199254740992), interpreter.IntVal(1))
-	if got[0].Int != 1 || got[1].Kind != interpreter.KindFloat || got[2].Int != 9007199254740993 {
+	if got[0].Int() != 1 || got[1].Kind != interpreter.KindFloat || got[2].Int() != 9007199254740993 {
 		t.Errorf("mixed int / float at 2^53: %v", got)
 	}
 }
@@ -383,10 +383,10 @@ func TestMismatch(t *testing.T) {
 		}
 		got, err := mismatchFn(ctx, args)
 		if err != nil {
-			t.Fatalf("mismatch(%v, %v, %d): %v", c.a.List, c.b.List, c.from, err)
+			t.Fatalf("mismatch(%v, %v, %d): %v", c.a.List(), c.b.List(), c.from, err)
 		}
-		if got.Int != c.want {
-			t.Errorf("mismatch(%v, %v, %d) = %d, want %d", c.a.List, c.b.List, c.from, got.Int, c.want)
+		if got.Int() != c.want {
+			t.Errorf("mismatch(%v, %v, %d) = %d, want %d", c.a.List(), c.b.List(), c.from, got.Int(), c.want)
 		}
 	}
 	for _, bad := range [][]interpreter.Value{

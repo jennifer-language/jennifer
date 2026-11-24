@@ -14,9 +14,9 @@ import (
 
 // field pulls a named bytes field out of a returned struct Value.
 func field(v interpreter.Value, name string) []byte {
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == name {
-			return f.Value.Bytes
+			return f.Value.Bytes()
 		}
 	}
 	return nil
@@ -40,7 +40,7 @@ func TestMlkemRoundTrip(t *testing.T) {
 		t.Fatalf("key sizes: pub=%d (want 1184) priv=%d (want 64)", len(pub), len(priv))
 	}
 	pv, err := publicKeyFn(noCtx, []interpreter.Value{strArg("mlkem768"), bytesArg(priv)})
-	if err != nil || !bytes.Equal(pv.Bytes, pub) {
+	if err != nil || !bytes.Equal(pv.Bytes(), pub) {
 		t.Errorf("publicKey does not match the keypair's public key (err %v)", err)
 	}
 
@@ -48,7 +48,7 @@ func TestMlkemRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encapsulate: %v", err)
 	}
-	if enc.StructName != "Encapsulation" {
+	if enc.StructName() != "Encapsulation" {
 		t.Fatalf("encapsulate returned %s, want a crypto.Encapsulation", enc.Display())
 	}
 	ct, secret := field(enc, "ciphertext"), field(enc, "sharedSecret")
@@ -60,7 +60,7 @@ func TestMlkemRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decapsulate: %v", err)
 	}
-	if dec.Kind != interpreter.KindBytes || !bytes.Equal(dec.Bytes, secret) {
+	if dec.Kind != interpreter.KindBytes || !bytes.Equal(dec.Bytes(), secret) {
 		t.Fatalf("decapsulated secret does not match the encapsulated one")
 	}
 }
@@ -85,7 +85,7 @@ func TestMlkemIndependentSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decapsulate with a valid but unrelated key should not error: %v", err)
 	}
-	if bytes.Equal(wrong.Bytes, field(e1, "sharedSecret")) {
+	if bytes.Equal(wrong.Bytes(), field(e1, "sharedSecret")) {
 		t.Error("an unrelated key must not recover the secret")
 	}
 }

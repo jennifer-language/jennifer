@@ -50,7 +50,7 @@ func one(name string, args []Value) (string, error) {
 	if args[0].Kind != interpreter.KindString {
 		return "", fmt.Errorf("path.%s: path must be string, got %s", name, args[0].Kind)
 	}
-	return args[0].Str, nil
+	return args[0].Str(), nil
 }
 
 // baseFn: path.base(p) - the last element of p (filepath.Base).
@@ -119,7 +119,7 @@ func joinFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if a.Kind != interpreter.KindString {
 			return interpreter.Null(), fmt.Errorf("path.join: argument %d must be string, got %s", i+1, a.Kind)
 		}
-		parts[i] = a.Str
+		parts[i] = a.Str()
 	}
 	return interpreter.StringVal(filepath.Join(parts...)), nil
 }

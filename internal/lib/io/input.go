@@ -71,9 +71,10 @@ func getReader(in io.Reader) *stdinbuf.Reader {
 // a catchable Error{kind: "limit"} rather than an unbounded buffer.
 const maxLineBytes = limits.MaxAllocBytes
 
-// maxLines caps how many lines readLines returns: each costs about 1 KB of
-// heap at the peak (its Value plus list growth), so a stream of empty lines
-// would otherwise cost ~1000x its size. A quarter of the range cap is ~1 GiB.
+// maxLines caps how many lines readLines returns: each costs a Value plus list
+// growth at the peak, many times the bytes of a short line, so a stream of
+// empty lines would otherwise cost far more than its size. A quarter of the
+// range cap is ~4.2M lines (~1M on jennifer-tiny).
 const maxLines = limits.MaxRangeElements / 4
 
 // maxReadBytes caps readBytes' count, like fs.readBytes($f, n).
@@ -121,7 +122,7 @@ func readLine(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		if args[0].Kind != interpreter.KindString {
 			return interpreter.Null(), fmt.Errorf("io.readLine: prompt must be string, got %s", args[0].Kind)
 		}
-		if _, err := io.WriteString(ctx.Out, args[0].Str); err != nil {
+		if _, err := io.WriteString(ctx.Out, args[0].Str()); err != nil {
 			return interpreter.Null(), fmt.Errorf("io.readLine: writing prompt: %v", err)
 		}
 	}
@@ -167,7 +168,7 @@ func readBytes(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if args[0].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("io.readBytes: count must be int, got %s", args[0].Kind)
 	}
-	n := args[0].Int
+	n := args[0].Int()
 	if n < 0 {
 		return interpreter.Null(), fmt.Errorf("io.readBytes: count must be non-negative, got %d", n)
 	}
@@ -208,7 +209,7 @@ func readChars(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if args[0].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("io.readChars: count must be int, got %s", args[0].Kind)
 	}
-	n := args[0].Int
+	n := args[0].Int()
 	if n < 0 {
 		return interpreter.Null(), fmt.Errorf("io.readChars: count must be non-negative, got %d", n)
 	}

@@ -53,29 +53,29 @@ func TestResultsDoNotAlias(t *testing.T) {
 			t.Fatalf("%s: result aliased an input: src %q key %q", name, src, key)
 		}
 	}
-	for _, p := range call(t, splitFn, bv(src), bv([]byte(","))).List {
-		scribble(p.Bytes)
+	for _, p := range call(t, splitFn, bv(src), bv([]byte(","))).List() {
+		scribble(p.Bytes())
 	}
 	check("split")
-	for _, p := range call(t, splitFn, bv(src), bv([]byte(";"))).List {
-		scribble(p.Bytes)
+	for _, p := range call(t, splitFn, bv(src), bv([]byte(";"))).List() {
+		scribble(p.Bytes())
 	}
 	check("split no match")
-	scribble(call(t, joinFn, listOf([]Value{bv(src)})).Bytes)
+	scribble(call(t, joinFn, listOf([]Value{bv(src)})).Bytes())
 	check("join single part")
-	scribble(call(t, joinFn, listOf([]Value{bv(src)}), bv(empty)).Bytes)
+	scribble(call(t, joinFn, listOf([]Value{bv(src)}), bv(empty)).Bytes())
 	check("join empty sep")
-	scribble(call(t, concatFn, bv(src), bv(empty)).Bytes)
+	scribble(call(t, concatFn, bv(src), bv(empty)).Bytes())
 	check("concat empty b")
-	scribble(call(t, concatFn, bv(empty), bv(src)).Bytes)
+	scribble(call(t, concatFn, bv(empty), bv(src)).Bytes())
 	check("concat empty a")
 	for _, fn := range []interpreter.Builtin{bitXorFn, bitAndFn, bitOrFn} {
-		scribble(call(t, fn, bv(src), bv(key)).Bytes)
+		scribble(call(t, fn, bv(src), bv(key)).Bytes())
 		check("bitwise equal-length key")
-		scribble(call(t, fn, bv(src[:3]), bv(key)).Bytes)
+		scribble(call(t, fn, bv(src[:3]), bv(key)).Bytes())
 		check("bitwise long key")
 	}
-	scribble(call(t, bitNotFn, bv(src)).Bytes)
+	scribble(call(t, bitNotFn, bv(src)).Bytes())
 	check("bitNot")
 	for _, fn := range []interpreter.Builtin{readIntsFn, readFloatsFn} {
 		call(t, fn, sv("le"), bv(make([]byte, 8)), iv(0), iv(1), iv(8))
@@ -107,8 +107,8 @@ func TestJoinLimit(t *testing.T) {
 	// Exactly at the limit is allowed.
 	half := bv(make([]byte, maxMakeBytes/2-1))
 	v := call(t, joinFn, listOf([]Value{half, half}), bv([]byte("ab")))
-	if len(v.Bytes) != maxMakeBytes {
-		t.Fatalf("len %d, want %d", len(v.Bytes), maxMakeBytes)
+	if len(v.Bytes()) != maxMakeBytes {
+		t.Fatalf("len %d, want %d", len(v.Bytes()), maxMakeBytes)
 	}
 }
 
@@ -121,8 +121,8 @@ func TestElementLimit(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "the limit of") {
 		t.Fatalf("split: got %v, want an element-limit error", err)
 	}
-	if v := call(t, splitFn, bv(seps[1:]), bv([]byte{','})); len(v.List) != n {
-		t.Fatalf("split at the limit: %d parts, want %d", len(v.List), n)
+	if v := call(t, splitFn, bv(seps[1:]), bv([]byte{','})); len(v.List()) != n {
+		t.Fatalf("split at the limit: %d parts, want %d", len(v.List()), n)
 	}
 	buf := make([]byte, 8*(n+1))
 	for _, c := range []struct {
@@ -181,7 +181,7 @@ func TestBitwiseKeyBlocks(t *testing.T) {
 				key[i] = byte(i*13 + 5)
 			}
 			for _, op := range ops {
-				got := call(t, op.fn, bv(data[:dl]), bv(key)).Bytes
+				got := call(t, op.fn, bv(data[:dl]), bv(key)).Bytes()
 				if len(got) != dl {
 					t.Fatalf("data %d key %d: len %d", dl, kl, len(got))
 				}
@@ -199,7 +199,7 @@ func TestBitwiseKeyBlocks(t *testing.T) {
 // are not powers of two.
 func TestMakeFill(t *testing.T) {
 	for _, n := range []int64{0, 1, 2, 3, 1000, 4097} {
-		b := call(t, makeFn, iv(n), iv(171)).Bytes
+		b := call(t, makeFn, iv(n), iv(171)).Bytes()
 		if int64(len(b)) != n || bytes.Count(b, []byte{171}) != int(n) {
 			t.Fatalf("make(%d, 171) = %d bytes, %d filled", n, len(b), bytes.Count(b, []byte{171}))
 		}
@@ -211,7 +211,7 @@ func TestMakeFill(t *testing.T) {
 func TestReadFloatEdgePatterns(t *testing.T) {
 	read := func(b []byte, size int64, order string) (float64, error) {
 		v, err := readFloatFn(interpreter.BuiltinCtx{}, []Value{sv(order), bv(b), iv(0), iv(size)})
-		return v.Float, err
+		return v.Float(), err
 	}
 	for _, c := range []struct {
 		b    []byte

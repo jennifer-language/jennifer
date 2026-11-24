@@ -77,8 +77,8 @@ func TestReadBytesCountCap(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 	v, err := readBytes(ctx, []interpreter.Value{interpreter.IntVal(maxReadBytes)})
-	if err != nil || string(v.Bytes) != "abc" {
-		t.Fatalf("readBytes(max) = %q, %v", v.Bytes, err)
+	if err != nil || string(v.Bytes()) != "abc" {
+		t.Fatalf("readBytes(max) = %q, %v", v.Bytes(), err)
 	}
 }
 

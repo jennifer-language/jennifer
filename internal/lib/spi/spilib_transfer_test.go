@@ -81,12 +81,12 @@ func errKind(err error) (string, string) {
 		return "runtime", err.Error()
 	}
 	var kind, msg string
-	for _, f := range sig.Value.Fields {
+	for _, f := range sig.Value.Fields() {
 		switch f.Name {
 		case "kind":
-			kind = f.Value.Str
+			kind = f.Value.Str()
 		case "message":
-			msg = f.Value.Str
+			msg = f.Value.Str()
 		}
 	}
 	return kind, msg
@@ -103,8 +103,8 @@ func TestTransferOverBufsiz(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(v.Bytes) != 4096 || v.Bytes[0] != 0xff {
-		t.Fatalf("rx: %d bytes, first %#x", len(v.Bytes), v.Bytes[0])
+	if len(v.Bytes()) != 4096 || v.Bytes()[0] != 0xff {
+		t.Fatalf("rx: %d bytes, first %#x", len(v.Bytes()), v.Bytes()[0])
 	}
 	_, err = transferFn(interpreter.BuiltinCtx{}, []Value{h, interpreter.BytesVal(make([]byte, 4097))})
 	if err == nil {

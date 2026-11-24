@@ -2,10 +2,12 @@
 // SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 // Package netlib implements Jennifer's `net` library:
-// blocking TCP and UDP sockets plus two DNS lookup helpers. The
+// blocking TCP and UDP sockets plus DNS lookups. The
 // design mirrors `fs`: blocking on purpose, with non-blocking
 // use composed through `spawn` rather than a duplicated
 // `*Async` surface.
+//
+// Name resolution follows the files internal/dnsconf picks (M29.5).
 //
 // The library uses a build-tag split. The default `jennifer`
 // binary (standard-Go build) ships the real implementations in
@@ -40,6 +42,10 @@ type Value = interpreter.Value
 // (netlib_std.go or netlib_tinygo.go); this file registers them
 // and installs the shared verbs (close, struct definitions).
 func Install(in *interpreter.Interpreter) {
+	// The resolver configuration (JENNIFER_RESOLV_CONF / JENNIFER_HOSTS, the
+	// prefix's etc, /etc) is picked once per process; see internal/dnsconf.
+	setupDNS()
+
 	// Structs.
 	in.RegisterNamespacedStruct(LibraryName, "Conn", []parser.StructField{
 		{Name: "id", Type: parser.PrimitiveType(parser.TypeInt)},
@@ -67,10 +73,14 @@ func Install(in *interpreter.Interpreter) {
 	// Options of connectWith / startTLSWith / lookupWith / reverseLookupWith;
 	// the zero value is a plaintext connect within the default deadline.
 	// timeoutMs: 0 = DefaultTimeoutMs, the largest int = none, negative throws.
+	// dnsServers ("ip" or "ip:port", port 53 by default, at most 16): only
+	// lookupWith reads it, asking those servers alone (no hosts file, no
+	// search list); empty is the configured resolver.
 	in.RegisterNamespacedStruct(LibraryName, "ConnectOptions", []parser.StructField{
 		{Name: "timeoutMs", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "tls", Type: parser.PrimitiveType(parser.TypeBool)},
 		{Name: "tlsOptions", Type: parser.Type{Kind: parser.TypeStruct, StructNS: LibraryName, StructName: "TLSOptions"}},
+		{Name: "dnsServers", Type: parser.ListType(parser.PrimitiveType(parser.TypeString))},
 	})
 	// A transport failure (refused, reset, unreachable, DNS, TLS): kind "net",
 	// thrown by every call that touches a socket. `op` names the call that
@@ -177,15 +187,15 @@ func newNetError(ctx interpreter.BuiltinCtx, op, reason, message string) error {
 // namespaced-struct name. Returns a boundary error mentioning what
 // the caller passed in so mis-typed arguments surface cleanly.
 func extractID(fnName, wantStruct string, v Value) (int64, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != wantStruct {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != wantStruct {
 		return 0, fmt.Errorf("%s: argument must be a net.%s, got %s", fnName, wantStruct, v.Kind)
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == "id" {
 			if f.Value.Kind != interpreter.KindInt {
 				return 0, fmt.Errorf("%s: net.%s.id is not int (got %s)", fnName, wantStruct, f.Value.Kind)
 			}
-			return f.Value.Int, nil
+			return f.Value.Int(), nil
 		}
 	}
 	return 0, fmt.Errorf("%s: net.%s has no id field", fnName, wantStruct)
@@ -197,7 +207,7 @@ func takeStringArg(fnName string, args []Value, idx int, role string) (string, e
 	if args[idx].Kind != interpreter.KindString {
 		return "", fmt.Errorf("%s: %s must be string, got %s", fnName, role, args[idx].Kind)
 	}
-	return args[idx].Str, nil
+	return args[idx].Str(), nil
 }
 
 // takeBytesArg pulls out a positional bytes argument.
@@ -205,7 +215,7 @@ func takeBytesArg(fnName string, args []Value, idx int, role string) ([]byte, er
 	if args[idx].Kind != interpreter.KindBytes {
 		return nil, fmt.Errorf("%s: %s must be bytes, got %s", fnName, role, args[idx].Kind)
 	}
-	return args[idx].Bytes, nil
+	return args[idx].Bytes(), nil
 }
 
 // takeIntArg pulls out a positional non-negative int argument.
@@ -213,10 +223,10 @@ func takeIntArg(fnName string, args []Value, idx int, role string) (int64, error
 	if args[idx].Kind != interpreter.KindInt {
 		return 0, fmt.Errorf("%s: %s must be int, got %s", fnName, role, args[idx].Kind)
 	}
-	if args[idx].Int < 0 {
-		return 0, fmt.Errorf("%s: %s must be non-negative, got %d", fnName, role, args[idx].Int)
+	if args[idx].Int() < 0 {
+		return 0, fmt.Errorf("%s: %s must be non-negative, got %d", fnName, role, args[idx].Int())
 	}
-	return args[idx].Int, nil
+	return args[idx].Int(), nil
 }
 
 // stringSlice wraps a Go []string as a Jennifer `list of string`.
@@ -237,10 +247,10 @@ func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("net.close expects 1 argument (net.Conn, net.Listener, or net.UDPSocket), got %d", len(args))
 	}
 	v := args[0]
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName {
 		return interpreter.Null(), fmt.Errorf("net.close: argument must be a net.Conn, net.Listener, or net.UDPSocket; got %s", v.Kind)
 	}
-	switch v.StructName {
+	switch v.StructName() {
 	case "Conn":
 		id, err := extractID("net.close", "Conn", v)
 		if err != nil {
@@ -260,6 +270,6 @@ func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		}
 		return interpreter.Null(), closeUDP(id)
 	default:
-		return interpreter.Null(), fmt.Errorf("net.close: argument must be a net.Conn, net.Listener, or net.UDPSocket; got net.%s", v.StructName)
+		return interpreter.Null(), fmt.Errorf("net.close: argument must be a net.Conn, net.Listener, or net.UDPSocket; got net.%s", v.StructName())
 	}
 }

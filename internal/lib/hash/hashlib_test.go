@@ -26,7 +26,7 @@ func compute(t *testing.T, in []byte, algo string) []byte {
 	if v.Kind != interpreter.KindBytes {
 		t.Fatalf("compute(%q): expected KindBytes, got %s", algo, v.Kind)
 	}
-	return v.Bytes
+	return v.Bytes()
 }
 
 // TestComputeKnownVectors pins each algorithm against its canonical
@@ -121,8 +121,8 @@ func TestStreamMatchesOneShot(t *testing.T) {
 			t.Fatalf("%s: finalize: %v", algo, err)
 		}
 		want := compute(t, input, algo)
-		if !bytes.Equal(got.Bytes, want) {
-			t.Errorf("%s: streamed %x, one-shot %x", algo, got.Bytes, want)
+		if !bytes.Equal(got.Bytes(), want) {
+			t.Errorf("%s: streamed %x, one-shot %x", algo, got.Bytes(), want)
 		}
 	}
 }
@@ -186,7 +186,7 @@ func hmacHelper(t *testing.T, key, msg []byte, algo string) []byte {
 	if v.Kind != interpreter.KindBytes {
 		t.Fatalf("hmac(%q): expected KindBytes, got %s", algo, v.Kind)
 	}
-	return v.Bytes
+	return v.Bytes()
 }
 
 // TestHmacKnownVectors pins hash.hmac against the canonical RFC 2202 / RFC 4231
@@ -234,7 +234,7 @@ func TestEqualConstantTime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return v.Bool
+		return v.Bool()
 	}
 	if !eq([]byte("abc"), []byte("abc")) {
 		t.Error("equal bytes should compare equal")

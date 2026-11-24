@@ -33,12 +33,12 @@ func TestUnpackWithMaxInt64Caps(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s/%d: %v", format, eb, err)
 			}
-			if len(v.List) != 1 {
-				t.Fatalf("%s/%d: %d entries, want 1", format, eb, len(v.List))
+			if len(v.List()) != 1 {
+				t.Fatalf("%s/%d: %d entries, want 1", format, eb, len(v.List()))
 			}
-			for _, f := range v.List[0].Fields {
-				if f.Name == "data" && string(f.Value.Bytes) != "hello world" {
-					t.Fatalf("%s/%d: data %q", format, eb, f.Value.Bytes)
+			for _, f := range v.List()[0].Fields() {
+				if f.Name == "data" && string(f.Value.Bytes()) != "hello world" {
+					t.Fatalf("%s/%d: data %q", format, eb, f.Value.Bytes())
 				}
 			}
 		}

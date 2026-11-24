@@ -42,13 +42,13 @@ func TestChachaVectorsFromLibsodium(t *testing.T) {
 			t.Fatalf("%s encrypt: %v", c.algo, err)
 		}
 		want := unhex(t, c.box)
-		if !bytes.Equal(got.Bytes, want) {
-			t.Errorf("%s: got %x, want %s", c.algo, got.Bytes, c.box)
+		if !bytes.Equal(got.Bytes(), want) {
+			t.Errorf("%s: got %x, want %s", c.algo, got.Bytes(), c.box)
 		}
 		args[1] = bytesArg(want)
 		back, err := decryptFn(noCtx, args)
-		if err != nil || !bytes.Equal(back.Bytes, pt) {
-			t.Errorf("%s decrypt: %q, %v", c.algo, back.Bytes, err)
+		if err != nil || !bytes.Equal(back.Bytes(), pt) {
+			t.Errorf("%s decrypt: %q, %v", c.algo, back.Bytes(), err)
 		}
 		tampered := append([]byte{}, want...)
 		tampered[0] ^= 1
@@ -81,8 +81,8 @@ const (
 
 func TestSealedBoxOpensLibsodiumBox(t *testing.T) {
 	got, err := unwrapFn(noCtx, []interpreter.Value{strArg("nacl-sealedbox"), bytesArg(unhex(t, sbBox)), bytesArg(unhex(t, sbPriv))})
-	if err != nil || string(got.Bytes) != "secret value" {
-		t.Fatalf("unwrap: %q, %v", got.Bytes, err)
+	if err != nil || string(got.Bytes()) != "secret value" {
+		t.Fatalf("unwrap: %q, %v", got.Bytes(), err)
 	}
 	tampered := unhex(t, sbBox)
 	tampered[len(tampered)-1] ^= 1
@@ -96,11 +96,11 @@ func TestSealedBoxRoundTripAndChecks(t *testing.T) {
 		if err != nil {
 			t.Fatalf("wrap: %v", err)
 		}
-		if len(box.Bytes) != len(msg)+48 {
-			t.Errorf("a box of %d bytes is %d long, want %d", len(msg), len(box.Bytes), len(msg)+48)
+		if len(box.Bytes()) != len(msg)+48 {
+			t.Errorf("a box of %d bytes is %d long, want %d", len(msg), len(box.Bytes()), len(msg)+48)
 		}
 		back, err := unwrapFn(noCtx, []interpreter.Value{strArg("nacl-sealedbox"), box, bytesArg(unhex(t, sbPriv))})
-		if err != nil || !bytes.Equal(back.Bytes, msg) {
+		if err != nil || !bytes.Equal(back.Bytes(), msg) {
 			t.Errorf("round trip of %d bytes: %v", len(msg), err)
 		}
 	}
@@ -118,12 +118,12 @@ func hashPw(t *testing.T, algo, pw string) string {
 	if err != nil {
 		t.Fatalf("hashPassword(%s): %v", algo, err)
 	}
-	return v.Str
+	return v.Str()
 }
 
 func verifyPw(pw, stored string) (bool, error) {
 	v, err := verifyPasswordFn(noCtx, []interpreter.Value{bytesArg([]byte(pw)), strArg(stored)})
-	return v.Bool, err
+	return v.Bool(), err
 }
 
 func TestVerifyPasswordHashesFromOtherLibraries(t *testing.T) {
@@ -192,12 +192,12 @@ func TestVerifyPasswordRefusesMalformedAndCostly(t *testing.T) {
 
 func TestRawKdfVectors(t *testing.T) {
 	a, err := argon2idFn(noCtx, []interpreter.Value{bytesArg([]byte("pw")), bytesArg([]byte("saltsalt")), interpreter.IntVal(2), interpreter.IntVal(1024), interpreter.IntVal(2), interpreter.IntVal(32)})
-	if err != nil || !bytes.Equal(a.Bytes, unhex(t, "1eb9fb74859d81724892f66222f75c1801c1b3933543766d6e0a051d223e6989")) {
-		t.Errorf("argon2id: %x, %v", a.Bytes, err)
+	if err != nil || !bytes.Equal(a.Bytes(), unhex(t, "1eb9fb74859d81724892f66222f75c1801c1b3933543766d6e0a051d223e6989")) {
+		t.Errorf("argon2id: %x, %v", a.Bytes(), err)
 	}
 	s, err := scryptFn(noCtx, []interpreter.Value{bytesArg([]byte("pw")), bytesArg([]byte("saltsalt")), interpreter.IntVal(1024), interpreter.IntVal(8), interpreter.IntVal(2), interpreter.IntVal(32)})
-	if err != nil || !bytes.Equal(s.Bytes, unhex(t, "db7b553159cf6630d4449ffb48d14876c5070363617dac28a89f18dfd7fac115")) {
-		t.Errorf("scrypt: %x, %v", s.Bytes, err)
+	if err != nil || !bytes.Equal(s.Bytes(), unhex(t, "db7b553159cf6630d4449ffb48d14876c5070363617dac28a89f18dfd7fac115")) {
+		t.Errorf("scrypt: %x, %v", s.Bytes(), err)
 	}
 	for _, c := range []struct {
 		fn   func(interpreter.BuiltinCtx, []interpreter.Value) (interpreter.Value, error)

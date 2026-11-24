@@ -233,7 +233,7 @@ func strArg(fn string, args []interpreter.Value) (string, error) {
 	if args[0].Kind != interpreter.KindString {
 		return "", fmt.Errorf("uuid.%s: argument must be string, got %s", fn, args[0].Kind)
 	}
-	return args[0].Str, nil
+	return args[0].Str(), nil
 }
 
 // errInvalid reports a malformed UUID string (kind "uuid").

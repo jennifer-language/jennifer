@@ -37,13 +37,13 @@ func matrixArg(name string, v interpreter.Value) ([][]float64, error) {
 	if v.Kind != interpreter.KindList {
 		return nil, fmt.Errorf("stats.%s: argument must be a list of rows, got %s", name, v.Kind)
 	}
-	rows := make([][]float64, len(v.List))
-	for i, r := range v.List {
+	rows := make([][]float64, len(v.List()))
+	for i, r := range v.List() {
 		if r.Kind != interpreter.KindList {
 			return nil, fmt.Errorf("stats.%s: row %d must be a list, got %s", name, i, r.Kind)
 		}
-		row := make([]float64, len(r.List))
-		for j, e := range r.List {
+		row := make([]float64, len(r.List()))
+		for j, e := range r.List() {
 			f, ok := e.AsFloat()
 			if !ok {
 				return nil, fmt.Errorf("stats.%s: row %d element %d must be int or float, got %s", name, i, j, e.Kind)
@@ -231,7 +231,7 @@ func linearRegressionFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (int
 		{Name: "pValue", Value: interpreter.FloatVal(clamp01(p))},
 	}
 	for _, f := range fields {
-		if f.Value.Kind == interpreter.KindFloat && !isFinite(f.Value.Float) {
+		if f.Value.Kind == interpreter.KindFloat && !isFinite(f.Value.Float()) {
 			return interpreter.Null(), fmt.Errorf("stats.linearRegression: result is undefined or infinite")
 		}
 	}
@@ -343,11 +343,11 @@ func proportionCiFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpr
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("stats.proportionCi: method must be a string")
 	}
-	method := args[0].Str
+	method := args[0].Str()
 	if args[1].Kind != interpreter.KindInt || args[2].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("stats.proportionCi: successes and n must be ints")
 	}
-	x, n := args[1].Int, args[2].Int
+	x, n := args[1].Int(), args[2].Int()
 	level, ok := args[3].AsFloat()
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("stats.proportionCi: level must be int or float, got %s", args[3].Kind)

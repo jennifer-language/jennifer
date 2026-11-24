@@ -34,7 +34,7 @@ func formatFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if args[1].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("time.format: layout must be string, got %s", args[1].Kind)
 	}
-	out, err := strftimeFormat(goTimeFrom(nanos, offset), offset, args[1].Str)
+	out, err := strftimeFormat(goTimeFrom(nanos, offset), offset, args[1].Str())
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("time.format: %w", err)
 	}
@@ -52,7 +52,7 @@ func parseFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if args[1].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("time.parse: layout must be string, got %s", args[1].Kind)
 	}
-	t, err := strftimeParse(args[1].Str, args[0].Str)
+	t, err := strftimeParse(args[1].Str(), args[0].Str())
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("time.parse: %w", err)
 	}
@@ -82,7 +82,7 @@ func fromIsoFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("time.fromIso: input must be string, got %s", args[0].Kind)
 	}
-	t, err := stdtime.Parse(stdtime.RFC3339Nano, args[0].Str)
+	t, err := stdtime.Parse(stdtime.RFC3339Nano, args[0].Str())
 	if err != nil {
 		return interpreter.Null(), dataerr.New("time", "time.fromIso: %v", err)
 	}

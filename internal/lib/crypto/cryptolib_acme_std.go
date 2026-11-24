@@ -111,7 +111,7 @@ func jwkPublicFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if len(args) != 1 || args[0].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("crypto.jwkPublic expects 1 bytes argument (private PEM)")
 	}
-	signer, err := parseAnyPrivate("jwkPublic", args[0].Bytes)
+	signer, err := parseAnyPrivate("jwkPublic", args[0].Bytes())
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -183,7 +183,7 @@ func jwkToPemFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		X   string `json:"x"`
 		Y   string `json:"y"`
 	}
-	if err := json.Unmarshal([]byte(args[0].Str), &jwk); err != nil {
+	if err := json.Unmarshal([]byte(args[0].Str()), &jwk); err != nil {
 		return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: invalid JWK JSON: %v", err)
 	}
 	var pub crypto.PublicKey
@@ -257,17 +257,17 @@ func csrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	if len(args) != 2 || args[0].Kind != interpreter.KindBytes || args[1].Kind != interpreter.KindList {
 		return interpreter.Null(), fmt.Errorf("crypto.csr expects (private PEM bytes, list of domain strings)")
 	}
-	domains := make([]string, 0, len(args[1].List))
-	for _, d := range args[1].List {
+	domains := make([]string, 0, len(args[1].List()))
+	for _, d := range args[1].List() {
 		if d.Kind != interpreter.KindString {
 			return interpreter.Null(), fmt.Errorf("crypto.csr: every domain must be a string")
 		}
-		domains = append(domains, d.Str)
+		domains = append(domains, d.Str())
 	}
 	if len(domains) == 0 {
 		return interpreter.Null(), fmt.Errorf("crypto.csr: need at least one domain")
 	}
-	signer, err := parseAnyPrivate("csr", args[0].Bytes)
+	signer, err := parseAnyPrivate("csr", args[0].Bytes())
 	if err != nil {
 		return interpreter.Null(), err
 	}

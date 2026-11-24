@@ -32,7 +32,7 @@ func signWith(t *testing.T, algo string, msg, priv []byte) []byte {
 	if err != nil {
 		t.Fatalf("sign(%s): %v", algo, err)
 	}
-	return v.Bytes
+	return v.Bytes()
 }
 
 func verifyWith(t *testing.T, algo string, msg, sig, pub []byte) bool {
@@ -41,7 +41,7 @@ func verifyWith(t *testing.T, algo string, msg, sig, pub []byte) bool {
 	if err != nil {
 		t.Fatalf("verify(%s): %v", algo, err)
 	}
-	return v.Bool
+	return v.Bool()
 }
 
 func TestRSASignNamesRoundTrip(t *testing.T) {
@@ -130,7 +130,7 @@ func TestJwkToPemBytesVerify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pemV, err := jwkToPemFn(noCtx, []interpreter.Value{strArg(jwk.Str)})
+	pemV, err := jwkToPemFn(noCtx, []interpreter.Value{strArg(jwk.Str())})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestJwkToPemBytesVerify(t *testing.T) {
 		t.Fatalf("jwkToPem returned %s, want bytes", pemV.Kind)
 	}
 	msg := []byte("m")
-	if !verifyWith(t, "rsa-pss-sha512", msg, signWith(t, "rsa-pss-sha512", msg, priv), pemV.Bytes) {
+	if !verifyWith(t, "rsa-pss-sha512", msg, signWith(t, "rsa-pss-sha512", msg, priv), pemV.Bytes()) {
 		t.Error("rsa-pss-sha512 signature does not verify against jwkToPem's key")
 	}
 }
@@ -151,14 +151,14 @@ func TestPasswordBytesAndString(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return h.Str
+		return h.Str()
 	}
 	check := func(v interpreter.Value, stored string) bool {
 		ok, err := verifyPasswordFn(noCtx, []interpreter.Value{v, strArg(stored)})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return ok.Bool
+		return ok.Bool()
 	}
 	fromBytes, fromString := hashWith(bytesArg([]byte(pw))), hashWith(strArg(pw))
 	for _, stored := range []string{fromBytes, fromString} {
@@ -195,7 +195,7 @@ func deriveOK(t *testing.T, algo string, secret, salt []byte, length int64, p in
 	if err != nil {
 		t.Fatalf("%s: %v", algo, err)
 	}
-	return v.Bytes
+	return v.Bytes()
 }
 
 // Published vectors: RFC 5869 A.1 (HKDF-SHA256) and A.4 (HKDF-SHA1), RFC 6070

@@ -39,8 +39,8 @@ func TestFold(t *testing.T) {
 			t.Errorf("fold(%q): err %v", c.in, err)
 			continue
 		}
-		if v.Kind != interpreter.KindString || v.Str != c.want {
-			t.Errorf("fold(%q) = %q, want %q", c.in, v.Str, c.want)
+		if v.Kind != interpreter.KindString || v.Str() != c.want {
+			t.Errorf("fold(%q) = %q, want %q", c.in, v.Str(), c.want)
 		}
 	}
 
@@ -65,7 +65,7 @@ func TestFoldCanonicalEquivalence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("fold(%q): %v", s, err)
 		}
-		return v.Str
+		return v.Str()
 	}
 
 	pairs := []struct{ nfc, nfd string }{
@@ -84,7 +84,7 @@ func TestFoldCanonicalEquivalence(t *testing.T) {
 	key := func(s string) string {
 		f, _ := fold(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal(s)})
 		l, _ := lower(interpreter.BuiltinCtx{}, []interpreter.Value{f})
-		return l.Str
+		return l.Str()
 	}
 	if a, b := key("STRAẞE"), key("STRASSE"); a != b {
 		t.Errorf("key(STRAẞE) = %q, key(STRASSE) = %q - want equal", a, b)

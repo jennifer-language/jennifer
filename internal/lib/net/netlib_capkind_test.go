@@ -85,7 +85,7 @@ func TestAcceptCapIsKindLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := stdnet.Dial("tcp", a.Str)
+	c, err := stdnet.Dial("tcp", a.Str())
 	if err != nil {
 		t.Fatal(err)
 	}

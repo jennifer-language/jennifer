@@ -253,21 +253,21 @@ func openWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	opts := args[1]
-	if opts.Kind != interpreter.KindStruct || opts.StructNS != LibraryName || opts.StructName != "Options" {
+	if opts.Kind != interpreter.KindStruct || opts.StructNS() != LibraryName || opts.StructName() != "Options" {
 		return interpreter.Null(), fmt.Errorf("%s: second argument must be a spi.Options, got %s", fn, opts.Kind)
 	}
 	var mode, speed, bits int64
-	for _, f := range opts.Fields {
+	for _, f := range opts.Fields() {
 		if f.Value.Kind != interpreter.KindInt {
 			continue
 		}
 		switch f.Name {
 		case "mode":
-			mode = f.Value.Int
+			mode = f.Value.Int()
 		case "speedHz":
-			speed = f.Value.Int
+			speed = f.Value.Int()
 		case "bitsPerWord":
-			bits = f.Value.Int
+			bits = f.Value.Int()
 		}
 	}
 	if speed == 0 {

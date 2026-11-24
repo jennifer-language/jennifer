@@ -88,17 +88,17 @@ func TestLocalDatetimes(t *testing.T) {
 		"lt = 03:04:05.25\n"
 	doc := mustToml(t, "decode", s(src))
 	for ptr, want := range map[string]string{"/odt": "datetime", "/ldt": "local-datetime", "/ld": "local-date", "/lt": "local-time"} {
-		if got := mustToml(t, "typeOf", doc, s(ptr)).Str; got != want {
+		if got := mustToml(t, "typeOf", doc, s(ptr)).Str(); got != want {
 			t.Errorf("typeOf(%s) = %q, want %q", ptr, got, want)
 		}
-		if got := mustToml(t, "isDatetime", doc, s(ptr)).Bool; got != (want == "datetime") {
+		if got := mustToml(t, "isDatetime", doc, s(ptr)).Bool(); got != (want == "datetime") {
 			t.Errorf("isDatetime(%s) = %v", ptr, got)
 		}
 	}
 	fields := func(v interpreter.Value) map[string]int64 {
 		out := map[string]int64{}
-		for _, f := range v.Fields {
-			out[f.Name] = f.Value.Int
+		for _, f := range v.Fields() {
+			out[f.Name] = f.Value.Int()
 		}
 		return out
 	}
@@ -108,8 +108,8 @@ func TestLocalDatetimes(t *testing.T) {
 		"/lt":  {"year": 0, "month": 0, "day": 0, "hour": 3, "minute": 4, "second": 5, "nanosecond": 250000000},
 	} {
 		v := mustToml(t, "asLocal", doc, s(ptr))
-		if v.StructNS != "toml" || v.StructName != "Local" {
-			t.Fatalf("asLocal(%s) = %s.%s", ptr, v.StructNS, v.StructName)
+		if v.StructNS() != "toml" || v.StructName() != "Local" {
+			t.Fatalf("asLocal(%s) = %s.%s", ptr, v.StructNS(), v.StructName())
 		}
 		got := fields(v)
 		for k, w := range want {
@@ -138,7 +138,7 @@ func TestLocalDatetimes(t *testing.T) {
 		t.Error("asLocal on an int should error")
 	}
 	// encode round-trips every form, and so does a set of a local node.
-	out := mustToml(t, "encode", doc).Str
+	out := mustToml(t, "encode", doc).Str()
 	for _, text := range []string{"2024-01-02T03:04:05.5+02:00", "2024-01-02T03:04:05.123456789", "ld = 2024-01-02\n", "lt = 03:04:05.25\n"} {
 		if !strings.Contains(out, text) {
 			t.Errorf("encode lost %q:\n%s", text, out)
@@ -148,7 +148,7 @@ func TestLocalDatetimes(t *testing.T) {
 		t.Errorf("decode(encode(doc)) differs:\n%s", out)
 	}
 	moved := mustToml(t, "set", doc, s("/copy"), mustToml(t, "get", doc, s("/lt")))
-	if got := mustToml(t, "typeOf", moved, s("/copy")).Str; got != "local-time" {
+	if got := mustToml(t, "typeOf", moved, s("/copy")).Str(); got != "local-time" {
 		t.Errorf("typeOf after set = %q", got)
 	}
 }

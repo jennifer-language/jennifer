@@ -16,7 +16,7 @@ import (
 // stays "runtime" ("").
 func TestErrorKinds(t *testing.T) {
 	data := strings.Repeat("jennifer ", 200)
-	packed := func(algo string) []byte { return pack(t, str(algo), b(data)).Bytes }
+	packed := func(algo string) []byte { return pack(t, str(algo), b(data)).Bytes() }
 	flip := func(p []byte, i int) []byte {
 		q := append([]byte(nil), p...)
 		if i < 0 {

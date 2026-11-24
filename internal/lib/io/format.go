@@ -708,26 +708,26 @@ func renderValue(spec FormatSpec, v interpreter.Value) (string, error) {
 		if v.Kind != interpreter.KindInt {
 			return "", fmt.Errorf("`%%d` requires int, got %s", v.Kind)
 		}
-		return applyLayout(spec, renderInt(spec, v.Int)), nil
+		return applyLayout(spec, renderInt(spec, v.Int())), nil
 	case 'f':
 		if v.Kind != interpreter.KindFloat {
 			return "", fmt.Errorf("`%%f` requires float, got %s", v.Kind)
 		}
-		if math.IsNaN(v.Float) || math.IsInf(v.Float, 0) {
+		if math.IsNaN(v.Float()) || math.IsInf(v.Float(), 0) {
 			// C pads a non-finite value with spaces even under a zero flag.
 			spec.Fill = 0
 		}
-		return applyLayout(spec, renderFloat(spec, v.Float)), nil
+		return applyLayout(spec, renderFloat(spec, v.Float())), nil
 	case 's':
 		if v.Kind != interpreter.KindString {
 			return "", fmt.Errorf("`%%s` requires string, got %s", v.Kind)
 		}
-		return applyLayout(spec, renderString(spec, v.Str)), nil
+		return applyLayout(spec, renderString(spec, v.Str())), nil
 	case 't':
 		if v.Kind != interpreter.KindBool {
 			return "", fmt.Errorf("`%%t` requires bool, got %s", v.Kind)
 		}
-		return applyLayout(spec, renderBool(spec, v.Bool)), nil
+		return applyLayout(spec, renderBool(spec, v.Bool())), nil
 	case 'v':
 		return v.Display(), nil
 	case 'a':
@@ -764,7 +764,7 @@ func renderAggregate(spec FormatSpec, v interpreter.Value, level int) string {
 			sep = spec.AggSep
 		}
 		var parts []string
-		for _, elem := range v.List {
+		for _, elem := range v.List() {
 			if elem.Kind == interpreter.KindNull && spec.NullSkipA {
 				continue
 			}
@@ -791,7 +791,7 @@ func renderAggregate(spec FormatSpec, v interpreter.Value, level int) string {
 			kv = spec.AggKV
 		}
 		var parts []string
-		for _, entry := range v.Map {
+		for _, entry := range v.Map() {
 			if entry.Value.Kind == interpreter.KindNull && spec.NullSkipA {
 				continue
 			}
@@ -814,13 +814,13 @@ func aggElement(spec FormatSpec, v interpreter.Value, level int) string {
 	if spec.AggElem {
 		switch v.Kind {
 		case interpreter.KindFloat:
-			return renderFloat(spec, v.Float)
+			return renderFloat(spec, v.Float())
 		case interpreter.KindInt:
-			return renderInt(spec, v.Int)
+			return renderInt(spec, v.Int())
 		case interpreter.KindString:
-			return renderString(spec, v.Str)
+			return renderString(spec, v.Str())
 		case interpreter.KindBool:
-			return renderBool(spec, v.Bool)
+			return renderBool(spec, v.Bool())
 		}
 	}
 	return v.Display()

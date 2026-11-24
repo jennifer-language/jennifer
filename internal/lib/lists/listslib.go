@@ -68,7 +68,7 @@ func requireBool(name string, v interpreter.Value) (bool, error) {
 	if v.Kind != interpreter.KindBool {
 		return false, fmt.Errorf("lists.%s: the callback must return bool, got %s", name, v.Kind)
 	}
-	return v.Bool, nil
+	return v.Bool(), nil
 }
 
 // genericList builds a list value with no recorded element type, so it is
@@ -76,7 +76,7 @@ func requireBool(name string, v interpreter.Value) (bool, error) {
 // a json.decode result). Used for `map`, whose result element type is whatever
 // the callback returns.
 func genericList(elems []interpreter.Value) interpreter.Value {
-	return interpreter.Value{Kind: interpreter.KindList, List: elems}
+	return interpreter.GenericListVal(elems)
 }
 
 // mapFn: lists.map(xs, fn) -> a new list of fn(x) for each x. The result is a
@@ -91,7 +91,7 @@ func mapFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if err := requireFunc("map", args[1], "second argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	src := args[0].List
+	src := args[0].List()
 	out := make([]interpreter.Value, len(src))
 	for idx, x := range src {
 		r, err := ctx.Invoke(args[1], x.Copy())
@@ -115,9 +115,9 @@ func filterFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	if err := requireFunc("filter", args[1], "second argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	src := args[0].List
+	src := args[0].List()
 	out := args[0]
-	out.List = make([]interpreter.Value, 0, len(src))
+	out.SetList(make([]interpreter.Value, 0, len(src)))
 	for _, x := range src {
 		r, err := ctx.Invoke(args[1], x.Copy())
 		if err != nil {
@@ -128,7 +128,7 @@ func filterFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 			return interpreter.Null(), err
 		}
 		if keep {
-			out.List = append(out.List, x.Copy())
+			out.SetList(append(out.List(), x.Copy()))
 		}
 	}
 	return out, nil
@@ -146,7 +146,7 @@ func reduceFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		return interpreter.Null(), err
 	}
 	acc := args[2].Copy()
-	for _, x := range args[0].List {
+	for _, x := range args[0].List() {
 		r, err := ctx.Invoke(args[1], acc, x.Copy())
 		if err != nil {
 			return interpreter.Null(), err
@@ -168,7 +168,7 @@ func findFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if err := requireFunc("find", args[1], "second argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	for _, x := range args[0].List {
+	for _, x := range args[0].List() {
 		r, err := ctx.Invoke(args[1], x.Copy())
 		if err != nil {
 			return interpreter.Null(), err
@@ -195,7 +195,7 @@ func anyFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if err := requireFunc("any", args[1], "second argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	for _, x := range args[0].List {
+	for _, x := range args[0].List() {
 		r, err := ctx.Invoke(args[1], x.Copy())
 		if err != nil {
 			return interpreter.Null(), err
@@ -223,7 +223,7 @@ func allFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if err := requireFunc("all", args[1], "second argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	for _, x := range args[0].List {
+	for _, x := range args[0].List() {
 		r, err := ctx.Invoke(args[1], x.Copy())
 		if err != nil {
 			return interpreter.Null(), err
@@ -253,7 +253,7 @@ func sortByFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	if err := requireFunc("sortBy", args[1], "second argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	src := args[0].List
+	src := args[0].List()
 	// An empty or single-element list is already sorted - return it without
 	// invoking the key function or validateSortable (which dereferences keys[0]).
 	if len(src) < 2 {
@@ -278,9 +278,9 @@ func sortByFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		return less(&keys[idxs[a]], &keys[idxs[b]])
 	})
 	out := args[0]
-	out.List = make([]interpreter.Value, len(src))
+	out.SetList(make([]interpreter.Value, len(src)))
 	for pos, srcIdx := range idxs {
-		out.List[pos] = src[srcIdx].Copy()
+		out.List()[pos] = src[srcIdx].Copy()
 	}
 	return out, nil
 }
@@ -306,7 +306,7 @@ func sortWithFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpret
 	if err := requireFunc("sortWith", args[1], "second argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	src := args[0].List
+	src := args[0].List()
 	if len(src) < 2 {
 		return args[0], nil
 	}
@@ -328,15 +328,15 @@ func sortWithFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpret
 			cmpErr = fmt.Errorf("lists.sortWith: the comparator must return int, got %s", r.Kind)
 			return false
 		}
-		return r.Int < 0
+		return r.Int() < 0
 	})
 	if cmpErr != nil {
 		return interpreter.Null(), cmpErr
 	}
 	out := args[0]
-	out.List = make([]interpreter.Value, len(src))
+	out.SetList(make([]interpreter.Value, len(src)))
 	for pos, srcIdx := range idxs {
-		out.List[pos] = src[srcIdx].Copy()
+		out.List()[pos] = src[srcIdx].Copy()
 	}
 	return out, nil
 }
@@ -354,10 +354,10 @@ func requireInt(name string, v interpreter.Value, argpos string) (int, error) {
 	}
 	// Range-check before narrowing to int: on a 32-bit build (TinyGo) a value
 	// beyond the platform int range would silently truncate to a bogus index.
-	if v.Int > int64(math.MaxInt) || v.Int < int64(math.MinInt) {
-		return 0, fmt.Errorf("lists.%s: %s value %d is out of range", name, argpos, v.Int)
+	if v.Int() > int64(math.MaxInt) || v.Int() < int64(math.MinInt) {
+		return 0, fmt.Errorf("lists.%s: %s value %d is out of range", name, argpos, v.Int())
 	}
-	return int(v.Int), nil
+	return int(v.Int()), nil
 }
 
 // pushFn returns a new list with `item` appended. The element-type
@@ -370,11 +370,11 @@ func pushFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if err := requireList("push", args[0], "first argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	if len(args[0].List) >= maxListElements {
+	if len(args[0].List()) >= maxListElements {
 		return interpreter.Null(), limits.Capf("lists.push: result exceeds the limit of %d elements", maxListElements)
 	}
 	out := args[0].Copy()
-	out.List = append(out.List, args[1].Copy())
+	out.SetList(append(out.List(), args[1].Copy()))
 	return out, nil
 }
 
@@ -386,10 +386,10 @@ func firstFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if err := requireList("first", args[0], "argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	if len(args[0].List) == 0 {
+	if len(args[0].List()) == 0 {
 		return interpreter.Null(), fmt.Errorf("lists.first: list is empty")
 	}
-	return args[0].List[0].Copy(), nil
+	return args[0].List()[0].Copy(), nil
 }
 
 // lastFn returns the element at index len-1. Empty input errors.
@@ -400,10 +400,10 @@ func lastFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if err := requireList("last", args[0], "argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	if len(args[0].List) == 0 {
+	if len(args[0].List()) == 0 {
 		return interpreter.Null(), fmt.Errorf("lists.last: list is empty")
 	}
-	return args[0].List[len(args[0].List)-1].Copy(), nil
+	return args[0].List()[len(args[0].List())-1].Copy(), nil
 }
 
 // reverseFn returns a new list with elements in reverse order.
@@ -414,14 +414,14 @@ func reverseFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if err := requireList("reverse", args[0], "argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	src := args[0].List
+	src := args[0].List()
 	// Shallow struct copy: List is fully rebuilt (with per-element copies)
 	// just below, so deep-copying args[0] first is wasted work. ElemTyp is a
 	// shared immutable type pointer - exactly what Copy() would leave.
 	out := args[0]
-	out.List = make([]interpreter.Value, len(src))
+	out.SetList(make([]interpreter.Value, len(src)))
 	for i, v := range src {
-		out.List[len(src)-1-i] = v.Copy()
+		out.List()[len(src)-1-i] = v.Copy()
 	}
 	return out, nil
 }
@@ -439,14 +439,14 @@ func sortFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 		return interpreter.Null(), err
 	}
 	out := args[0].Copy()
-	if len(out.List) < 2 {
+	if len(out.List()) < 2 {
 		return out, nil
 	}
-	if err := validateSortable(out.List); err != nil {
+	if err := validateSortable(out.List()); err != nil {
 		return interpreter.Null(), err
 	}
-	sort.SliceStable(out.List, func(i, j int) bool {
-		return less(&out.List[i], &out.List[j])
+	sort.SliceStable(out.List(), func(i, j int) bool {
+		return less(&out.List()[i], &out.List()[j])
 	})
 	return out, nil
 }
@@ -482,13 +482,13 @@ func validateSortable(xs []interpreter.Value) error {
 func less(a, b *interpreter.Value) bool {
 	switch {
 	case a.Kind == interpreter.KindInt && b.Kind == interpreter.KindInt:
-		return a.Int < b.Int
+		return a.Int() < b.Int()
 	case a.Kind == interpreter.KindFloat && b.Kind == interpreter.KindFloat:
-		return a.Float < b.Float
+		return a.Float() < b.Float()
 	case a.Kind == interpreter.KindString:
-		return a.Str < b.Str
+		return a.Str() < b.Str()
 	case a.Kind == interpreter.KindBool:
-		return !a.Bool && b.Bool
+		return !a.Bool() && b.Bool()
 	}
 	// A mixed int / float pair compares exactly (not through a lossy float64),
 	// so large ints - IDs, hashes, nanosecond timestamps above 2^53 - sort
@@ -507,7 +507,7 @@ func containsFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	if err := requireList("contains", args[0], "first argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	for _, v := range args[0].List {
+	for _, v := range args[0].List() {
 		if v.Equal(args[1]) {
 			return interpreter.BoolVal(true), nil
 		}
@@ -525,7 +525,7 @@ func indexOfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if err := requireList("indexOf", args[0], "first argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	for i, v := range args[0].List {
+	for i, v := range args[0].List() {
 		if v.Equal(args[1]) {
 			return interpreter.IntVal(int64(i)), nil
 		}
@@ -549,7 +549,7 @@ func mismatchFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	if err := requireList("mismatch", args[1], "second argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	a, b := args[0].List, args[1].List
+	a, b := args[0].List(), args[1].List()
 	longest := max(len(a), len(b))
 	from := 0
 	if len(args) == 3 {
@@ -592,16 +592,16 @@ func concatFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if err := requireList("concat", args[1], "second argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	if n := len(args[0].List) + len(args[1].List); n > maxListElements {
+	if n := len(args[0].List()) + len(args[1].List()); n > maxListElements {
 		return interpreter.Null(), limits.Capf("lists.concat: %d elements exceed the limit of %d", n, maxListElements)
 	}
 	out := args[0] // shallow; List rebuilt below (skip the wasted deep copy)
-	out.List = make([]interpreter.Value, 0, len(args[0].List)+len(args[1].List))
-	for _, v := range args[0].List {
-		out.List = append(out.List, v.Copy())
+	out.SetList(make([]interpreter.Value, 0, len(args[0].List())+len(args[1].List())))
+	for _, v := range args[0].List() {
+		out.SetList(append(out.List(), v.Copy()))
 	}
-	for _, v := range args[1].List {
-		out.List = append(out.List, v.Copy())
+	for _, v := range args[1].List() {
+		out.SetList(append(out.List(), v.Copy()))
 	}
 	return out, nil
 }
@@ -621,21 +621,21 @@ func replicateFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if args[1].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("lists.replicate: count must be int, got %s", args[1].Kind)
 	}
-	n := args[1].Int
+	n := args[1].Int()
 	if n < 0 {
 		return interpreter.Null(), fmt.Errorf("lists.replicate: negative count %d", n)
 	}
-	src := args[0].List
+	src := args[0].List()
 	// Overflow-safe: compare n against the cap divided by the length instead
 	// of multiplying, so a huge n cannot wrap (or truncate on 32-bit TinyGo).
 	if len(src) > 0 && n > int64(maxListElements/len(src)) {
 		return interpreter.Null(), limits.Capf("lists.replicate: %d copies of %d elements exceed the limit of %d", n, len(src), maxListElements)
 	}
 	out := args[0] // shallow; List rebuilt below (skip the wasted deep copy)
-	out.List = make([]interpreter.Value, 0, len(src)*int(n))
+	out.SetList(make([]interpreter.Value, 0, len(src)*int(n)))
 	for k := int64(0); k < n && len(src) > 0; k++ {
 		for _, v := range src {
-			out.List = append(out.List, v.Copy())
+			out.SetList(append(out.List(), v.Copy()))
 		}
 	}
 	return out, nil
@@ -654,12 +654,12 @@ func shuffleFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 		return interpreter.Null(), err
 	}
 	out := args[0].Copy()
-	n := len(out.List)
+	n := len(out.List())
 	// Durstenfeld in-place on the copy: walk from n-1 down to 1, swap
 	// element i with a random j in [0, i].
 	for i := n - 1; i > 0; i-- {
 		j := int(mathlib.SharedIntN(int64(i) + 1))
-		out.List[i], out.List[j] = out.List[j], out.List[i]
+		out.List()[i], out.List()[j] = out.List()[j], out.List()[i]
 	}
 	return out, nil
 }
@@ -685,11 +685,11 @@ func rangeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("lists.range: start and end must be int, got %s and %s", args[0].Kind, args[1].Kind)
 	}
-	start, end := args[0].Int, args[1].Int
+	start, end := args[0].Int(), args[1].Int()
 	if args[2].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("lists.range: step must be int, got %s", args[2].Kind)
 	}
-	step := args[2].Int
+	step := args[2].Int()
 	if step == 0 {
 		return interpreter.Null(), fmt.Errorf("lists.range: step must be non-zero")
 	}
@@ -700,7 +700,7 @@ func rangeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		return interpreter.Null(), fmt.Errorf("lists.range: descending range (start=%d, end=%d) requires negative step, got %d", start, end, step)
 	}
 	// Cap the element count up front, like the `..` operator: each element is a
-	// ~272-byte Value, so an input-derived count would otherwise allocate until
+	// 48-byte Value, so an input-derived count would otherwise allocate until
 	// the process dies (an uncatchable OOM, not a Jennifer error). Computed
 	// overflow-safe in uint64 so a huge span cannot wrap.
 	var span uint64

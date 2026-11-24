@@ -31,7 +31,7 @@ func benchDoc(n int) string {
 
 func BenchmarkDecode(b *testing.B) {
 	text := interpreter.StringVal(benchDoc(2000))
-	b.SetBytes(int64(len(text.Str)))
+	b.SetBytes(int64(len(text.Str())))
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		if _, err := decodeFn([]interpreter.Value{text}); err != nil {

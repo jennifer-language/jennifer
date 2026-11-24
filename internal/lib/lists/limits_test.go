@@ -20,9 +20,9 @@ func TestConcatPushCap(t *testing.T) {
 	}
 	defer func(n int) { maxListElements = n }(maxListElements)
 	maxListElements = 1000
-	half := interpreter.Value{Kind: interpreter.KindList, List: make([]interpreter.Value, 500)}
+	half := interpreter.GenericListVal(make([]interpreter.Value, 500))
 	full, err := concatFn(interpreter.BuiltinCtx{}, []interpreter.Value{half, half})
-	if err != nil || len(full.List) != 1000 {
+	if err != nil || len(full.List()) != 1000 {
 		t.Fatalf("concat at the cap: %v", err)
 	}
 	if _, err := concatFn(interpreter.BuiltinCtx{}, []interpreter.Value{full, intList(1)}); err == nil || !strings.Contains(err.Error(), "lists.concat: ") {

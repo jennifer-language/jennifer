@@ -22,9 +22,9 @@ func unhex(t *testing.T, s string) []byte {
 }
 
 func keypairField(v interpreter.Value, name string) []byte {
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		if f.Name == name {
-			return f.Value.Bytes
+			return f.Value.Bytes()
 		}
 	}
 	return nil
@@ -49,17 +49,17 @@ func TestX25519RFC7748Vector(t *testing.T) {
 
 	for _, c := range []struct{ priv, pub []byte }{{alicePriv, alicePub}, {bobPriv, bobPub}} {
 		got, err := x25519Pub(c.priv)
-		if err != nil || !bytes.Equal(got.Bytes, c.pub) {
-			t.Errorf("publicKey(\"x25519\") = %x, %v; want %x", got.Bytes, err, c.pub)
+		if err != nil || !bytes.Equal(got.Bytes(), c.pub) {
+			t.Errorf("publicKey(\"x25519\") = %x, %v; want %x", got.Bytes(), err, c.pub)
 		}
 	}
 	a, err := x25519Agree(alicePriv, bobPub)
-	if err != nil || !bytes.Equal(a.Bytes, shared) {
-		t.Errorf("alice side = %x, %v; want %x", a.Bytes, err, shared)
+	if err != nil || !bytes.Equal(a.Bytes(), shared) {
+		t.Errorf("alice side = %x, %v; want %x", a.Bytes(), err, shared)
 	}
 	b, err := x25519Agree(bobPriv, alicePub)
-	if err != nil || !bytes.Equal(b.Bytes, shared) {
-		t.Errorf("bob side = %x, %v; want %x", b.Bytes, err, shared)
+	if err != nil || !bytes.Equal(b.Bytes(), shared) {
+		t.Errorf("bob side = %x, %v; want %x", b.Bytes(), err, shared)
 	}
 }
 
@@ -74,7 +74,7 @@ func TestX25519KeypairRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ka.StructName != "Keypair" || len(keypairField(ka, "public")) != 32 || len(keypairField(ka, "private")) != 32 {
+	if ka.StructName() != "Keypair" || len(keypairField(ka, "public")) != 32 || len(keypairField(ka, "private")) != 32 {
 		t.Fatalf("keypair shape: %v", ka.Display())
 	}
 	s1, err := x25519Agree(keypairField(ka, "private"), keypairField(kb, "public"))
@@ -85,11 +85,11 @@ func TestX25519KeypairRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(s1.Bytes, s2.Bytes) || len(s1.Bytes) != 32 {
-		t.Errorf("secrets differ: %x vs %x", s1.Bytes, s2.Bytes)
+	if !bytes.Equal(s1.Bytes(), s2.Bytes()) || len(s1.Bytes()) != 32 {
+		t.Errorf("secrets differ: %x vs %x", s1.Bytes(), s2.Bytes())
 	}
 	pub, _ := x25519Pub(keypairField(ka, "private"))
-	if !bytes.Equal(pub.Bytes, keypairField(ka, "public")) {
+	if !bytes.Equal(pub.Bytes(), keypairField(ka, "public")) {
 		t.Error("publicKey does not match the keypair's public key")
 	}
 	if bytes.Equal(keypairField(ka, "private"), keypairField(kb, "private")) {

@@ -29,10 +29,10 @@ func unpackErr(algo string, data []byte) error {
 // a second stream) is kind "compress"; an exact stream reads.
 func TestZlibDeflateRefuseTrailingBytes(t *testing.T) {
 	for _, algo := range []string{"zlib", "deflate"} {
-		one := pack(t, str(algo), b("hello")).Bytes
-		two := pack(t, str(algo), b(" world")).Bytes
-		if got := unpack(t, str(algo), interpreter.BytesVal(one)); string(got.Bytes) != "hello" {
-			t.Errorf("%s: exact stream = %q", algo, got.Bytes)
+		one := pack(t, str(algo), b("hello")).Bytes()
+		two := pack(t, str(algo), b(" world")).Bytes()
+		if got := unpack(t, str(algo), interpreter.BytesVal(one)); string(got.Bytes()) != "hello" {
+			t.Errorf("%s: exact stream = %q", algo, got.Bytes())
 		}
 		for name, data := range map[string][]byte{
 			"one junk byte":   cat(one, []byte{0}),
@@ -53,7 +53,7 @@ func TestZlibDeflateRefuseTrailingBytes(t *testing.T) {
 		}
 	}
 	// The pooled decompressors (reused across calls) check it the same way.
-	one := pack(t, str("zlib"), b("x")).Bytes
+	one := pack(t, str("zlib"), b("x")).Bytes()
 	for range 3 {
 		if err := unpackErr("zlib", cat(one, one)); err == nil {
 			t.Fatal("pooled zlib: two streams read")
@@ -64,10 +64,10 @@ func TestZlibDeflateRefuseTrailingBytes(t *testing.T) {
 // gzip reads every member (RFC 1952) and refuses trailing bytes that are not
 // one.
 func TestGzipMembers(t *testing.T) {
-	one := pack(t, str("gzip"), b("hello")).Bytes
-	two := pack(t, str("gzip"), b(" world")).Bytes
-	if got := unpack(t, str("gzip"), interpreter.BytesVal(cat(one, two))); string(got.Bytes) != "hello world" {
-		t.Errorf("two members = %q, want both", got.Bytes)
+	one := pack(t, str("gzip"), b("hello")).Bytes()
+	two := pack(t, str("gzip"), b(" world")).Bytes()
+	if got := unpack(t, str("gzip"), interpreter.BytesVal(cat(one, two))); string(got.Bytes()) != "hello world" {
+		t.Errorf("two members = %q, want both", got.Bytes())
 	}
 	for name, data := range map[string][]byte{
 		"junk":                   cat(one, []byte("junk")),
@@ -102,7 +102,7 @@ func TestUnpackWith(t *testing.T) {
 		}
 		for _, m := range []int64{0, 1000, math.MaxInt64} {
 			got, err := call(unpackOpts(m))
-			if err != nil || string(got.Bytes) != data {
+			if err != nil || string(got.Bytes()) != data {
 				t.Errorf("%s maxBytes %d: %v", algo, m, err)
 			}
 		}
@@ -122,7 +122,7 @@ func TestUnpackWith(t *testing.T) {
 		}
 	}
 	// Trailing bytes are refused through unpackWith too.
-	comp := pack(t, str("zlib"), b(data)).Bytes
+	comp := pack(t, str("zlib"), b(data)).Bytes()
 	_, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("zlib"), interpreter.BytesVal(cat(comp, comp)), unpackOpts(0)})
 	if dataerr.KindOf(err) != "compress" {
 		t.Errorf("unpackWith two zlib streams: %v", err)
@@ -135,7 +135,7 @@ func TestUnpackWithDefaultIsUnpack(t *testing.T) {
 	comp := pack(t, str("gzip"), b(data))
 	a := unpack(t, str("gzip"), comp)
 	w, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("gzip"), comp, unpackOpts(0)})
-	if err != nil || string(w.Bytes) != string(a.Bytes) {
+	if err != nil || string(w.Bytes()) != string(a.Bytes()) {
 		t.Errorf("unpackWith{} = %v, want unpack's output", err)
 	}
 }

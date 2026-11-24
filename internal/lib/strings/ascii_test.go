@@ -23,7 +23,7 @@ func TestOneByteRunePath(t *testing.T) {
 				if i := strings.Index(s[from:], sub); i >= 0 {
 					want = from + int64(i)
 				}
-				if got := callFn(t, in, "indexOf", sv(s), sv(sub), iv(from)).Int; got != want {
+				if got := callFn(t, in, "indexOf", sv(s), sv(sub), iv(from)).Int(); got != want {
 					t.Errorf("indexOf(%q, %q, %d) = %d, want %d", s, sub, from, got, want)
 				}
 			}
@@ -43,8 +43,9 @@ func TestOneByteRunePath(t *testing.T) {
 	}
 	// A string Value built without StringVal has no cached count: RuneLen
 	// counts, the result is the same.
-	raw := interpreter.Value{Kind: interpreter.KindString, Str: "xyzxyz"}
-	if got := callFn(t, in, "indexOf", raw, sv("x"), iv(1)).Int; got != 3 {
+	raw := interpreter.Value{Kind: interpreter.KindString}
+	raw.SetStr("xyzxyz")
+	if got := callFn(t, in, "indexOf", raw, sv("x"), iv(1)).Int(); got != 3 {
 		t.Errorf("uncached indexOf: %d", got)
 	}
 }

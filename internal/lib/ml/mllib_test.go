@@ -44,12 +44,12 @@ func fails(t *testing.T, fn interpreter.Builtin, args ...interpreter.Value) {
 	}
 }
 func fvals(v interpreter.Value) []float64 {
-	out := make([]float64, len(v.List))
-	for i, e := range v.List {
+	out := make([]float64, len(v.List()))
+	for i, e := range v.List() {
 		if e.Kind == interpreter.KindInt {
-			out[i] = float64(e.Int)
+			out[i] = float64(e.Int())
 		} else {
-			out[i] = e.Float
+			out[i] = e.Float()
 		}
 	}
 	return out
@@ -67,8 +67,8 @@ func TestLinearRegression(t *testing.T) {
 		t.Errorf("linreg predict [5,5] = %v, want 26", fvals(pred)[0])
 	}
 	r2 := ok(t, r2Fn, y, ok(t, predictFn, m, X))
-	if !near(r2.Float, 1.0, 1e-9) {
-		t.Errorf("r2 = %v, want 1", r2.Float)
+	if !near(r2.Float(), 1.0, 1e-9) {
+		t.Errorf("r2 = %v, want 1", r2.Float())
 	}
 	// Ridge shrinks coefficients toward zero vs OLS.
 	ols := modelOf(m).(*linearModel)
@@ -149,15 +149,15 @@ func TestPcaAndScalers(t *testing.T) {
 	X := mat([]float64{-2, 0}, []float64{-1, 0.1}, []float64{0, -0.1}, []float64{1, 0}, []float64{2, 0.1})
 	pc := ok(t, pcaFn, X, iv(1))
 	tr := ok(t, transformFn, pc, X)
-	if len(tr.List) != 5 || len(tr.List[0].List) != 1 {
-		t.Fatalf("pca transform shape wrong: %d x %d", len(tr.List), len(tr.List[0].List))
+	if len(tr.List()) != 5 || len(tr.List()[0].List()) != 1 {
+		t.Fatalf("pca transform shape wrong: %d x %d", len(tr.List()), len(tr.List()[0].List()))
 	}
 	// Standard scaler: each feature becomes mean 0, unit variance.
 	sc := ok(t, standardScalerFn, X)
 	st := ok(t, transformFn, sc, X)
 	col0 := 0.0
-	for _, row := range st.List {
-		col0 += row.List[0].Float
+	for _, row := range st.List() {
+		col0 += row.List()[0].Float()
 	}
 	if !near(col0/5, 0, 1e-9) {
 		t.Errorf("standardized feature 0 mean = %v, want 0", col0/5)
@@ -165,10 +165,10 @@ func TestPcaAndScalers(t *testing.T) {
 	// Min-max scaler: values land in [0,1].
 	mm := ok(t, minMaxScalerFn, X)
 	mt := ok(t, transformFn, mm, X)
-	for _, row := range mt.List {
-		for _, e := range row.List {
-			if e.Float < -1e-12 || e.Float > 1+1e-12 {
-				t.Errorf("minmax value %v out of [0,1]", e.Float)
+	for _, row := range mt.List() {
+		for _, e := range row.List() {
+			if e.Float() < -1e-12 || e.Float() > 1+1e-12 {
+				t.Errorf("minmax value %v out of [0,1]", e.Float())
 			}
 		}
 	}
@@ -179,40 +179,40 @@ func TestPcaAndScalers(t *testing.T) {
 func TestMetrics(t *testing.T) {
 	yt := vec(1, 0, 1, 1, 0, 1)
 	yp := vec(1, 0, 0, 1, 0, 1)
-	if v := ok(t, accuracyFn, yt, yp); !near(v.Float, 5.0/6, 1e-12) {
-		t.Errorf("accuracy = %v", v.Float)
+	if v := ok(t, accuracyFn, yt, yp); !near(v.Float(), 5.0/6, 1e-12) {
+		t.Errorf("accuracy = %v", v.Float())
 	}
 	// positives: TP=3, FP=0, FN=1 -> prec=1, rec=0.75, f1=0.857
-	if v := ok(t, precisionFn, yt, yp, iv(1)); !near(v.Float, 1, 1e-12) {
-		t.Errorf("precision = %v", v.Float)
+	if v := ok(t, precisionFn, yt, yp, iv(1)); !near(v.Float(), 1, 1e-12) {
+		t.Errorf("precision = %v", v.Float())
 	}
-	if v := ok(t, recallFn, yt, yp, iv(1)); !near(v.Float, 0.75, 1e-12) {
-		t.Errorf("recall = %v", v.Float)
+	if v := ok(t, recallFn, yt, yp, iv(1)); !near(v.Float(), 0.75, 1e-12) {
+		t.Errorf("recall = %v", v.Float())
 	}
-	if v := ok(t, f1Fn, yt, yp, iv(1)); !near(v.Float, 6.0/7, 1e-12) {
-		t.Errorf("f1 = %v", v.Float)
+	if v := ok(t, f1Fn, yt, yp, iv(1)); !near(v.Float(), 6.0/7, 1e-12) {
+		t.Errorf("f1 = %v", v.Float())
 	}
 	// ROC-AUC: perfect ranking = 1.0; reversed = 0.0; tie handling = 0.5.
-	if v := ok(t, rocAucFn, vec(1, 0, 1, 0), vec(0.9, 0.1, 0.8, 0.4)); !near(v.Float, 1, 1e-12) {
-		t.Errorf("rocAuc perfect = %v", v.Float)
+	if v := ok(t, rocAucFn, vec(1, 0, 1, 0), vec(0.9, 0.1, 0.8, 0.4)); !near(v.Float(), 1, 1e-12) {
+		t.Errorf("rocAuc perfect = %v", v.Float())
 	}
-	if v := ok(t, rocAucFn, vec(1, 1, 0, 0), vec(0.5, 0.5, 0.5, 0.5)); !near(v.Float, 0.5, 1e-12) {
-		t.Errorf("rocAuc all-ties = %v, want 0.5", v.Float)
+	if v := ok(t, rocAucFn, vec(1, 1, 0, 0), vec(0.5, 0.5, 0.5, 0.5)); !near(v.Float(), 0.5, 1e-12) {
+		t.Errorf("rocAuc all-ties = %v, want 0.5", v.Float())
 	}
 	// Regression metrics.
-	if v := ok(t, rmseFn, vec(1, 2, 3), vec(1, 2, 4)); !near(v.Float, math.Sqrt(1.0/3), 1e-12) {
-		t.Errorf("rmse = %v", v.Float)
+	if v := ok(t, rmseFn, vec(1, 2, 3), vec(1, 2, 4)); !near(v.Float(), math.Sqrt(1.0/3), 1e-12) {
+		t.Errorf("rmse = %v", v.Float())
 	}
-	if v := ok(t, maeFn, vec(1, 2, 3), vec(2, 2, 5)); !near(v.Float, 1.0, 1e-12) {
-		t.Errorf("mae = %v", v.Float)
+	if v := ok(t, maeFn, vec(1, 2, 3), vec(2, 2, 5)); !near(v.Float(), 1.0, 1e-12) {
+		t.Errorf("mae = %v", v.Float())
 	}
-	if v := ok(t, r2Fn, vec(1, 2, 3, 4), vec(1, 2, 3, 4)); !near(v.Float, 1, 1e-12) {
-		t.Errorf("r2 perfect = %v", v.Float)
+	if v := ok(t, r2Fn, vec(1, 2, 3, 4), vec(1, 2, 3, 4)); !near(v.Float(), 1, 1e-12) {
+		t.Errorf("r2 perfect = %v", v.Float())
 	}
 	// Confusion matrix diagonal for a perfect prediction.
 	cm := ok(t, confusionMatrixFn, vec(0, 1, 0, 1), vec(0, 1, 0, 1))
-	m := cm.Fields[1].Value // matrix
-	if m.List[0].List[1].Int != 0 || m.List[0].List[0].Int != 2 {
+	m := cm.Fields()[1].Value // matrix
+	if m.List()[0].List()[1].Int() != 0 || m.List()[0].List()[0].Int() != 2 {
 		t.Errorf("confusion matrix wrong: %v", m)
 	}
 	fails(t, accuracyFn, yt, vec(1, 0)) // length mismatch
@@ -236,8 +236,8 @@ func TestIntrospectionAndExtras(t *testing.T) {
 	if !near(coef[0], 2, 1e-6) || !near(coef[1], 3, 1e-6) {
 		t.Errorf("coefficients = %v, want [2,3]", coef)
 	}
-	if !near(ok(t, interceptFn, lr).Float, 1, 1e-6) {
-		t.Errorf("intercept = %v, want 1", ok(t, interceptFn, lr).Float)
+	if !near(ok(t, interceptFn, lr).Float(), 1, 1e-6) {
+		t.Errorf("intercept = %v, want 1", ok(t, interceptFn, lr).Float())
 	}
 	// Lasso shrinks coefficients vs OLS (L1 penalty).
 	las := ok(t, lassoFn, X, y, interpreter.FloatVal(2))
@@ -251,7 +251,7 @@ func TestIntrospectionAndExtras(t *testing.T) {
 	if ev[0] < ev[1] || ev[0]+ev[1] > 1.0000001 {
 		t.Errorf("explainedVariance = %v (want descending, sum<=1)", ev)
 	}
-	if len(ok(t, componentsFn, pc).List) != 2 {
+	if len(ok(t, componentsFn, pc).List()) != 2 {
 		t.Errorf("components should have 2 rows")
 	}
 	// Wrong-model accessor errors.
@@ -260,7 +260,7 @@ func TestIntrospectionAndExtras(t *testing.T) {
 
 	// Regression variants: kNN + tree regressors return floats near the target.
 	knnr := ok(t, kNNRegressorFn, X, y, iv(3))
-	if v := ok(t, predictFn, knnr, mat([]float64{2, 2})); v.List[0].Kind != interpreter.KindFloat {
+	if v := ok(t, predictFn, knnr, mat([]float64{2, 2})); v.List()[0].Kind != interpreter.KindFloat {
 		t.Errorf("kNNRegressor should return floats")
 	}
 	ok(t, decisionTreeRegressorFn, X, y)
@@ -279,7 +279,7 @@ func TestIntrospectionAndExtras(t *testing.T) {
 	// polynomialFeatures(deg 2) of [2,3] = [1, 2, 3, 4, 6, 9].
 	poly := ok(t, polynomialFeaturesFn, mat([]float64{2, 3}), iv(2))
 	want := []float64{1, 2, 3, 4, 6, 9}
-	got := fvals(poly.List[0])
+	got := fvals(poly.List()[0])
 	for i := range want {
 		if !near(got[i], want[i], 1e-12) {
 			t.Errorf("poly[%d] = %v, want %v", i, got[i], want[i])
@@ -288,11 +288,11 @@ func TestIntrospectionAndExtras(t *testing.T) {
 	fails(t, polynomialFeaturesFn, mat([]float64{2, 3}), iv(100)) // degree cap
 
 	// New metrics.
-	if v := ok(t, mseFn, vec(1, 2, 3), vec(1, 2, 4)); !near(v.Float, 1.0/3, 1e-12) {
-		t.Errorf("mse = %v", v.Float)
+	if v := ok(t, mseFn, vec(1, 2, 3), vec(1, 2, 4)); !near(v.Float(), 1.0/3, 1e-12) {
+		t.Errorf("mse = %v", v.Float())
 	}
-	if v := ok(t, logLossFn, vec(1, 0), vec(1, 0)); v.Float > 1e-10 {
-		t.Errorf("logLoss(perfect) = %v, want ~0", v.Float)
+	if v := ok(t, logLossFn, vec(1, 0), vec(1, 0)); v.Float() > 1e-10 {
+		t.Errorf("logLoss(perfect) = %v, want ~0", v.Float())
 	}
 	fails(t, logLossFn, vec(2, 0), vec(0.5, 0.5)) // non-binary labels
 	fails(t, logLossFn, vec(1, 0), vec(2, 0.5))   // probability out of [0,1]
@@ -346,24 +346,24 @@ func TestSplitAndFold(t *testing.T) {
 	X := mat([]float64{1}, []float64{2}, []float64{3}, []float64{4}, []float64{5}, []float64{6}, []float64{7}, []float64{8}, []float64{9}, []float64{10})
 	y := vec(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 	sp := ok(t, trainTestSplitFn, X, y, interpreter.FloatVal(0.3))
-	trX := sp.Fields[0].Value
-	teX := sp.Fields[2].Value
-	if len(trX.List) != 7 || len(teX.List) != 3 {
-		t.Errorf("split sizes train=%d test=%d, want 7/3", len(trX.List), len(teX.List))
+	trX := sp.Fields()[0].Value
+	teX := sp.Fields()[2].Value
+	if len(trX.List()) != 7 || len(teX.List()) != 3 {
+		t.Errorf("split sizes train=%d test=%d, want 7/3", len(trX.List()), len(teX.List()))
 	}
 	// k-fold: 3 folds over 10, test indices partition 0..9 with no overlap.
 	folds := ok(t, kFoldFn, iv(10), iv(3))
-	if len(folds.List) != 3 {
-		t.Fatalf("want 3 folds, got %d", len(folds.List))
+	if len(folds.List()) != 3 {
+		t.Fatalf("want 3 folds, got %d", len(folds.List()))
 	}
 	seen := map[int64]bool{}
-	for _, f := range folds.List {
-		testIdx := f.Fields[1].Value
-		for _, e := range testIdx.List {
-			if seen[e.Int] {
-				t.Errorf("index %d appears in two test folds", e.Int)
+	for _, f := range folds.List() {
+		testIdx := f.Fields()[1].Value
+		for _, e := range testIdx.List() {
+			if seen[e.Int()] {
+				t.Errorf("index %d appears in two test folds", e.Int())
 			}
-			seen[e.Int] = true
+			seen[e.Int()] = true
 		}
 	}
 	if len(seen) != 10 {

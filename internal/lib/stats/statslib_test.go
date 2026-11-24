@@ -16,7 +16,7 @@ func intList(ns ...int64) interpreter.Value {
 	for i, n := range ns {
 		xs[i] = interpreter.IntVal(n)
 	}
-	return interpreter.Value{Kind: interpreter.KindList, List: xs}
+	return interpreter.GenericListVal(xs)
 }
 
 func floatList(fs ...float64) interpreter.Value {
@@ -24,7 +24,7 @@ func floatList(fs ...float64) interpreter.Value {
 	for i, f := range fs {
 		xs[i] = interpreter.FloatVal(f)
 	}
-	return interpreter.Value{Kind: interpreter.KindList, List: xs}
+	return interpreter.GenericListVal(xs)
 }
 
 func call(t *testing.T, fn interpreter.Builtin, args ...interpreter.Value) interpreter.Value {
@@ -41,8 +41,8 @@ func wantFloat(t *testing.T, v interpreter.Value, want float64) {
 	if v.Kind != interpreter.KindFloat {
 		t.Fatalf("expected float, got %s", v.Kind)
 	}
-	if math.Abs(v.Float-want) > 1e-9 {
-		t.Errorf("got %v, want %v", v.Float, want)
+	if math.Abs(v.Float()-want) > 1e-9 {
+		t.Errorf("got %v, want %v", v.Float(), want)
 	}
 }
 
@@ -63,21 +63,21 @@ func TestReductions(t *testing.T) {
 // TestSelectionsPreserveKind: min / max / mode / sum keep the element kind.
 func TestSelectionsPreserveKind(t *testing.T) {
 	xs := intList(2, 4, 4, 4, 5, 5, 7, 9)
-	if v := call(t, minFn, xs); v.Kind != interpreter.KindInt || v.Int != 2 {
+	if v := call(t, minFn, xs); v.Kind != interpreter.KindInt || v.Int() != 2 {
 		t.Errorf("min = %v, want int 2", v)
 	}
-	if v := call(t, maxFn, xs); v.Kind != interpreter.KindInt || v.Int != 9 {
+	if v := call(t, maxFn, xs); v.Kind != interpreter.KindInt || v.Int() != 9 {
 		t.Errorf("max = %v, want int 9", v)
 	}
-	if v := call(t, modeFn, xs); v.Kind != interpreter.KindInt || v.Int != 4 {
+	if v := call(t, modeFn, xs); v.Kind != interpreter.KindInt || v.Int() != 4 {
 		t.Errorf("mode = %v, want int 4", v)
 	}
-	if v := call(t, sumFn, xs); v.Kind != interpreter.KindInt || v.Int != 40 {
+	if v := call(t, sumFn, xs); v.Kind != interpreter.KindInt || v.Int() != 40 {
 		t.Errorf("sum = %v, want int 40", v)
 	}
 	// Float list: sum stays float, min preserves float.
 	fs := floatList(1.5, 2.5, 3.0)
-	if v := call(t, sumFn, fs); v.Kind != interpreter.KindFloat || math.Abs(v.Float-7.0) > 1e-9 {
+	if v := call(t, sumFn, fs); v.Kind != interpreter.KindFloat || math.Abs(v.Float()-7.0) > 1e-9 {
 		t.Errorf("float sum = %v, want float 7.0", v)
 	}
 	if v := call(t, minFn, fs); v.Kind != interpreter.KindFloat {
@@ -124,7 +124,7 @@ func TestErrors(t *testing.T) {
 			return correlationFn(interpreter.BuiltinCtx{}, []interpreter.Value{intList(1, 1, 1), intList(1, 2, 3)})
 		}},
 		{"non-numeric element", func() (interpreter.Value, error) {
-			return meanFn(interpreter.BuiltinCtx{}, []interpreter.Value{{Kind: interpreter.KindList, List: []interpreter.Value{interpreter.StringVal("x")}}})
+			return meanFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.GenericListVal([]interpreter.Value{interpreter.StringVal("x")})})
 		}},
 		{"not a list", func() (interpreter.Value, error) {
 			return meanFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(5)})
@@ -179,7 +179,7 @@ func TestNonFiniteResultsRejected(t *testing.T) {
 
 // TestSumEmptyIsZero: the sum of an empty list is int 0 (well-defined).
 func TestSumEmptyIsZero(t *testing.T) {
-	if v := call(t, sumFn, intList()); v.Kind != interpreter.KindInt || v.Int != 0 {
+	if v := call(t, sumFn, intList()); v.Kind != interpreter.KindInt || v.Int() != 0 {
 		t.Errorf("sum([]) = %v, want int 0", v)
 	}
 }
@@ -198,10 +198,10 @@ func TestSampleVsPopulation(t *testing.T) {
 
 // TestRangePreservesKind: range = max - min, int for an int list.
 func TestRangePreservesKind(t *testing.T) {
-	if v := call(t, rangeFn, intList(2, 9, 5)); v.Kind != interpreter.KindInt || v.Int != 7 {
+	if v := call(t, rangeFn, intList(2, 9, 5)); v.Kind != interpreter.KindInt || v.Int() != 7 {
 		t.Errorf("range = %v, want int 7", v)
 	}
-	if v := call(t, rangeFn, floatList(1.5, 4.0)); v.Kind != interpreter.KindFloat || math.Abs(v.Float-2.5) > 1e-9 {
+	if v := call(t, rangeFn, floatList(1.5, 4.0)); v.Kind != interpreter.KindFloat || math.Abs(v.Float()-2.5) > 1e-9 {
 		t.Errorf("float range = %v, want float 2.5", v)
 	}
 }
@@ -216,17 +216,17 @@ func TestQuartilesIqrZscore(t *testing.T) {
 	xs := intList(2, 4, 4, 4, 5, 5, 7, 9)
 	wantFloat(t, call(t, iqrFn, xs), 1.5) // p75 5.5 - p25 4.0
 	q := call(t, quartilesFn, xs)
-	if q.Kind != interpreter.KindList || len(q.List) != 3 {
+	if q.Kind != interpreter.KindList || len(q.List()) != 3 {
 		t.Fatalf("quartiles = %v, want a 3-element list", q)
 	}
-	wantFloat(t, q.List[0], 4.0)
-	wantFloat(t, q.List[1], 4.5)
-	wantFloat(t, q.List[2], 5.5)
+	wantFloat(t, q.List()[0], 4.0)
+	wantFloat(t, q.List()[1], 4.5)
+	wantFloat(t, q.List()[2], 5.5)
 	z := call(t, zscoreFn, xs)
-	if z.Kind != interpreter.KindList || len(z.List) != 8 {
+	if z.Kind != interpreter.KindList || len(z.List()) != 8 {
 		t.Fatalf("zscore = %v, want an 8-element list", z)
 	}
-	wantFloat(t, z.List[0], -1.5) // (2-5)/2
+	wantFloat(t, z.List()[0], -1.5) // (2-5)/2
 	// A constant list has no z-score.
 	if _, err := zscoreFn(interpreter.BuiltinCtx{}, []interpreter.Value{intList(3, 3, 3)}); err == nil {
 		t.Error("zscore of a constant list should error")
@@ -236,14 +236,14 @@ func TestQuartilesIqrZscore(t *testing.T) {
 // TestSkewnessKurtosis: sign of skew, excess kurtosis (normal -> 0), constant errors.
 func TestSkewnessKurtosis(t *testing.T) {
 	// A right-skewed set (one large outlier) has positive skewness.
-	if v := call(t, skewnessFn, intList(1, 2, 2, 3, 100)); v.Float <= 0 {
-		t.Errorf("skewness = %v, want positive", v.Float)
+	if v := call(t, skewnessFn, intList(1, 2, 2, 3, 100)); v.Float() <= 0 {
+		t.Errorf("skewness = %v, want positive", v.Float())
 	}
 	// A symmetric set has ~zero skewness.
 	wantFloat(t, call(t, skewnessFn, floatList(1, 2, 3, 4, 5)), 0.0)
 	// Excess kurtosis of a uniform-ish symmetric small set is negative (platykurtic).
-	if v := call(t, kurtosisFn, floatList(1, 2, 3, 4, 5)); v.Float >= 0 {
-		t.Errorf("excess kurtosis = %v, want negative for this set", v.Float)
+	if v := call(t, kurtosisFn, floatList(1, 2, 3, 4, 5)); v.Float() >= 0 {
+		t.Errorf("excess kurtosis = %v, want negative for this set", v.Float())
 	}
 	for _, fn := range []interpreter.Builtin{skewnessFn, kurtosisFn} {
 		if _, err := fn(interpreter.BuiltinCtx{}, []interpreter.Value{intList(3, 3, 3)}); err == nil {
@@ -265,7 +265,7 @@ func TestSampleCovarianceMadWeightedModes(t *testing.T) {
 	}
 	// modes returns every tied value in first-encountered order, preserving kind.
 	m := call(t, modesFn, intList(2, 2, 5, 5, 7))
-	if m.Kind != interpreter.KindList || len(m.List) != 2 || m.List[0].Int != 2 || m.List[1].Int != 5 {
+	if m.Kind != interpreter.KindList || len(m.List()) != 2 || m.List()[0].Int() != 2 || m.List()[1].Int() != 5 {
 		t.Errorf("modes = %v, want int list [2, 5]", m)
 	}
 }
@@ -273,14 +273,14 @@ func TestSampleCovarianceMadWeightedModes(t *testing.T) {
 // TestDescribe: the one-call Summary struct.
 func TestDescribe(t *testing.T) {
 	d := call(t, describeFn, intList(2, 4, 4, 4, 5, 5, 7, 9))
-	if d.Kind != interpreter.KindStruct || d.StructName != "Summary" || d.StructNS != "stats" {
+	if d.Kind != interpreter.KindStruct || d.StructName() != "Summary" || d.StructNS() != "stats" {
 		t.Fatalf("describe = %v, want a stats.Summary struct", d)
 	}
 	fields := map[string]interpreter.Value{}
-	for _, f := range d.Fields {
+	for _, f := range d.Fields() {
 		fields[f.Name] = f.Value
 	}
-	if fields["count"].Kind != interpreter.KindInt || fields["count"].Int != 8 {
+	if fields["count"].Kind != interpreter.KindInt || fields["count"].Int() != 8 {
 		t.Errorf("count = %v, want int 8", fields["count"])
 	}
 	wantFloat(t, fields["min"], 2.0)
@@ -312,13 +312,13 @@ func TestSelectionLargeInts(t *testing.T) {
 		interpreter.IntVal(1), interpreter.IntVal(1),
 	})
 	args := []interpreter.Value{xs}
-	if mx, err := maxFn(interpreter.BuiltinCtx{}, args); err != nil || mx.Int != 9007199254740993 {
-		t.Errorf("max = %d (err %v), want 9007199254740993", mx.Int, err)
+	if mx, err := maxFn(interpreter.BuiltinCtx{}, args); err != nil || mx.Int() != 9007199254740993 {
+		t.Errorf("max = %d (err %v), want 9007199254740993", mx.Int(), err)
 	}
-	if mn, err := minFn(interpreter.BuiltinCtx{}, args); err != nil || mn.Int != 1 {
-		t.Errorf("min = %d (err %v), want 1", mn.Int, err)
+	if mn, err := minFn(interpreter.BuiltinCtx{}, args); err != nil || mn.Int() != 1 {
+		t.Errorf("min = %d (err %v), want 1", mn.Int(), err)
 	}
-	if md, err := modeFn(interpreter.BuiltinCtx{}, args); err != nil || md.Int != 1 {
-		t.Errorf("mode = %d (err %v), want 1", md.Int, err)
+	if md, err := modeFn(interpreter.BuiltinCtx{}, args); err != nil || md.Int() != 1 {
+		t.Errorf("mode = %d (err %v), want 1", md.Int(), err)
 	}
 }

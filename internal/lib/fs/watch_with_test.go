@@ -46,7 +46,7 @@ func TestWatchWithDeliversEvents(t *testing.T) {
 	}()
 	select {
 	case ev := <-got:
-		if ev.Kind != interpreter.KindStruct || ev.StructName != "Event" {
+		if ev.Kind != interpreter.KindStruct || ev.StructName() != "Event" {
 			t.Fatalf("fs.next: %+v", ev)
 		}
 	case <-time.After(3 * time.Second):

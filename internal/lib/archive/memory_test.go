@@ -27,7 +27,7 @@ func TestUnpackAllocatesAboutTheMemberSize(t *testing.T) {
 		var before, after runtime.MemStats
 		runtime.GC()
 		runtime.ReadMemStats(&before)
-		es, err := unpackBytes(packed.Bytes, format, defaultUnpackCaps())
+		es, err := unpackBytes(packed.Bytes(), format, defaultUnpackCaps())
 		runtime.ReadMemStats(&after)
 		if err != nil || len(es) != 1 || len(es[0].data) != size {
 			t.Fatalf("%s unpack: %v", format, err)

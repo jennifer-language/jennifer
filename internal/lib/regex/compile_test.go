@@ -67,7 +67,7 @@ func TestSplitPartCap(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 	v, err := callRegex("split", ",", s[1:])
-	if err != nil || len(v.List) != limits.MaxRangeElements {
-		t.Fatalf("at the cap: %v, %d parts", err, len(v.List))
+	if err != nil || len(v.List()) != limits.MaxRangeElements {
+		t.Fatalf("at the cap: %v, %d parts", err, len(v.List()))
 	}
 }

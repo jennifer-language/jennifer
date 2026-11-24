@@ -79,7 +79,7 @@ func parseFormFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("encoding.parseForm: argument must be string, got %s", args[0].Kind)
 	}
-	v, err := parseForm(args[0].Str)
+	v, err := parseForm(args[0].Str())
 	return v, named("encoding.parseForm", err)
 }
 
@@ -188,7 +188,7 @@ func parseCookiesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpr
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("encoding.parseCookies: argument must be string, got %s", args[0].Kind)
 	}
-	return parseCookies(args[0].Str)
+	return parseCookies(args[0].Str())
 }
 
 func parseCookies(header string) (interpreter.Value, error) {
@@ -234,7 +234,7 @@ func parseMultipartFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (inter
 	if args[1].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("encoding.parseMultipart: second argument must be bytes, got %s", args[1].Kind)
 	}
-	parts, err := parseMultipart(args[0].Str, args[1].Bytes)
+	parts, err := parseMultipart(args[0].Str(), args[1].Bytes())
 	if err != nil {
 		return interpreter.Null(), named("encoding.parseMultipart", err)
 	}

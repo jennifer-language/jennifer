@@ -16,7 +16,7 @@ import (
 func TestCapsAreKindLimit(t *testing.T) {
 	defer func(n int) { maxListElements = n }(maxListElements)
 	maxListElements = 10
-	full := interpreter.Value{Kind: interpreter.KindList, List: make([]interpreter.Value, 10)}
+	full := interpreter.GenericListVal(make([]interpreter.Value, 10))
 	var ce *limits.CapError
 	if _, err := pushFn(interpreter.BuiltinCtx{}, []interpreter.Value{full, interpreter.IntVal(1)}); !errors.As(err, &ce) {
 		t.Errorf("push: %T %v", err, err)

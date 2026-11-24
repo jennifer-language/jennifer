@@ -60,21 +60,21 @@ func TestFailureClassifiesSocketErrors(t *testing.T) {
 			continue
 		}
 		var kind, msg, reason string
-		for _, f := range sig.Value.Fields {
+		for _, f := range sig.Value.Fields() {
 			switch f.Name {
 			case "kind":
-				kind = f.Value.Str
+				kind = f.Value.Str()
 			case "message":
-				msg = f.Value.Str
+				msg = f.Value.Str()
 			case "reason":
-				reason = f.Value.Str
+				reason = f.Value.Str()
 			}
 		}
 		if kind != c.kind || msg != c.msg || reason != c.reason {
 			t.Errorf("%v: got kind %q message %q reason %q, want %q %q %q", c.err, kind, msg, reason, c.kind, c.msg, c.reason)
 		}
-		if kind == "net" && (sig.Value.StructNS != "net" || sig.Value.StructName != "NetError") {
-			t.Errorf("%v: thrown as %s.%s, want net.NetError", c.err, sig.Value.StructNS, sig.Value.StructName)
+		if kind == "net" && (sig.Value.StructNS() != "net" || sig.Value.StructName() != "NetError") {
+			t.Errorf("%v: thrown as %s.%s, want net.NetError", c.err, sig.Value.StructNS(), sig.Value.StructName())
 		}
 	}
 }

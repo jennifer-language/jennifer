@@ -18,8 +18,8 @@ func TestGetEnvReadsSetVariable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Kind != interpreter.KindString || v.Str != "hello" {
-		t.Errorf("got (%s, %q)", v.Kind, v.Str)
+	if v.Kind != interpreter.KindString || v.Str() != "hello" {
+		t.Errorf("got (%s, %q)", v.Kind, v.Str())
 	}
 }
 
@@ -30,8 +30,8 @@ func TestGetEnvReturnsEmptyWhenUnset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Str != "" {
-		t.Errorf("expected empty string, got %q", v.Str)
+	if v.Str() != "" {
+		t.Errorf("expected empty string, got %q", v.Str())
 	}
 }
 
@@ -58,7 +58,7 @@ func TestHasFlagFindsExactMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Kind != interpreter.KindBool || !v.Bool {
+	if v.Kind != interpreter.KindBool || !v.Bool() {
 		t.Errorf("got %+v, want true", v)
 	}
 }
@@ -71,7 +71,7 @@ func TestHasFlagMissingReturnsFalse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Bool {
+	if v.Bool() {
 		t.Errorf("expected false, got true")
 	}
 }
@@ -85,7 +85,7 @@ func TestHasFlagDoesNotMatchEquals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Bool {
+	if v.Bool() {
 		t.Errorf("--port=8080 unexpectedly satisfied --port")
 	}
 }
@@ -98,8 +98,8 @@ func TestFlagReturnsFollowingValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Str != "8080" {
-		t.Errorf("got %q, want %q", v.Str, "8080")
+	if v.Str() != "8080" {
+		t.Errorf("got %q, want %q", v.Str(), "8080")
 	}
 }
 
@@ -111,8 +111,8 @@ func TestFlagMissingReturnsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Str != "" {
-		t.Errorf("got %q, want empty", v.Str)
+	if v.Str() != "" {
+		t.Errorf("got %q, want empty", v.Str())
 	}
 }
 
@@ -125,8 +125,8 @@ func TestFlagAtEndReturnsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if v.Str != "" {
-		t.Errorf("got %q, want empty (no value follows)", v.Str)
+	if v.Str() != "" {
+		t.Errorf("got %q, want empty (no value follows)", v.Str())
 	}
 }
 
@@ -191,7 +191,7 @@ func TestCwdReturnsWorkingDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.cwd: %v", err)
 	}
-	if v.Kind != interpreter.KindString || v.Str != want {
+	if v.Kind != interpreter.KindString || v.Str() != want {
 		t.Errorf("os.cwd = %v, want string %q", v, want)
 	}
 }
@@ -201,7 +201,7 @@ func TestHomeDirNonEmpty(t *testing.T) {
 	if err != nil {
 		t.Skipf("home dir unavailable in this environment: %v", err)
 	}
-	if v.Kind != interpreter.KindString || v.Str == "" {
+	if v.Kind != interpreter.KindString || v.Str() == "" {
 		t.Errorf("os.homeDir = %v, want a non-empty string", v)
 	}
 }
@@ -211,7 +211,7 @@ func TestTempDirMatchesHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("os.tempDir: %v", err)
 	}
-	if v.Kind != interpreter.KindString || v.Str != stdos.TempDir() {
+	if v.Kind != interpreter.KindString || v.Str() != stdos.TempDir() {
 		t.Errorf("os.tempDir = %v, want %q", v, stdos.TempDir())
 	}
 }
@@ -235,8 +235,8 @@ func TestSetEnvRoundTrip(t *testing.T) {
 		t.Errorf("after setEnv, Getenv = %q, want %q", got, "world")
 	}
 	v, _ := getEnvFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal(key)})
-	if v.Str != "world" {
-		t.Errorf("getEnv after setEnv = %q", v.Str)
+	if v.Str() != "world" {
+		t.Errorf("getEnv after setEnv = %q", v.Str())
 	}
 }
 
@@ -266,7 +266,7 @@ func TestUnsetEnvAndHasEnv(t *testing.T) {
 		if err != nil {
 			t.Fatalf("hasEnv: %v", err)
 		}
-		return v.Bool
+		return v.Bool()
 	}
 	stdos.Unsetenv(key)
 	defer stdos.Unsetenv(key)

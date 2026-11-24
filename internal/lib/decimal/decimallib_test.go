@@ -26,9 +26,9 @@ func call(t *testing.T, fn interpreter.Builtin, args ...Value) Value {
 // kindOf returns the error kind (an *ErrorSignal's kind, or "runtime").
 func kindOf(err error) string {
 	if sig, ok := err.(*interpreter.ErrorSignal); ok {
-		for _, f := range sig.Value.Fields {
+		for _, f := range sig.Value.Fields() {
 			if f.Name == "kind" {
-				return f.Value.Str
+				return f.Value.Str()
 			}
 		}
 	}
@@ -43,9 +43,9 @@ func fails(t *testing.T, kind, want string, fn interpreter.Builtin, args ...Valu
 	}
 	msg := err.Error()
 	if sig, ok := err.(*interpreter.ErrorSignal); ok {
-		for _, f := range sig.Value.Fields {
+		for _, f := range sig.Value.Fields() {
 			if f.Name == "message" {
-				msg = f.Value.Str
+				msg = f.Value.Str()
 			}
 		}
 	}
@@ -79,6 +79,9 @@ func TestParseAndDisplay(t *testing.T) {
 		fails(t, "decimal", "is not a decimal number", fromFn, str(bad))
 	}
 	fails(t, "limit", "more than", fromFn, str("1e999999999"))
+	// Past 2^31 the exponent still reaches the cap, not a parse error, on
+	// a 32-bit int too (M29.6).
+	fails(t, "limit", "more than", fromFn, str("1e9999999999"))
 	if got := s(call(t, fromFn, num(-42))); got != "-42" {
 		t.Errorf("from(-42) = %s", got)
 	}
@@ -194,7 +197,7 @@ func TestEqualityAndCompare(t *testing.T) {
 		a, b string
 		want int64
 	}{{"1.5", "1.50", 0}, {"-2", "1", -1}, {"0.1", "0.09", 1}, {"100", "1e2", 0}} {
-		if got := call(t, compareFn, str(c.a), str(c.b)).Int; got != c.want {
+		if got := call(t, compareFn, str(c.a), str(c.b)).Int(); got != c.want {
 			t.Errorf("compare(%s, %s) = %d, want %d", c.a, c.b, got, c.want)
 		}
 	}
@@ -225,15 +228,15 @@ func TestHelpers(t *testing.T) {
 	if got := s(call(t, sumFn, interpreter.ListVal(parser.Type{}, nil))); got != "0" {
 		t.Errorf("empty sum = %s", got)
 	}
-	if got := call(t, info("isInteger", func(d dec) Value { return interpreter.BoolVal(isInteger(d)) }), str("3.000")); !got.Bool {
+	if got := call(t, info("isInteger", func(d dec) Value { return interpreter.BoolVal(isInteger(d)) }), str("3.000")); !got.Bool() {
 		t.Error("3.000 is an integer")
 	}
-	if got := call(t, toIntFn, str("42.00")).Int; got != 42 {
+	if got := call(t, toIntFn, str("42.00")).Int(); got != 42 {
 		t.Errorf("toInt = %d", got)
 	}
 	fails(t, "decimal", "fractional part", toIntFn, str("1.5"))
 	fails(t, "decimal", "does not fit an int", toIntFn, str("9223372036854775808"))
-	if got := call(t, toFloatFn, str("0.1")).Float; got != 0.1 {
+	if got := call(t, toFloatFn, str("0.1")).Float(); got != 0.1 {
 		t.Errorf("toFloat = %v", got)
 	}
 	fails(t, "decimal", "out of float range", toFloatFn, str("1e400"))

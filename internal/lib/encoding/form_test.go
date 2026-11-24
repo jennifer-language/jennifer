@@ -29,8 +29,8 @@ func formPairs(t *testing.T, text string) []string {
 		t.Fatalf("parseForm(%q): %v", text, err)
 	}
 	var out []string
-	for _, e := range v.Map {
-		out = append(out, e.Key.Str+"="+e.Value.Str)
+	for _, e := range v.Map() {
+		out = append(out, e.Key.Str()+"="+e.Value.Str())
 	}
 	return out
 }
@@ -103,7 +103,7 @@ func TestRequestParsersStayBounded(t *testing.T) {
 	}
 	semis := strings.Repeat(";", 64<<10)
 	if n := allocDuring(func() {
-		if got, err := parseCookies(semis); err != nil || len(got.Map) != 0 {
+		if got, err := parseCookies(semis); err != nil || len(got.Map()) != 0 {
 			t.Fatalf("got %v, %v", got, err)
 		}
 	}); n > 64<<10 {
@@ -128,8 +128,8 @@ func TestParseCookies(t *testing.T) {
 			t.Fatalf("%q: %v", c.header, err)
 		}
 		var got []string
-		for _, e := range v.Map {
-			got = append(got, e.Key.Str+"="+e.Value.Str)
+		for _, e := range v.Map() {
+			got = append(got, e.Key.Str()+"="+e.Value.Str())
 		}
 		if strings.Join(got, "|") != c.want {
 			t.Errorf("parseCookies(%q) = %q, want %q", c.header, strings.Join(got, "|"), c.want)

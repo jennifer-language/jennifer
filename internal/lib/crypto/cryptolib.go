@@ -227,7 +227,7 @@ func randBytesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if args[0].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("crypto.randBytes: n must be int, got %s", args[0].Kind)
 	}
-	n := args[0].Int
+	n := args[0].Int()
 	if n < 0 {
 		return interpreter.Null(), fmt.Errorf("crypto.randBytes: n must be >= 0, got %d", n)
 	}
@@ -252,7 +252,7 @@ func randIntFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("crypto.randInt: lo and hi must be int")
 	}
-	lo, hi := args[0].Int, args[1].Int
+	lo, hi := args[0].Int(), args[1].Int()
 	if lo > hi {
 		return interpreter.Null(), fmt.Errorf("crypto.randInt: lo (%d) must be <= hi (%d)", lo, hi)
 	}
@@ -304,7 +304,7 @@ func hkdfCore(fn string, args []interpreter.Value) (interpreter.Value, error) {
 	if args[4].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("%s: length must be int, got %s", fn, args[4].Kind)
 	}
-	length := args[4].Int
+	length := args[4].Int()
 	if length <= 0 {
 		return interpreter.Null(), fmt.Errorf("%s: length must be > 0, got %d", fn, length)
 	}
@@ -313,9 +313,9 @@ func hkdfCore(fn string, args []interpreter.Value) (interpreter.Value, error) {
 	// truncate to a small int on a 32-bit target (jennifer-tiny), and with a
 	// message of our own. It is the algorithm's bound, not one of our caps.
 	if most := int64(255 * h().Size()); length > most {
-		return interpreter.Null(), fmt.Errorf("%s: length %d is over HKDF's maximum of %d bytes for %s (255 times the hash size)", fn, length, most, args[0].Str)
+		return interpreter.Null(), fmt.Errorf("%s: length %d is over HKDF's maximum of %d bytes for %s (255 times the hash size)", fn, length, most, args[0].Str())
 	}
-	key, kerr := hkdf.Key(h, args[1].Bytes, args[2].Bytes, string(args[3].Bytes), int(length))
+	key, kerr := hkdf.Key(h, args[1].Bytes(), args[2].Bytes(), string(args[3].Bytes()), int(length))
 	if kerr != nil {
 		return interpreter.Null(), fmt.Errorf("%s: %v", fn, kerr)
 	}
@@ -354,7 +354,7 @@ func pbkdf2Core(fn string, args []interpreter.Value) (interpreter.Value, error) 
 	if args[3].Kind != interpreter.KindInt || args[4].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("%s: iterations and keyLen must be int", fn)
 	}
-	iterations, keyLen := args[3].Int, args[4].Int
+	iterations, keyLen := args[3].Int(), args[4].Int()
 	if iterations <= 0 {
 		return interpreter.Null(), fmt.Errorf("%s: iterations must be > 0, got %d", fn, iterations)
 	}
@@ -371,7 +371,7 @@ func pbkdf2Core(fn string, args []interpreter.Value) (interpreter.Value, error) 
 	if iterations > maxPBKDFWork/blocks {
 		return interpreter.Null(), limits.Capf("%s: work (%d blocks x %d iterations) exceeds the %d limit; lower keyLen or iterations", fn, blocks, iterations, maxPBKDFWork)
 	}
-	key, kerr := pbkdf2.Key(h, string(args[1].Bytes), args[2].Bytes, int(iterations), int(keyLen))
+	key, kerr := pbkdf2.Key(h, string(args[1].Bytes()), args[2].Bytes(), int(iterations), int(keyLen))
 	if kerr != nil {
 		return interpreter.Null(), fmt.Errorf("%s: %v", fn, kerr)
 	}
@@ -383,12 +383,12 @@ func kdfHashOf(fn string, v interpreter.Value) (func() gohash.Hash, error) {
 	if v.Kind != interpreter.KindString {
 		return nil, fmt.Errorf("%s: algo must be string, got %s", fn, v.Kind)
 	}
-	if v.Str == "md5" {
+	if v.Str() == "md5" {
 		return nil, fmt.Errorf("%s: %s", fn, md5KDF)
 	}
-	h, ok := kdfHash[v.Str]
+	h, ok := kdfHash[v.Str()]
 	if !ok {
-		return nil, fmt.Errorf("%s: unknown algorithm %q; known: %s", fn, v.Str, quoteList(kdfHashNames))
+		return nil, fmt.Errorf("%s: unknown algorithm %q; known: %s", fn, v.Str(), quoteList(kdfHashNames))
 	}
 	return h, nil
 }

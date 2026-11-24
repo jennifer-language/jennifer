@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"time"
 
+	"jennifer-lang.dev/jennifer/internal/dnsconf"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
@@ -296,7 +297,12 @@ func failure(ctx interpreter.BuiltinCtx, prefix, op string, err error) error {
 	if isAddrError(err) {
 		return fmt.Errorf("%s: %v", prefix, err)
 	}
-	return newNetError(ctx, op, failureReason(op, err), fmt.Sprintf("%s: %v", prefix, err))
+	reason := failureReason(op, err)
+	msg := fmt.Sprintf("%s: %v", prefix, err)
+	if reason == "dns" {
+		msg = dnsconf.Setup().Explain(msg)
+	}
+	return newNetError(ctx, op, reason, msg)
 }
 
 // isAddrError reports a malformed address (no port, a bad port): the caller's
@@ -391,27 +397,32 @@ type dialOptions struct {
 	tls        bool
 	skipVerify bool
 	caCert     []byte
+	dnsServers []string // host:port; only lookupWith asks them
 }
+
+// maxDNSServers bounds ConnectOptions.dnsServers: each is tried in turn, so a
+// long list only multiplies the wait.
+const maxDNSServers = 16
 
 // connectOptions reads a net.ConnectOptions argument.
 func connectOptions(fnName string, v Value) (dialOptions, error) {
 	var o dialOptions
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "ConnectOptions" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "ConnectOptions" {
 		return o, fmt.Errorf("%s: options must be a net.ConnectOptions, got %s", fnName, typeName(v))
 	}
 	ms := int64(0)
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		switch f.Name {
 		case "timeoutMs":
 			if f.Value.Kind != interpreter.KindInt {
 				return o, fmt.Errorf("%s: net.ConnectOptions.timeoutMs must be int, got %s", fnName, f.Value.Kind)
 			}
-			ms = f.Value.Int
+			ms = f.Value.Int()
 		case "tls":
 			if f.Value.Kind != interpreter.KindBool {
 				return o, fmt.Errorf("%s: net.ConnectOptions.tls must be bool, got %s", fnName, f.Value.Kind)
 			}
-			o.tls = f.Value.Bool
+			o.tls = f.Value.Bool()
 		case "tlsOptions":
 			if f.Value.Kind == interpreter.KindNull {
 				continue
@@ -421,6 +432,12 @@ func connectOptions(fnName string, v Value) (dialOptions, error) {
 				return o, err
 			}
 			o.skipVerify, o.caCert = skip, caCert
+		case "dnsServers":
+			servers, err := dnsServers(fnName, f.Value)
+			if err != nil {
+				return o, err
+			}
+			o.dnsServers = servers
 		}
 	}
 	timeout, err := resolveTimeout(fnName, ms)
@@ -431,13 +448,40 @@ func connectOptions(fnName string, v Value) (dialOptions, error) {
 	return o, nil
 }
 
+// dnsServers reads ConnectOptions.dnsServers: each "ip" or "ip:port" (port 53
+// by default) as host:port; a host name is an error.
+func dnsServers(fnName string, v Value) ([]string, error) {
+	if v.Kind == interpreter.KindNull {
+		return nil, nil
+	}
+	if v.Kind != interpreter.KindList {
+		return nil, fmt.Errorf("%s: net.ConnectOptions.dnsServers must be list of string, got %s", fnName, v.Kind)
+	}
+	list := v.List()
+	if len(list) > maxDNSServers {
+		return nil, fmt.Errorf("%s: net.ConnectOptions.dnsServers names %d servers, at most %d", fnName, len(list), maxDNSServers)
+	}
+	var servers []string
+	for _, e := range list {
+		if e.Kind != interpreter.KindString {
+			return nil, fmt.Errorf("%s: net.ConnectOptions.dnsServers must be list of string, got an element of %s", fnName, e.Kind)
+		}
+		addr, err := dnsconf.ServerAddr(e.Str())
+		if err != nil {
+			return nil, fmt.Errorf("%s: %v", fnName, err)
+		}
+		servers = append(servers, addr)
+	}
+	return servers, nil
+}
+
 // typeName names a value's type for an error: net.X for a net struct.
 func typeName(v Value) string {
-	if v.Kind == interpreter.KindStruct && v.StructName != "" {
-		if v.StructNS != "" {
-			return v.StructNS + "." + v.StructName
+	if v.Kind == interpreter.KindStruct && v.StructName() != "" {
+		if v.StructNS() != "" {
+			return v.StructNS() + "." + v.StructName()
 		}
-		return v.StructName
+		return v.StructName()
 	}
 	return v.Kind.String()
 }
@@ -448,7 +492,7 @@ func legacyTimeout(fnName string, v Value) (time.Duration, error) {
 	if v.Kind != interpreter.KindInt {
 		return 0, fmt.Errorf("%s: timeout must be int milliseconds, got %s", fnName, v.Kind)
 	}
-	return resolveTimeout(fnName, v.Int)
+	return resolveTimeout(fnName, v.Int())
 }
 
 // connectFn implements `net.connect(address) -> net.Conn`, a plaintext
@@ -563,21 +607,21 @@ func tlsOptions(fnName string, args []Value, idx int) (skipVerify bool, caCert [
 		return false, nil, nil
 	}
 	v := args[idx]
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "TLSOptions" {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "TLSOptions" {
 		return false, nil, fmt.Errorf("%s: options must be a net.TLSOptions, got %s", fnName, v.Kind)
 	}
-	for _, f := range v.Fields {
+	for _, f := range v.Fields() {
 		switch f.Name {
 		case "skipVerify":
 			if f.Value.Kind != interpreter.KindBool {
 				return false, nil, fmt.Errorf("%s: net.TLSOptions.skipVerify must be bool, got %s", fnName, f.Value.Kind)
 			}
-			skipVerify = f.Value.Bool
+			skipVerify = f.Value.Bool()
 		case "caCert":
 			if f.Value.Kind != interpreter.KindBytes {
 				return false, nil, fmt.Errorf("%s: net.TLSOptions.caCert must be bytes, got %s", fnName, f.Value.Kind)
 			}
-			caCert = f.Value.Bytes
+			caCert = f.Value.Bytes()
 		}
 	}
 	return skipVerify, caCert, nil
@@ -705,7 +749,7 @@ func readAllFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if args[1].Kind != interpreter.KindInt {
 			return interpreter.Null(), fmt.Errorf("net.readAll: maxBytes must be int, got %s", args[1].Kind)
 		}
-		switch m := args[1].Int; {
+		switch m := args[1].Int(); {
 		case m > 0:
 			maxBytes = m
 		case m < 0:
@@ -1124,7 +1168,7 @@ func applyDeadline(fnName string, args []Value, kind deadlineKind) (Value, error
 	// Dispatch on the handle kind: a stream net.Conn or a datagram
 	// net.UDPSocket (its PacketConn honours the same deadline methods).
 	v := args[0]
-	if v.Kind == interpreter.KindStruct && v.StructNS == LibraryName && v.StructName == "UDPSocket" {
+	if v.Kind == interpreter.KindStruct && v.StructNS() == LibraryName && v.StructName() == "UDPSocket" {
 		id, err := extractID(fnName, "UDPSocket", v)
 		if err != nil {
 			return interpreter.Null(), err
@@ -1198,7 +1242,7 @@ func setIdleTimeoutFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if args[1].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("net.setIdleTimeout: ms must be int, got %s", args[1].Kind)
 	}
-	ms := args[1].Int
+	ms := args[1].Int()
 	if ms < 0 {
 		return interpreter.Null(), fmt.Errorf("net.setIdleTimeout: ms must be >= 0 (0 or %d = none), got %d", int64(noDeadlineMs), ms)
 	}
@@ -1307,10 +1351,10 @@ func addressFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("net.address expects 1 argument (net.Conn, net.Listener, or net.UDPSocket), got %d", len(args))
 	}
 	v := args[0]
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName {
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName {
 		return interpreter.Null(), fmt.Errorf("net.address: argument must be a net.Conn, net.Listener, or net.UDPSocket; got %s", v.Kind)
 	}
-	switch v.StructName {
+	switch v.StructName() {
 	case "Conn":
 		id, err := extractID("net.address", "Conn", v)
 		if err != nil {
@@ -1342,7 +1386,7 @@ func addressFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		}
 		return interpreter.StringVal(s.c.LocalAddr().String()), nil
 	default:
-		return interpreter.Null(), fmt.Errorf("net.address: argument must be a net.Conn, net.Listener, or net.UDPSocket; got net.%s", v.StructName)
+		return interpreter.Null(), fmt.Errorf("net.address: argument must be a net.Conn, net.Listener, or net.UDPSocket; got net.%s", v.StructName())
 	}
 }
 
@@ -1493,7 +1537,7 @@ func sendToFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if !errors.As(resolveErr, &dnsErr) {
 			return interpreter.Null(), errors.New(msg)
 		}
-		return interpreter.Null(), newNetError(ctx, "lookup", "dns", msg)
+		return interpreter.Null(), newNetError(ctx, "lookup", "dns", dnsconf.Setup().Explain(msg))
 	}
 	if _, werr := s.c.WriteTo(data, peerAddr); werr != nil {
 		return interpreter.Null(), failure(ctx, "net.sendTo", "write", werr)
@@ -1586,7 +1630,7 @@ func setBroadcastFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("net.setBroadcast: %v", cerr)
 	}
 	val := 0
-	if args[1].Bool {
+	if args[1].Bool() {
 		val = 1
 	}
 	var opErr error
@@ -1663,14 +1707,26 @@ func closeUDP(id int64) error {
 
 // -------- DNS --------
 
-// resolver answers net.lookup / reverseLookup; a variable so tests can hand
-// in one that never answers.
+// resolver answers net.lookup / reverseLookup; a variable so tests
+// can hand in one that never answers. It is the process-wide resolver, which
+// setupDNS routes through the configured files.
 var resolver = stdnet.DefaultResolver
+
+// setupDNS picks the resolver configuration once per process and, when it is
+// not the system's, routes net.DefaultResolver through it (internal/dnsconf).
+func setupDNS() { dnsconf.Setup() }
 
 // lookupDeadline runs a lookup under timeout (0 = no deadline). A lookup cut
 // off by the deadline is kind "timeout"; any other failure a NetError with
 // op "lookup" and reason "dns".
 func lookupDeadline(ctx interpreter.BuiltinCtx, fnName, name string, timeout time.Duration,
+	run func(context.Context, string) ([]string, error)) (Value, error) {
+	return lookupWithin(ctx, fnName, name, timeout, false, run)
+}
+
+// lookupWithin is lookupDeadline; explicitServers (lookupWith's dnsServers)
+// leaves out the configuration hint, which is about the configured resolver.
+func lookupWithin(ctx interpreter.BuiltinCtx, fnName, name string, timeout time.Duration, explicitServers bool,
 	run func(context.Context, string) ([]string, error)) (Value, error) {
 	c := context.Background()
 	if timeout > 0 {
@@ -1684,67 +1740,79 @@ func lookupDeadline(ctx interpreter.BuiltinCtx, fnName, name string, timeout tim
 		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &dnsErr) && dnsErr.IsTimeout) {
 			return interpreter.Null(), interpreter.RaiseError("timeout", fmt.Sprintf("%s: %s: lookup timed out", fnName, name), ctx.File, ctx.Line, ctx.Col)
 		}
-		return interpreter.Null(), newNetError(ctx, "lookup", "dns", fmt.Sprintf("%s: %s: %v", fnName, name, err))
+		msg := fmt.Sprintf("%s: %s: %v", fnName, name, err)
+		if !explicitServers {
+			msg = dnsconf.Setup().Explain(msg)
+		}
+		return interpreter.Null(), newNetError(ctx, "lookup", "dns", msg)
 	}
 	return stringSlice(out), nil
 }
 
 // lookupArgs reads `(name)` or, for the With form, `(name, net.ConnectOptions)`
-// and returns the name and the deadline.
-func lookupArgs(fnName, role string, args []Value, with bool) (string, time.Duration, error) {
+// and returns the name and the options (the zero form: the default deadline).
+func lookupArgs(fnName, role string, args []Value, with bool) (string, dialOptions, error) {
 	want, shape := 1, "1 argument ("+role+")"
 	if with {
 		want, shape = 2, "2 arguments ("+role+", net.ConnectOptions)"
 	}
 	if len(args) != want {
-		return "", 0, fmt.Errorf("%s expects %s, got %d", fnName, shape, len(args))
+		return "", dialOptions{}, fmt.Errorf("%s expects %s, got %d", fnName, shape, len(args))
 	}
 	name, err := takeStringArg(fnName, args, 0, role)
 	if err != nil {
-		return "", 0, err
+		return "", dialOptions{}, err
 	}
 	if !with {
-		return name, defaultTimeout, nil
+		return name, dialOptions{timeout: defaultTimeout}, nil
 	}
 	o, err := connectOptions(fnName, args[1])
 	if err != nil {
-		return "", 0, err
+		return "", dialOptions{}, err
 	}
-	return name, o.timeout, nil
+	return name, o, nil
 }
 
 func lookupFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
-	host, timeout, err := lookupArgs("net.lookup", "host", args, false)
+	host, o, err := lookupArgs("net.lookup", "host", args, false)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return lookupDeadline(ctx, "net.lookup", host, timeout, resolver.LookupHost)
+	return lookupDeadline(ctx, "net.lookup", host, o.timeout, resolver.LookupHost)
 }
 
 // lookupWithFn implements `net.lookupWith(host, net.ConnectOptions)`: lookup
-// within the options' timeoutMs (the other fields are ignored).
+// within the options' timeoutMs. With dnsServers it asks only those (no hosts
+// file, no search list, A then AAAA); tls and tlsOptions are ignored.
 func lookupWithFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
-	host, timeout, err := lookupArgs("net.lookupWith", "host", args, true)
+	const fnName = "net.lookupWith"
+	host, o, err := lookupArgs(fnName, "host", args, true)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return lookupDeadline(ctx, "net.lookupWith", host, timeout, resolver.LookupHost)
+	if len(o.dnsServers) == 0 {
+		return lookupDeadline(ctx, fnName, host, o.timeout, resolver.LookupHost)
+	}
+	return lookupWithin(ctx, fnName, host, o.timeout, true, func(c context.Context, name string) ([]string, error) {
+		return dnsconf.Query(c, o.dnsServers, name)
+	})
 }
 
 func reverseLookupFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
-	ip, timeout, err := lookupArgs("net.reverseLookup", "ip", args, false)
+	ip, o, err := lookupArgs("net.reverseLookup", "ip", args, false)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return lookupDeadline(ctx, "net.reverseLookup", ip, timeout, resolver.LookupAddr)
+	return lookupDeadline(ctx, "net.reverseLookup", ip, o.timeout, resolver.LookupAddr)
 }
 
 // reverseLookupWithFn implements `net.reverseLookupWith(ip,
-// net.ConnectOptions)`: reverseLookup within the options' timeoutMs.
+// net.ConnectOptions)`: reverseLookup within the options' timeoutMs, through
+// the configured resolver (dnsServers is ignored, as are tls and tlsOptions).
 func reverseLookupWithFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
-	ip, timeout, err := lookupArgs("net.reverseLookupWith", "ip", args, true)
+	ip, o, err := lookupArgs("net.reverseLookupWith", "ip", args, true)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return lookupDeadline(ctx, "net.reverseLookupWith", ip, timeout, resolver.LookupAddr)
+	return lookupDeadline(ctx, "net.reverseLookupWith", ip, o.timeout, resolver.LookupAddr)
 }

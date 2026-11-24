@@ -42,7 +42,7 @@ func tempArgs(fnName string, args []Value, maxN int) (dir, prefix, suffix string
 		if args[i].Kind != interpreter.KindString {
 			return "", "", "", fmt.Errorf("%s: argument %d must be string, got %s", fnName, i+1, args[i].Kind)
 		}
-		parts[i] = args[i].Str
+		parts[i] = args[i].Str()
 	}
 	dir = parts[0]
 	prefix = parts[1]

@@ -42,8 +42,8 @@ func roundtrip(t *testing.T, format string, in []entry) []entry {
 	if err != nil {
 		t.Fatalf("%s unpack: %v", format, err)
 	}
-	out := make([]entry, len(back.List))
-	for i, v := range back.List {
+	out := make([]entry, len(back.List()))
+	for i, v := range back.List() {
 		e, err := extractEntry(i, v)
 		if err != nil {
 			t.Fatalf("%s extract %d: %v", format, i, err)
@@ -105,8 +105,8 @@ func TestTarGzIsGzip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(packed.Bytes) < 2 || packed.Bytes[0] != 0x1f || packed.Bytes[1] != 0x8b {
-		t.Errorf("tar.gz output is not gzip-framed: %x", packed.Bytes[:min(4, len(packed.Bytes))])
+	if len(packed.Bytes()) < 2 || packed.Bytes()[0] != 0x1f || packed.Bytes()[1] != 0x8b {
+		t.Errorf("tar.gz output is not gzip-framed: %x", packed.Bytes()[:min(4, len(packed.Bytes()))])
 	}
 }
 
@@ -277,8 +277,8 @@ func TestTgzAlias(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unpack %s: %v", format, err)
 		}
-		if len(out.List) != 1 {
-			t.Fatalf("unpack %s: %d entries, want 1", format, len(out.List))
+		if len(out.List()) != 1 {
+			t.Fatalf("unpack %s: %d entries, want 1", format, len(out.List()))
 		}
 	}
 }
@@ -313,7 +313,7 @@ func TestUnpackTarMasksSpecialBits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pack: %v", err)
 	}
-	entries, err := unpackTar(packed.Bytes, defaultUnpackCaps())
+	entries, err := unpackTar(packed.Bytes(), defaultUnpackCaps())
 	if err != nil {
 		t.Fatalf("unpackTar: %v", err)
 	}
@@ -479,8 +479,8 @@ func TestSpecialEntries(t *testing.T) {
 		{Name: "skipSpecial", Value: interpreter.BoolVal(true)},
 	})
 	got, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("zip"), interpreter.BytesVal(buf.Bytes()), opts})
-	if err != nil || len(got.List) != 1 {
-		t.Errorf("unpackWith skipSpecial: %v entries, %v", len(got.List), err)
+	if err != nil || len(got.List()) != 1 {
+		t.Errorf("unpackWith skipSpecial: %v entries, %v", len(got.List()), err)
 	}
 }
 

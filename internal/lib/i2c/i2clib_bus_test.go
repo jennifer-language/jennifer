@@ -45,8 +45,8 @@ func TestMessageLimit(t *testing.T) {
 	ctx := interpreter.BuiltinCtx{}
 	iv, bv := interpreter.IntVal, interpreter.BytesVal
 	v, err := readFn(ctx, []Value{b, iv(8192)})
-	if err != nil || len(v.Bytes) != 8192 {
-		t.Fatalf("read 8192: %d bytes, %v", len(v.Bytes), err)
+	if err != nil || len(v.Bytes()) != 8192 {
+		t.Fatalf("read 8192: %d bytes, %v", len(v.Bytes()), err)
 	}
 	if _, err := writeRegFn(ctx, []Value{b, iv(1), bv(make([]byte, 8191))}); err != nil {
 		t.Fatalf("writeReg of 8191 data bytes: %v", err)

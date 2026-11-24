@@ -57,7 +57,7 @@ func TestServerRejectsInvalidUTF8(t *testing.T) {
 			p, perr := pathFn(noCtx, []Value{req})
 			q, qerr := queryFn(noCtx, []Value{req, interpreter.StringVal("x")})
 			h, herr := headerFn(noCtx, []Value{req, interpreter.StringVal("X-Test")})
-			got := p.Str + "|" + q.Str + "|" + h.Str
+			got := p.Str() + "|" + q.Str() + "|" + h.Str()
 			if perr != nil || qerr != nil || herr != nil {
 				got = "error"
 			}

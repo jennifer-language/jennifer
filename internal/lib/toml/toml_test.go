@@ -76,37 +76,37 @@ no = false
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if v := get(t, tree, "/title"); v.Kind != interpreter.KindString || v.Str != "Jennifer" {
+	if v := get(t, tree, "/title"); v.Kind != interpreter.KindString || v.Str() != "Jennifer" {
 		t.Errorf("title = %+v", v)
 	}
-	if v := get(t, tree, "/literal"); v.Str != `C:\temp` {
-		t.Errorf("literal = %q", v.Str)
+	if v := get(t, tree, "/literal"); v.Str() != `C:\temp` {
+		t.Errorf("literal = %q", v.Str())
 	}
-	if v := get(t, tree, "/count"); v.Kind != interpreter.KindInt || v.Int != 42 {
+	if v := get(t, tree, "/count"); v.Kind != interpreter.KindInt || v.Int() != 42 {
 		t.Errorf("count = %+v", v)
 	}
-	if v := get(t, tree, "/hex"); v.Int != 255 {
+	if v := get(t, tree, "/hex"); v.Int() != 255 {
 		t.Errorf("hex = %+v", v)
 	}
-	if v := get(t, tree, "/oct"); v.Int != 493 {
+	if v := get(t, tree, "/oct"); v.Int() != 493 {
 		t.Errorf("oct = %+v", v)
 	}
-	if v := get(t, tree, "/bin"); v.Int != 10 {
+	if v := get(t, tree, "/bin"); v.Int() != 10 {
 		t.Errorf("bin = %+v", v)
 	}
-	if v := get(t, tree, "/neg"); v.Int != -17 {
+	if v := get(t, tree, "/neg"); v.Int() != -17 {
 		t.Errorf("neg = %+v", v)
 	}
-	if v := get(t, tree, "/big"); v.Int != 1000000 {
+	if v := get(t, tree, "/big"); v.Int() != 1000000 {
 		t.Errorf("big = %+v", v)
 	}
-	if v := get(t, tree, "/ratio"); v.Kind != interpreter.KindFloat || v.Float != 3.14 {
+	if v := get(t, tree, "/ratio"); v.Kind != interpreter.KindFloat || v.Float() != 3.14 {
 		t.Errorf("ratio = %+v", v)
 	}
-	if v := get(t, tree, "/sci"); v.Kind != interpreter.KindFloat || v.Float != 1000 {
+	if v := get(t, tree, "/sci"); v.Kind != interpreter.KindFloat || v.Float() != 1000 {
 		t.Errorf("sci = %+v", v)
 	}
-	if v := get(t, tree, "/yes"); v.Kind != interpreter.KindBool || !v.Bool {
+	if v := get(t, tree, "/yes"); v.Kind != interpreter.KindBool || !v.Bool() {
 		t.Errorf("yes = %+v", v)
 	}
 }
@@ -130,20 +130,20 @@ name = "banana"
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if v := get(t, tree, "/server/host"); v.Str != "localhost" {
-		t.Errorf("host = %q", v.Str)
+	if v := get(t, tree, "/server/host"); v.Str() != "localhost" {
+		t.Errorf("host = %q", v.Str())
 	}
-	if v := get(t, tree, "/server/ports/2"); v.Int != 8002 {
+	if v := get(t, tree, "/server/ports/2"); v.Int() != 8002 {
 		t.Errorf("ports[2] = %+v", v)
 	}
-	if v := get(t, tree, "/server/tls/enabled"); !v.Bool {
+	if v := get(t, tree, "/server/tls/enabled"); !v.Bool() {
 		t.Errorf("tls.enabled = %+v", v)
 	}
-	if v := get(t, tree, "/fruit/0/name"); v.Str != "apple" {
-		t.Errorf("fruit[0] = %q", v.Str)
+	if v := get(t, tree, "/fruit/0/name"); v.Str() != "apple" {
+		t.Errorf("fruit[0] = %q", v.Str())
 	}
-	if v := get(t, tree, "/fruit/1/name"); v.Str != "banana" {
-		t.Errorf("fruit[1] = %q", v.Str)
+	if v := get(t, tree, "/fruit/1/name"); v.Str() != "banana" {
+		t.Errorf("fruit[1] = %q", v.Str())
 	}
 }
 
@@ -157,13 +157,13 @@ nested = { deep.value = 3 }
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if v := get(t, tree, "/a/b/c"); v.Int != 1 {
+	if v := get(t, tree, "/a/b/c"); v.Int() != 1 {
 		t.Errorf("a.b.c = %+v", v)
 	}
-	if v := get(t, tree, "/point/x"); v.Int != 1 {
+	if v := get(t, tree, "/point/x"); v.Int() != 1 {
 		t.Errorf("point.x = %+v", v)
 	}
-	if v := get(t, tree, "/nested/deep/value"); v.Int != 3 {
+	if v := get(t, tree, "/nested/deep/value"); v.Int() != 3 {
 		t.Errorf("nested.deep.value = %+v", v)
 	}
 }
@@ -181,17 +181,17 @@ mlit = '''raw\nnot-escaped'''
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if v := get(t, tree, "/esc"); v.Str != "tab\there\nnewline" {
-		t.Errorf("esc = %q", v.Str)
+	if v := get(t, tree, "/esc"); v.Str() != "tab\there\nnewline" {
+		t.Errorf("esc = %q", v.Str())
 	}
-	if v := get(t, tree, "/uni"); v.Str != "é" {
-		t.Errorf("uni = %q", v.Str)
+	if v := get(t, tree, "/uni"); v.Str() != "é" {
+		t.Errorf("uni = %q", v.Str())
 	}
-	if v := get(t, tree, "/multi"); v.Str != "first\nsecond" {
-		t.Errorf("multi = %q", v.Str)
+	if v := get(t, tree, "/multi"); v.Str() != "first\nsecond" {
+		t.Errorf("multi = %q", v.Str())
 	}
-	if v := get(t, tree, "/mlit"); v.Str != `raw\nnot-escaped` {
-		t.Errorf("mlit = %q", v.Str)
+	if v := get(t, tree, "/mlit"); v.Str() != `raw\nnot-escaped` {
+		t.Errorf("mlit = %q", v.Str())
 	}
 }
 
@@ -267,11 +267,11 @@ name = "banana"
 	if err != nil {
 		t.Fatalf("re-decode:\n%s\nerr: %v", out, err)
 	}
-	if v := get(t, tree2, "/server/ports/1"); v.Int != 8001 {
+	if v := get(t, tree2, "/server/ports/1"); v.Int() != 8001 {
 		t.Errorf("round-trip ports[1] = %+v", v)
 	}
-	if v := get(t, tree2, "/fruit/1/name"); v.Str != "banana" {
-		t.Errorf("round-trip fruit[1] = %q", v.Str)
+	if v := get(t, tree2, "/fruit/1/name"); v.Str() != "banana" {
+		t.Errorf("round-trip fruit[1] = %q", v.Str())
 	}
 	if txt := getNode(t, tree2, "/created").Str(); txt != "1979-05-27T07:32:00Z" {
 		t.Errorf("round-trip created = %q", txt)
@@ -414,11 +414,11 @@ name = "plantain"
 	if err != nil {
 		t.Fatalf("spec fruit example must decode, got: %v", err)
 	}
-	if v := get(t, tree, "/fruit/1/physical/color"); v.Str != "yellow" {
-		t.Errorf("fruit[1].physical.color = %q", v.Str)
+	if v := get(t, tree, "/fruit/1/physical/color"); v.Str() != "yellow" {
+		t.Errorf("fruit[1].physical.color = %q", v.Str())
 	}
-	if v := get(t, tree, "/fruit/1/variety/0/name"); v.Str != "plantain" {
-		t.Errorf("fruit[1].variety[0].name = %q", v.Str)
+	if v := get(t, tree, "/fruit/1/variety/0/name"); v.Str() != "plantain" {
+		t.Errorf("fruit[1].variety[0].name = %q", v.Str())
 	}
 
 	// Inline tables under the same key across elements are independent too.
@@ -432,8 +432,8 @@ net = { ip = "2.2.2.2" }
 	if err != nil {
 		t.Fatalf("per-element inline tables must decode, got: %v", err)
 	}
-	if v := get(t, tree, "/srv/1/net/ip"); v.Str != "2.2.2.2" {
-		t.Errorf("srv[1].net.ip = %q", v.Str)
+	if v := get(t, tree, "/srv/1/net/ip"); v.Str() != "2.2.2.2" {
+		t.Errorf("srv[1].net.ip = %q", v.Str())
 	}
 
 	// Within ONE element the redefinition rules still bite.
@@ -488,12 +488,12 @@ func TestDecodeUnderscoreBaseAware(t *testing.T) {
 		v := get(t, tree, "/x")
 		switch w := want.(type) {
 		case int64:
-			if v.Int != w {
-				t.Errorf("%q = %d, want %d", src, v.Int, w)
+			if v.Int() != w {
+				t.Errorf("%q = %d, want %d", src, v.Int(), w)
 			}
 		case float64:
-			if v.Float != w {
-				t.Errorf("%q = %g, want %g", src, v.Float, w)
+			if v.Float() != w {
+				t.Errorf("%q = %g, want %g", src, v.Float(), w)
 			}
 		}
 	}

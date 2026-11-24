@@ -24,7 +24,7 @@ func decodeFn(args []interpreter.Value) (node, error) {
 	if args[0].Kind != interpreter.KindString {
 		return node{}, fmt.Errorf("json.decode: argument must be string, got %s", args[0].Kind)
 	}
-	return decodeText("json.decode", args[0].Str, maxNestingDepth, maxDecodedNodes)
+	return decodeText("json.decode", args[0].Str(), maxNestingDepth, maxDecodedNodes)
 }
 
 // decodeWithFn implements `json.decodeWith(text, json.DecodeOptions)`: decode
@@ -41,7 +41,7 @@ func decodeWithFn(args []interpreter.Value) (node, error) {
 	if err != nil {
 		return node{}, err
 	}
-	return decodeText("json.decodeWith", args[0].Str, caps.Depth, caps.Nodes)
+	return decodeText("json.decodeWith", args[0].Str(), caps.Depth, caps.Nodes)
 }
 
 // decodeText decodes one JSON document under the given caps.

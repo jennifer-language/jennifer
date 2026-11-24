@@ -32,26 +32,29 @@ func allocDuring(f func()) uint64 {
 }
 
 // TestFindAllMatchCap: an empty pattern matches at every position; past the
-// match budget findAll errors instead of building ~2 KB per match. The
-// pre-fix code built all 600001 matches (over 1 GB).
+// match budget (limits.MaxRangeElements / matchCells matches) findAll errors
+// instead of building every match.
 func TestFindAllMatchCap(t *testing.T) {
 	resetCacheForTest()
 	var err error
 	got := allocDuring(func() {
-		_, err = callRegex("findAll", "", strings.Repeat("a", 600000))
+		_, err = callRegex("findAll", "", strings.Repeat("a", int(limits.MaxRangeElements/matchCells)+100))
 	})
 	if err == nil || !strings.Contains(err.Error(), "regex.findAll: more than") {
 		t.Fatalf("got %v", err)
 	}
-	if !raceEnabled && got > 128<<20 { // see raceEnabled
-		t.Fatalf("allocated %d bytes before refusing", got)
+	// Go's regexp collects the match positions (about 140 bytes a match) up to
+	// the budget before the refusal; no match Value is built.
+	if bound := uint64(limits.MaxRangeElements/matchCells) * 160; !raceEnabled && got > bound { // see raceEnabled
+		t.Fatalf("allocated %d bytes before refusing (bound %d)", got, bound)
 	}
-	// Groups shrink the budget: 1000 groups allow only a few thousand matches.
-	if _, err := callRegex("findAll", strings.Repeat("()", 1000), strings.Repeat("a", 3000)); err == nil {
-		t.Fatal("1000-group pattern over 3001 positions should error")
+	// Groups shrink the budget: 1000 groups allow only budget / 2008 matches.
+	n := int(limits.MaxRangeElements/(matchCells+groupCells*1000)) + 100
+	if _, err := callRegex("findAll", strings.Repeat("()", 1000), strings.Repeat("a", n)); err == nil {
+		t.Fatalf("1000-group pattern over %d positions should error", n+1)
 	}
 	v, err := callRegex("findAll", "a", "banana")
-	if err != nil || len(v.List) != 3 {
+	if err != nil || len(v.List()) != 3 {
 		t.Fatalf("small findAll: %v", err)
 	}
 }
@@ -76,11 +79,11 @@ func TestReplaceOutputCap(t *testing.T) {
 		t.Fatal("$0 amplification should error")
 	}
 	v, err := callRegex("replace", `(\w+)@(\w+)`, "x a@b y", "$2 at $1")
-	if err != nil || v.Str != "x b at a y" {
-		t.Fatalf("groups: %q, %v", v.Str, err)
+	if err != nil || v.Str() != "x b at a y" {
+		t.Fatalf("groups: %q, %v", v.Str(), err)
 	}
 	v, err = callRegex("replace", "", "ab", "-")
-	if err != nil || v.Str != "-a-b-" {
-		t.Fatalf("empty pattern: %q, %v", v.Str, err)
+	if err != nil || v.Str() != "-a-b-" {
+		t.Fatalf("empty pattern: %q, %v", v.Str(), err)
 	}
 }

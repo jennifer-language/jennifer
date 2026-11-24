@@ -103,18 +103,18 @@ func formatNumberFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpr
 	if args[0].Kind != interpreter.KindString {
 		return fail("locale must be string, got %s", args[0].Kind)
 	}
-	tag, err := normalizeLocale("intl.formatNumber", args[0].Str)
+	tag, err := normalizeLocale("intl.formatNumber", args[0].Str())
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	style, ok := styleFor(tag)
 	if !ok {
-		return fail("no number format for locale %q", args[0].Str)
+		return fail("no number format for locale %q", args[0].Str())
 	}
 	if args[2].Kind != interpreter.KindInt {
 		return fail("digits must be int, got %s", args[2].Kind)
 	}
-	digits := args[2].Int
+	digits := args[2].Int()
 	if digits < 0 || digits > maxFractionDigits {
 		return fail("digits must be 0 to %d, got %d", maxFractionDigits, digits)
 	}
@@ -142,12 +142,12 @@ func formatNumberFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpr
 func plainDecimal(v interpreter.Value) (string, error) {
 	switch v.Kind {
 	case interpreter.KindInt:
-		return strconv.FormatInt(v.Int, 10), nil
+		return strconv.FormatInt(v.Int(), 10), nil
 	case interpreter.KindFloat:
-		if math.IsNaN(v.Float) || math.IsInf(v.Float, 0) {
+		if math.IsNaN(v.Float()) || math.IsInf(v.Float(), 0) {
 			return "", fmt.Errorf("value is not a finite number")
 		}
-		return strconv.FormatFloat(v.Float, 'f', -1, 64), nil
+		return strconv.FormatFloat(v.Float(), 'f', -1, 64), nil
 	}
 	if n, ok := v.AsNativeObject("decimal", "Decimal"); ok {
 		return n.DisplayNative(), nil

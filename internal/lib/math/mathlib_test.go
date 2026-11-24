@@ -52,8 +52,8 @@ func TestRandIntWideRanges(t *testing.T) {
 				if v.Kind != interpreter.KindInt {
 					t.Fatalf("randInt returned %s, want int", v.Kind)
 				}
-				if v.Int < c.lo || v.Int > c.hi {
-					t.Fatalf("randInt(%d, %d) = %d, out of range", c.lo, c.hi, v.Int)
+				if v.Int() < c.lo || v.Int() > c.hi {
+					t.Fatalf("randInt(%d, %d) = %d, out of range", c.lo, c.hi, v.Int())
 				}
 			}
 		})
@@ -78,12 +78,12 @@ func TestFloorCeilRoundRejectUnrepresentable(t *testing.T) {
 	}{{"floor", floorFn}, {"ceil", ceilFn}, {"round", roundFn}} {
 		for _, v := range bad {
 			if _, err := fn.f(interpreter.BuiltinCtx{}, []interpreter.Value{v}); err == nil {
-				t.Errorf("%s(%g) should error, got nil", fn.name, v.Float)
+				t.Errorf("%s(%g) should error, got nil", fn.name, v.Float())
 			}
 		}
 	}
 	// A representable value still works.
-	if r, err := floorFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.FloatVal(3.7)}); err != nil || r.Int != 3 {
+	if r, err := floorFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.FloatVal(3.7)}); err != nil || r.Int() != 3 {
 		t.Errorf("floor(3.7) = %+v, err %v; want 3", r, err)
 	}
 }
@@ -95,7 +95,7 @@ func TestAbsMinInt64Errors(t *testing.T) {
 		t.Error("abs(MinInt64) should error, got nil")
 	}
 	// A normal negative still flips.
-	if r, err := absFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(-5)}); err != nil || r.Int != 5 {
+	if r, err := absFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(-5)}); err != nil || r.Int() != 5 {
 		t.Errorf("abs(-5) = %+v, err %v; want 5", r, err)
 	}
 }
