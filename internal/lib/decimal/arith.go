@@ -122,14 +122,16 @@ func parse(s string) (dec, error) {
 	}
 	e := 0
 	if exp != "" {
-		n, err := strconv.Atoi(exp)
+		// ParseInt at 64 bits, not Atoi: on a 32-bit int an exponent past
+		// 2^31 would fail to parse ("bad") instead of reaching the cap.
+		n, err := strconv.ParseInt(exp, 10, 64)
 		if err != nil {
 			return dec{}, bad
 		}
 		if n > maxDigits || n < -maxDigits {
 			return dec{}, errLimit
 		}
-		e = n
+		e = int(n)
 	}
 	// Leading zeros carry no digits: toString writes "0.00123" for a value
 	// whose coefficient has 3, and a scale of maxDigits gives maxDigits + 1

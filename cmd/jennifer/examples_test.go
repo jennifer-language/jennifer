@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -68,9 +69,20 @@ func TestExamples(t *testing.T) {
 			if err := in.Run(prog); err != nil {
 				t.Fatalf("run %s: %v", name, err)
 			}
+			expected = hostGolden(name, expected)
 			if buf.String() != string(expected) {
 				t.Errorf("%s output mismatch:\n--- got ---\n%s\n--- want ---\n%s", name, buf.String(), string(expected))
 			}
 		})
 	}
+}
+
+// hostGolden adapts a golden that prints the host: osinfo.j's is recorded on
+// linux/amd64 and prints os.ARCH, so on another architecture (GOARCH=386 runs
+// natively on amd64; the 32-bit targets of M29.6) the arch lines name it.
+func hostGolden(name string, expected []byte) []byte {
+	if name != "osinfo.j" || runtime.GOARCH == "amd64" {
+		return expected
+	}
+	return []byte(strings.ReplaceAll(string(expected), "= amd64\n", "= "+runtime.GOARCH+"\n"))
 }

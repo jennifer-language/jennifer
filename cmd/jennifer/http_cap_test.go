@@ -56,7 +56,7 @@ func rawHTTPServer(t *testing.T, pieces ...string) string {
 // capProg is a program that fetches url with maxBytes and checks the outcome:
 // a body of wantLen bytes, or (wantLen < 0) an error of kind "limit" containing
 // wantErr - a cap, told apart from a failed exchange by its kind.
-func capProg(url string, maxBytes, wantLen int, wantErr string) string {
+func capProg(url string, maxBytes int64, wantLen int, wantErr string) string {
 	return fmt.Sprintf(`
 def msg as string init "";
 def n as int init -1;
@@ -133,7 +133,7 @@ func TestHttpMaxBytesCountsBodyOnly(t *testing.T) {
 // included, and its own message.
 func TestHttpHeadersHaveTheirOwnCap(t *testing.T) {
 	huge := "HTTP/1.1 200 OK\r\nX-Pad: " + strings.Repeat("p", 1<<20) + "\r\nContent-Length: 2\r\n\r\nok"
-	for _, maxBytes := range []int{0, math.MaxInt64, 1 << 30} {
+	for _, maxBytes := range []int64{0, math.MaxInt64, 1 << 30} {
 		t.Run(fmt.Sprint(maxBytes), func(t *testing.T) {
 			url := rawHTTPServer(t, huge)
 			runHTTPProg(t, "head.j", capProg(url, maxBytes, -1, "response headers exceed 1048576 bytes"))

@@ -5,6 +5,7 @@ package decimallib
 
 import (
 	"math/big"
+	"math/bits"
 	"testing"
 	"time"
 )
@@ -34,7 +35,13 @@ func TestDivExactLargePowers(t *testing.T) {
 		// 0.7 s for 5^1430000 at the 1,000,000-digit cap (O(log n) big
 		// divisions of a 1,000,000-digit number); the per-factor loop would
 		// take hours.
-		within(t, 2*time.Second, "div(1, pow)", func() {
+		// math/big works in 32-bit words on a 32-bit target (386, arm), about
+		// three times slower; the bound still tells O(log n) from hours.
+		budget := 2 * time.Second
+		if bits.UintSize == 32 {
+			budget = 6 * time.Second
+		}
+		within(t, budget, "div(1, pow)", func() {
 			if _, err := divExact(dec{coef: big.NewInt(1)}, den); err != errLimit {
 				t.Errorf("1 / %d^%d: got %v, want errLimit", base, n, err)
 			}
