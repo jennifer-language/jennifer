@@ -4,8 +4,14 @@
 package interpreter_test
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/stdlib"
 )
 
 // identityGeo is a module whose struct, enum and constant are read from both
@@ -97,4 +103,60 @@ io.printf("%v %v", $mine == g.make(1), $mine);`,
 	if out != "false Point{x: 1}" {
 		t.Errorf("got %q, want %q", out, "false Point{x: 1}")
 	}
+}
+
+// A type written `json.Value` while a module with the file stem json, which
+// declares a Value, is imported beside `use json;` names two types: the load
+// refuses it, naming both, instead of taking the module's type (before, the
+// library value then failed to bind: "cannot initialize json.Value variable
+// ... with value of type object"). Without `use json` the stem names the
+// module's type, as before.
+func TestModuleStemClashesWithLibraryType(t *testing.T) {
+	mod := `export def struct Value { a as int };
+export func mk() { return Value{a: 1}; }`
+	out, err := runModuleMainAllErr(t, map[string]string{
+		"json.j": mod,
+		"main.j": `use io; use json; import "./json.j" as jm;
+io.printf("started ");
+def jv as json.Value init json.decode('{"a":1}');`,
+	})
+	if err == nil || out != "" ||
+		!strings.Contains(err.Error(), "type json.Value is ambiguous: library json has a type Value, and so has module") ||
+		!strings.Contains(err.Error(), "(imported as jm)") {
+		t.Fatalf("got %q, %v", out, err)
+	}
+	out, err = runModuleMainAllErr(t, map[string]string{
+		"json.j": mod,
+		"main.j": `use io; import "./json.j" as jm;
+def v as json.Value init jm.mk();
+io.printf("%v", $v);`,
+	})
+	if err != nil || out != "json.Value{a: 1}" {
+		t.Fatalf("stem without use: %q, %v", out, err)
+	}
+}
+
+// runModuleMainAllErr is runModuleMainAll returning the run error.
+func runModuleMainAllErr(t *testing.T, files map[string]string) (string, error) {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	var buf bytes.Buffer
+	setup := func(s *interpreter.Interpreter) {
+		s.Out = &buf
+		stdlib.InstallAll(s)
+	}
+	in := interpreter.New()
+	setup(in)
+	in.EnableModules(dir, nil, moduleProgram, setup)
+	prog, err := moduleProgram(filepath.Join(dir, "main.j"))
+	if err != nil {
+		t.Fatalf("parse main: %v", err)
+	}
+	err = in.Run(prog)
+	return buf.String(), err
 }

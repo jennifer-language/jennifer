@@ -133,22 +133,18 @@ func (e *Environment) allocBudget() *AllocBudget {
 	return e.depth.budget
 }
 
-// allocEstimate estimates the bytes allocated to build v: its own backing (one
-// Value cell per list element and struct / enum field, two per map entry, the
-// bytes of a bytes value) plus the next level, extrapolated from the first
-// allocSample elements. Bounded per call (at most allocSample elements read),
-// so charging a huge value costs the same as a small one, unlike copyBytes'
-// full walk. Deeper levels are not counted, so a deeply nested value is
-// under-counted. withStrings counts string bytes: true for a freshly built
-// value (a builtin result, a concatenation), false for a copy, which shares
-// its strings' immutable backing.
-func allocEstimate(v Value, withStrings bool) int64 {
+// allocEstimate estimates the bytes a builtin allocated to build its result v:
+// its own backing (one Value cell per list element and struct / enum field, two
+// per map entry, the bytes of a bytes value and of strings) plus the next
+// level, extrapolated from the first allocSample elements. Bounded per call (at
+// most allocSample elements read), so charging a huge result costs the same as
+// a small one. Deeper levels are not counted: a builtin may return a value it
+// did not build (a stored element), which a full walk would charge again at
+// O(size) per call. An eager copy is charged in full instead (copyBytes).
+func allocEstimate(v Value) int64 {
 	switch v.Kind {
 	case KindString:
-		if withStrings {
-			return int64(len(v.Str()))
-		}
-		return 0
+		return int64(len(v.Str()))
 	case KindBytes:
 		return int64(len(v.Bytes()))
 	case KindList:
@@ -160,7 +156,7 @@ func allocEstimate(v Value, withStrings bool) int64 {
 		k := min(n, allocSample)
 		var s int64
 		for _, e := range l[:k] {
-			s += elemBytes(e, withStrings)
+			s += elemBytes(e, true)
 		}
 		return valueCellBytes*int64(n) + s/int64(k)*int64(n)
 	case KindMap:
@@ -172,7 +168,7 @@ func allocEstimate(v Value, withStrings bool) int64 {
 		k := min(n, allocSample)
 		var s int64
 		for _, e := range m[:k] {
-			s += elemBytes(e.Key, withStrings) + elemBytes(e.Value, withStrings)
+			s += elemBytes(e.Key, true) + elemBytes(e.Value, true)
 		}
 		return 2*valueCellBytes*int64(n) + s/int64(k)*int64(n)
 	case KindStruct, KindEnum:
@@ -184,7 +180,7 @@ func allocEstimate(v Value, withStrings bool) int64 {
 		k := min(n, allocSample)
 		var s int64
 		for _, e := range f[:k] {
-			s += elemBytes(e.Value, withStrings)
+			s += elemBytes(e.Value, true)
 		}
 		return valueCellBytes*int64(n) + s/int64(k)*int64(n)
 	}

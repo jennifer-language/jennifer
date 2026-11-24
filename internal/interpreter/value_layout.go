@@ -217,36 +217,45 @@ func (t *Identity) Variant() string {
 	return t.variant
 }
 
-var identities struct {
-	sync.RWMutex
-	m map[Identity]*Identity
-}
+// identities is the intern table, Identity -> *Identity. A sync.Map: every
+// struct / enum / object value a builtin builds interns its identity, from any
+// number of tasks at once, and its read path shares no written word between
+// readers (an RWMutex's reader count did, so more goroutines interned fewer
+// identities per second).
+var identities sync.Map
 
 // InternIdentity returns the shared identity for (ns, modPath, name, variant),
 // creating it on first use; nil for the all-empty identity. Safe from any
 // goroutine. The table grows with the number of distinct types a program
-// uses, which is bounded by its declarations.
+// uses, which is bounded by its declarations. A literal in the program keeps
+// the identity it built on its node (literalIdentity) and skips the lookup.
 func InternIdentity(ns, modPath, name, variant string) *Identity {
 	key := Identity{ns: ns, modPath: modPath, name: name, variant: variant}
 	if key == (Identity{}) {
 		return nil
 	}
-	identities.RLock()
-	t := identities.m[key]
-	identities.RUnlock()
+	if t, ok := identities.Load(key); ok {
+		return t.(*Identity)
+	}
+	t, _ := identities.LoadOrStore(key, &key)
+	return t.(*Identity)
+}
+
+// literalIdentity returns the identity a struct or enum literal builds: the
+// one memoised on the node when it was interned for the same strings (a node
+// is resolved the same way on every evaluation, so after the first this is a
+// load and four string compares that hit on pointer equality), else
+// InternIdentity, memoised for the next evaluation. Tasks may evaluate one
+// node at once; the memo is an atomic value holding an immutable *Identity.
+func literalIdentity(ex *parser.StructLit, ns, modPath, name, variant string) *Identity {
+	if t, _ := ex.Ident.Load().(*Identity); t != nil &&
+		t.name == name && t.variant == variant && t.ns == ns && t.modPath == modPath {
+		return t
+	}
+	t := InternIdentity(ns, modPath, name, variant)
 	if t != nil {
-		return t
+		ex.Ident.Store(t)
 	}
-	identities.Lock()
-	defer identities.Unlock()
-	if t = identities.m[key]; t != nil {
-		return t
-	}
-	if identities.m == nil {
-		identities.m = make(map[Identity]*Identity)
-	}
-	t = &key
-	identities.m[key] = t
 	return t
 }
 

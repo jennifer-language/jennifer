@@ -4,6 +4,7 @@
 package interpreter
 
 import (
+	"fmt"
 	"math"
 	"sync"
 	"testing"
@@ -168,4 +169,61 @@ func TestFuncValueHandle(t *testing.T) {
 	if f.Fn() != m || f.FnHome() != in || !f.Equal(FuncVal(m)) || f.Display() != "<func f>" {
 		t.Fatalf("func value handle")
 	}
+}
+
+// BenchmarkInternIdentity: interning an existing identity from many goroutines
+// at once (every library struct or object result does it); run with -cpu 1,8.
+// The read path must not share a written word between readers.
+func BenchmarkInternIdentity(b *testing.B) {
+	InternIdentity("json", "", "Value", "")
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			InternIdentity("json", "", "Value", "")
+		}
+	})
+}
+
+// A literal's memoised identity is the interned one, and stays right when one
+// node is resolved to different identities from many goroutines at once (the
+// memo is checked against the strings before use); run with -race.
+func TestLiteralIdentityMemo(t *testing.T) {
+	ex := &parser.StructLit{Name: "Point"}
+	want := []*Identity{
+		InternIdentity("", "", "Point", ""),
+		InternIdentity("m", "/x/m.j", "Point", ""),
+		InternIdentity("m", "/y/m.j", "Point", ""),
+	}
+	args := [][2]string{{"", ""}, {"m", "/x/m.j"}, {"m", "/y/m.j"}}
+	var wg sync.WaitGroup
+	bad := make(chan string, 8)
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func(g int) {
+			defer wg.Done()
+			for k := 0; k < 2000; k++ {
+				j := (g + k/100) % 3
+				if got := literalIdentity(ex, args[j][0], args[j][1], "Point", ""); got != want[j] {
+					bad <- fmt.Sprintf("goroutine %d: %+v, want %+v", g, *got, *want[j])
+					return
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+	close(bad)
+	for e := range bad {
+		t.Fatal(e)
+	}
+}
+
+// BenchmarkLiteralIdentity: the identity lookup of one struct literal
+// evaluated by many tasks at once; run with -cpu 1,8.
+func BenchmarkLiteralIdentity(b *testing.B) {
+	ex := &parser.StructLit{Name: "Point"}
+	literalIdentity(ex, "m", "/x/m.j", "Point", "")
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			literalIdentity(ex, "m", "/x/m.j", "Point", "")
+		}
+	})
 }

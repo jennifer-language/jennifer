@@ -4,8 +4,12 @@
 package interpreter_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"unsafe"
+
+	"jennifer-lang.dev/jennifer/internal/interpreter"
 )
 
 // The per-task allocation budget (task.setAllocBudget, M29.3): a task counts the
@@ -321,6 +325,62 @@ func TestAllocBudgetAcrossModuleBoundary(t *testing.T) {
 		`,
 	})
 	if out != "limit" {
+		t.Fatalf("got %q", out)
+	}
+}
+
+// An eager copy and a literal element are charged their full size, every
+// nesting level included: before, a two-level estimate charged a copy of a
+// list of structs holding lists a fraction of its cells, and a budgeted task
+// could allocate hundreds of times its budget.
+func TestAllocBudgetChargesDeepCopiesInFull(t *testing.T) {
+	out := runBudget(t, `
+		use io;
+		use task;
+		def struct Rec { id as int, vals as list of int };
+		def struct Box { rows as list of list of int };
+		def recs as list of Rec;
+		for (def i in 0..50) { $recs[] = Rec{id: $i, vals: 0..40}; }
+		def b as list of list of int init [[1, 2, 3], [4, 5, 6]];
+		task.setAllocBudget(1000000000);
+		def n0 as int init task.allocated();
+		def c as list of Rec init $recs;
+		def n1 as int init task.allocated();
+		def l as list of list of list of int init [$b, $b];
+		def n2 as int init task.allocated();
+		def x as Box init Box{rows: $b};
+		def n3 as int init task.allocated();
+		io.printf("%d %d %d", $n1 - $n0, $n2 - $n1, $n3 - $n2);
+	`)
+	cell := int(unsafe.Sizeof(interpreter.Value{}))
+	// list of 50 Rec: 50 cells, 2 fields each, 40 ints each; [$b, $b]: 2 cells
+	// plus two copies of b (2 + 6 cells); Box{rows: $b}: 1 field plus b.
+	want := fmt.Sprintf("%d %d %d", (50+50*2+50*40)*cell, (2+2*8)*cell, (1+8)*cell)
+	if out != want {
+		t.Fatalf("charged %q, want %q", out, want)
+	}
+}
+
+// The review's reproduction: 20 copies of a ~48 MB list of structs under a
+// 100 MB budget raise "limit" (before the fix: 5.7 MB charged, no raise).
+func TestAllocBudgetDeepCopiesTrip(t *testing.T) {
+	out := runBudget(t, `
+		use io;
+		use task;
+		def struct Rec { id as int, vals as list of int };
+		def recs as list of Rec;
+		def row as list of int init 0..200;
+		for (def i in 0..200) { $recs[] = Rec{id: $i, vals: $row}; }
+		task.setAllocBudget(4000000);
+		def keep as list of list of Rec;
+		try {
+			for (def k in 0..20) { def c as list of Rec init $recs; $keep[] = $c; }
+			io.printf("no trip at %d", task.allocated());
+		} catch (e) {
+			io.printf("%s %d", $e.kind, len($keep));
+		}
+	`)
+	if !strings.HasPrefix(out, "limit ") || out == "limit 20" {
 		t.Fatalf("got %q", out)
 	}
 }

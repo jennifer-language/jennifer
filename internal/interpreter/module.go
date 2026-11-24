@@ -339,7 +339,7 @@ func (i *Interpreter) dispatchModuleMethod(m *loadedModule, md *parser.MethodDef
 				callee.accountCopy(callFrame, bound)
 				callee.recordParamCopy(v, p)
 				if b := env.allocBudget(); b != nil {
-					b.add(allocEstimate(bound, false))
+					b.add(copyBytes(bound))
 				}
 			}
 		}
@@ -438,6 +438,39 @@ func (i *Interpreter) stampModuleStructType(t *parser.Type, mod *loadedModule, a
 	return nil
 }
 
+// stemTypeClash returns the error for a type written `stem.Name` where stem is
+// both the file stem of the loaded module mod, which declares Name, and a
+// library namespace this program uses, whose library has a type Name too
+// (`import "./json.j" as jm;` declaring Value, beside `use json;`). Either
+// reading would be a guess, so the name is refused, naming both; an
+// already-stamped module type (ModPath set) is not ambiguous. During the load
+// pass the first clash is also kept for Run to report.
+func (i *Interpreter) stemTypeClash(t *parser.Type, mod *loadedModule, at parser.Node) error {
+	if t.ModPath != "" {
+		return nil
+	}
+	canonical, lib := i.nsPrefixes[t.StructNS]
+	if !lib {
+		return nil
+	}
+	if _, clash := i.NSStructs[nsKey{NS: canonical, Name: t.StructName}]; !clash {
+		return nil
+	}
+	alias := ""
+	for a, m := range i.moduleAliases {
+		if m.path == mod.path && (alias == "" || a < alias) {
+			alias = a
+		}
+	}
+	file, line, col := posFor(at)
+	err := &runtimeError{Msg: fmt.Sprintf("type %s.%s is ambiguous: library %s has a type %s, and so has module %q (imported as %s), whose file stem is %q; write %s.%s for the module's type, or rename the module file",
+		t.StructNS, t.StructName, canonical, t.StructName, mod.path, alias, mod.ns, alias, t.StructName), File: file, Line: line, Col: col}
+	if i.declTypesLoading && i.declTypeClash == nil {
+		i.declTypeClash = err
+	}
+	return err
+}
+
 // ownTypeIdentity is the (StructNS, ModPath) identity this interpreter's own
 // declared structs and enums carry: the module's (stem, canonical path) in a
 // module, so a module's values and types match what its importers name as
@@ -500,6 +533,9 @@ func (i *Interpreter) resolveDeclaredStructNS(t *parser.Type, at parser.Node) er
 		mod, ok := i.moduleAliases[t.StructNS]
 		if !ok {
 			if byStem := i.moduleByNS(t.StructNS); byStem != nil && byStem.isOwnStruct(t.StructName) {
+				if err := i.stemTypeClash(t, byStem, at); err != nil {
+					return err
+				}
 				mod, ok = byStem, true
 			}
 		}
@@ -568,6 +604,8 @@ func (i *Interpreter) resolveDeclaredTypesOnce(prog *parser.Program) {
 	if prog == nil {
 		return
 	}
+	i.declTypesLoading = true
+	defer func() { i.declTypesLoading = false }()
 	// Stamp struct field types so a `def struct Line { from as mod.Point };`
 	// field carries the module's (stem, path) identity and matches the module
 	// struct value stored into it. Field checks (at literal construction and

@@ -6,6 +6,7 @@ package stringslib
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
@@ -58,6 +59,29 @@ func TestIndexOfFromRunes(t *testing.T) {
 	_, err = rawFn(in, "indexOf", sv(s), sv("b"), iv(-1))
 	if err == nil || err.Error() != "strings.indexOf: from negative index -1" {
 		t.Fatalf("negative from: %v", err)
+	}
+}
+
+// TestIndexOfMidRuneHitKeepsCursor: a needle starting with a continuation
+// byte can hit inside a rune; that hit is not a rune boundary of the forward
+// walk and must not be recorded on the string's rune cursor, or later
+// conversions on the same string resume from a wrong offset.
+func TestIndexOfMidRuneHitKeepsCursor(t *testing.T) {
+	in := newLib(t)
+	s := strings.Repeat("aé", 400)
+	walk := func(r int) int {
+		b := 0
+		for ; r > 0 && b < len(s); r-- {
+			_, n := utf8.DecodeRuneInString(s[b:])
+			b += n
+		}
+		return b
+	}
+	at := int(callFn(t, in, "indexOf", sv(s), sv("\xa9"), iv(100)).Int())
+	for r := at; r < at+4; r++ {
+		if b, _ := interpreter.RuneOffset(s, r); b != walk(r) {
+			t.Fatalf("after the mid-rune hit at %d: RuneOffset(%d) = %d, want %d", at, r, b, walk(r))
+		}
 	}
 }
 

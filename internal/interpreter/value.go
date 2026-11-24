@@ -661,7 +661,13 @@ func ModuleStructVal(ns, modPath, name string, fields []StructField) Value {
 // module identity (empty for a user-program enum), and fields the variant's
 // payload (nil for a payload-less variant).
 func EnumVal(ns, modPath, enum, variant string, fields []StructField) Value {
-	v := Value{Kind: KindEnum, tag: refIdent << 4, ref: unsafe.Pointer(InternIdentity(ns, modPath, enum, variant))}
+	return EnumValOf(InternIdentity(ns, modPath, enum, variant), fields)
+}
+
+// EnumValOf constructs an enum value of the identity t (enum type and active
+// variant, see InternIdentity).
+func EnumValOf(t *Identity, fields []StructField) Value {
+	v := Value{Kind: KindEnum, tag: refIdent << 4, ref: unsafe.Pointer(t)}
 	if fields != nil {
 		v.SetFields(fields)
 	}
@@ -1147,15 +1153,6 @@ func (v Value) display(b *strings.Builder, quoted bool) {
 	default:
 		b.WriteString("<unknown>")
 	}
-}
-
-// displayElement is Display() but with a string value quoted, so that
-// list / map representations are unambiguous (`[1, "2", 3]` rather than
-// `[1, 2, 3]` when the middle entry is a string).
-func displayElement(v Value) string {
-	var b strings.Builder
-	v.display(&b, true)
-	return b.String()
 }
 
 // MatchesDeclared reports whether v's runtime kind matches a declared

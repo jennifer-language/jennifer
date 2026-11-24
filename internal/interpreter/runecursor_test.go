@@ -55,15 +55,18 @@ func TestRuneOffsetMatchesWalk(t *testing.T) {
 	}
 }
 
-// cursorState returns whether s owns its slot and the slot's rune index.
+// cursorState returns whether s has a cursor and its rune index, without
+// counting as a use.
 func cursorState(s string) (bool, int) {
-	c := runeCursorFor(s)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !sameString(c.s, s) {
-		return false, 0
+	set := runeCursorSetFor(s)
+	set.mu.Lock()
+	defer set.mu.Unlock()
+	for i := range set.way {
+		if c := &set.way[i]; sameString(c.s, s) {
+			return true, c.r
+		}
 	}
-	return true, c.r
+	return false, 0
 }
 
 // TestRuneCursorBackwardAfterForward: a forward scan leaves the cursor at its
@@ -100,17 +103,17 @@ func TestRuneCursorOtherString(t *testing.T) {
 		t.Fatal("a prefix sharing the backing matched the cursor")
 	}
 	modified := "é" + s[1:]
-	// A string of the same length but other runes, in s's slot: its offsets
+	// A string of the same length but other runes, in s's set: its offsets
 	// differ from s's at every odd position, so a cursor taken from s is wrong.
 	var twin string
 	for i := 0; i < 1000 && twin == ""; i++ {
 		x := strings.Repeat("éa", 1000)
-		if runeCursorFor(x) == runeCursorFor(s) {
+		if runeCursorSetFor(x) == runeCursorSetFor(s) {
 			twin = x
 		}
 	}
 	if twin == "" {
-		t.Fatal("no string of s's length landed in its slot")
+		t.Fatal("no string of s's length landed in its set")
 	}
 	RuneOffset(s, 1501)
 	if hit, _ := cursorState(twin); hit {
@@ -166,6 +169,40 @@ func TestRuneSpanSlices(t *testing.T) {
 		lo, hi := runeSpan(s, sp[0], sp[1])
 		if got, want := s[lo:hi], string(rs[sp[0]:sp[1]]); got != want {
 			t.Fatalf("span %v: %q, want %q", sp, got, want)
+		}
+	}
+}
+
+// TestRuneCursorPrefixAndWhole: a string and its own prefix (same data
+// pointer, other length) scanned alternately each keep their cursor.
+func TestRuneCursorPrefixAndWhole(t *testing.T) {
+	s := strings.Repeat("aé漢", 2000)
+	prefix := s[:len(s)/2]
+	for r := 100; r < 2000; r += 10 {
+		RuneOffset(s, r+1)
+		RuneOffset(prefix, r)
+		if hit, cr := cursorState(s); !hit || cr != r+1 {
+			t.Fatalf("whole lost its cursor at %d (hit %v, at %d)", r, hit, cr)
+		}
+		if hit, cr := cursorState(prefix); !hit || cr != r {
+			t.Fatalf("prefix lost its cursor at %d (hit %v, at %d)", r, hit, cr)
+		}
+	}
+}
+
+// TestRuneCursorSurvivesSubstrings: a forward scan over a long string that
+// also slices fresh substrings of it between steps (html.parse's tokenizer)
+// keeps the long string's cursor, whichever sets the substrings land in.
+func TestRuneCursorSurvivesSubstrings(t *testing.T) {
+	s := strings.Repeat("<p title=\"é漢\">x</p>", 3000)
+	for r := 100; r < 50000; r += 17 {
+		RuneOffset(s, r)
+		lo, hi := runeSpan(s, r, r+300)
+		piece := s[lo:hi]
+		RuneOffset(piece, 70)
+		RuneOffset(piece[1:], 80)
+		if hit, cr := cursorState(s); !hit || cr != r+300 {
+			t.Fatalf("step %d: the long string lost its cursor (hit %v, at %d)", r, hit, cr)
 		}
 	}
 }

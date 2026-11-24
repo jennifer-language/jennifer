@@ -268,9 +268,9 @@ type callChainState struct {
 	// whose frames root at that module's globals rather than the spawn
 	// snapshot, so task.cancel reaches a loop or a blocking builtin there too.
 	cancel *TaskState
-	// stackBase is the stack pointer at the chain's first call check, for
-	// jennifer-tiny's stack-bytes guard (stackguard_tiny.go); unused otherwise.
-	stackBase uintptr
+	// stack is jennifer-tiny's stack-bytes guard (stackguard_tiny.go); an empty
+	// struct in the default binary.
+	stack stackGuard
 	// budget is the allocation budget this chain's task counts against
 	// (task.setAllocBudget), nil when it has none: the charged paths then cost
 	// one nil check. A spawn copies its parent chain's pointer, so tasks spawned

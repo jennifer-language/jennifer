@@ -171,32 +171,46 @@ func (i *Interpreter) recordParamCopy(v Value, p parser.Param) {
 	}
 }
 
-// copyBytes estimates the heap a deep copy of v allocates: one Value cell per
-// list element and struct / enum field, two per map entry, plus each bytes
-// buffer, recursively. Strings count nothing - they are immutable, so a copy
-// shares their backing. Unlike shallowValueBytes (the recursion memory guard's
-// O(1) estimate) this walks the whole value, which is what makes a struct
-// holding a large list rank above a one-byte buffer.
+// copyBytes is the heap a deep copy of v allocates: one Value cell per list
+// element and struct / enum field, two per map entry, plus each bytes buffer,
+// recursively. Strings count nothing - they are immutable, so a copy shares
+// their backing. Unlike shallowValueBytes (the recursion memory guard's O(1)
+// estimate) this walks the whole value, which is what makes a struct holding a
+// large list rank above a one-byte buffer under `profile --allocs`, and what
+// the allocation budget charges for an eager copy (the walk is paid only by a
+// task with a budget, and costs no more than the copy itself).
 func copyBytes(v Value) int64 {
+	return copyBytesOf(&v)
+}
+
+// copyBytesOf is copyBytes through a pointer, recursing once per nesting level
+// with no Value in its frame, for the reason deepCopyInto does (jennifer-tiny's
+// fixed stack).
+//
+//go:noinline
+func copyBytesOf(v *Value) int64 {
 	switch v.Kind {
 	case KindBytes:
 		return int64(len(v.Bytes()))
 	case KindList:
-		n := valueCellBytes * int64(len(v.List()))
-		for _, e := range v.List() {
-			n += copyBytes(e)
+		l := v.List()
+		n := valueCellBytes * int64(len(l))
+		for k := range l {
+			n += copyBytesOf(&l[k])
 		}
 		return n
 	case KindMap:
-		n := valueCellBytes * 2 * int64(len(v.Map()))
-		for _, e := range v.Map() {
-			n += copyBytes(e.Key) + copyBytes(e.Value)
+		m := v.Map()
+		n := valueCellBytes * 2 * int64(len(m))
+		for k := range m {
+			n += copyBytesOf(&m[k].Key) + copyBytesOf(&m[k].Value)
 		}
 		return n
 	case KindStruct, KindEnum:
-		n := valueCellBytes * int64(len(v.Fields()))
-		for _, f := range v.Fields() {
-			n += copyBytes(f.Value)
+		f := v.Fields()
+		n := valueCellBytes * int64(len(f))
+		for k := range f {
+			n += copyBytesOf(&f[k].Value)
 		}
 		return n
 	default:

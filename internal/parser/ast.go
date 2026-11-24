@@ -3,7 +3,10 @@
 
 package parser
 
-import "fmt"
+import (
+	"fmt"
+	"sync/atomic"
+)
 
 // Node is the root interface for all AST nodes. Pos returns the source line/col
 // where the node starts; Filename returns the source file (or "" if unknown).
@@ -807,6 +810,10 @@ type StructLit struct {
 	Name   string
 	Bare   bool // true for the payload-less enum form written with no braces (`Shape.Empty`); Fields is nil. Distinguishes it from an empty struct literal `Foo{}` only for diagnostics.
 	Fields []StructLitField
+	// Ident is the interpreter's memo of the type identity this literal last
+	// built (an *interpreter.Identity); the parser leaves it empty. Atomic:
+	// tasks may evaluate one literal at once.
+	Ident atomic.Value
 }
 
 // StructLitField is one `field: expr` entry in a struct literal.

@@ -315,8 +315,15 @@ func indexOfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if rel < 0 {
 		return interpreter.IntVal(-1), nil
 	}
-	at := from + utf8.RuneCountInString(s[byteFrom:byteFrom+rel])
-	interpreter.NoteRuneOffset(s, at, byteFrom+rel)
+	hit := byteFrom + rel
+	at := from + utf8.RuneCountInString(s[byteFrom:hit])
+	// A start byte is always a boundary of the forward walk (a valid rune
+	// holds none after its first byte, an invalid byte is one rune); a hit on
+	// a continuation byte (a needle starting with one) may sit inside a rune,
+	// so it is not recorded on the cursor.
+	if hit == len(s) || utf8.RuneStart(s[hit]) {
+		interpreter.NoteRuneOffset(s, at, hit)
+	}
 	return interpreter.IntVal(int64(at)), nil
 }
 

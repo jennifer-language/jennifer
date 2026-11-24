@@ -24,15 +24,24 @@ func stackPointer() uintptr
 const maxStackBytes = 3 << 20
 
 // stackTooDeep reports whether the chain has used more than maxStackBytes of
-// stack. The base is the stack pointer at the chain's first call check, taken
-// on the goroutine that runs it; a pointer above the base re-anchors it, and a
-// pointer more than a whole stack below it means another goroutine's stack, so
-// it re-anchors too rather than trip.
-func stackTooDeep(dc *CallChain) bool {
+// stack.
+func stackTooDeep(dc *CallChain) bool { return dc.stack.tooDeep() }
+
+// stackGuard is a call chain's stack base: the stack pointer at its first call
+// check, taken on the goroutine that runs it.
+type stackGuard struct {
+	base uintptr
+}
+
+// tooDeep reports whether the stack has grown more than maxStackBytes below
+// the base. A pointer above the base re-anchors it, and a pointer more than a
+// whole stack below it means another goroutine's stack, so it re-anchors too
+// rather than trip.
+func (g *stackGuard) tooDeep() bool {
 	sp := stackPointer()
-	if dc.stackBase == 0 || sp > dc.stackBase || dc.stackBase-sp > 4<<20 {
-		dc.stackBase = sp
+	if g.base == 0 || sp > g.base || g.base-sp > 4<<20 {
+		g.base = sp
 		return false
 	}
-	return dc.stackBase-sp > maxStackBytes
+	return g.base-sp > maxStackBytes
 }

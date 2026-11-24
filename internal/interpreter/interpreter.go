@@ -229,6 +229,14 @@ type Interpreter struct {
 	// tables exist (checkStructLits). Cleared after the check.
 	structLits []*parser.StructLit
 
+	// declTypesLoading is set while resolveDeclaredTypesOnce stamps the
+	// program's declared types (single-threaded, before any statement runs);
+	// declTypeClash keeps the first type name it found ambiguous between a
+	// library and a module's file stem (stemTypeClash), which Run reports as a
+	// load error.
+	declTypesLoading bool
+	declTypeClash    error
+
 	// host is the entry-program interpreter for a module sub-interpreter, or
 	// nil on the entry program itself. meta.callMain / meta.definedMain resolve
 	// against it, so a module (e.g. `jsonrpc`, dispatching a wire method name)
@@ -1131,7 +1139,7 @@ func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *
 				i.accountCopy(callFrame, bound)
 				i.recordParamCopy(args[idx], p)
 				if b := dc.budget; b != nil {
-					b.add(allocEstimate(bound, false))
+					b.add(copyBytes(bound))
 				}
 			}
 		}
@@ -1423,6 +1431,9 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	// re-resolve in execDefine is a guarded no-op and a shared type node
 	// reached from concurrent goroutines never write-races.
 	i.resolveDeclaredTypesOnce(prog)
+	if i.declTypeClash != nil {
+		return i.declTypeClash
+	}
 	// Stamp each spawn with the globals it needs so the snapshot copies only
 	// those, not the whole global frame. Runs after resolveQualifiedRefs (the
 	// analysis consults module aliases + namespaces). Single-threaded here,
@@ -1984,7 +1995,23 @@ func literalElemBytes(src parser.Expr, v Value) int64 {
 	if literalElemFresh(src) {
 		return 0
 	}
-	return allocEstimate(v, false)
+	return copyBytes(v)
+}
+
+// literalFieldsBytes is what a struct or enum literal's fields add to the
+// allocation budget: one cell per field, plus the copy of each field whose
+// source is not fresh (literalElemBytes) and each zero value a left-out field
+// took.
+func literalFieldsBytes(out []StructField, provided map[string]*parser.StructLitField) int64 {
+	n := valueCellBytes * int64(len(out))
+	for _, f := range out {
+		if lit, ok := provided[f.Name]; ok {
+			n += literalElemBytes(lit.Expr, f.Value)
+		} else {
+			n += copyBytes(f.Value)
+		}
+	}
+	return n
 }
 
 // literalElementValue returns the value to store for a list element / map value
@@ -2064,7 +2091,7 @@ func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error 
 			val = stampDeclaredType(i.eagerCopy(v, st), st.VarType)
 			i.accountCopy(env, val)
 			if b := env.allocBudget(); b != nil {
-				if err := b.chargeAt(allocEstimate(val, false), st); err != nil {
+				if err := b.chargeAt(copyBytes(val), st); err != nil {
 					return err
 				}
 			}
@@ -2354,7 +2381,7 @@ func (i *Interpreter) execAssign(st *parser.AssignStmt, env *Environment) error 
 	} else {
 		val = stampDeclaredType(i.eagerCopy(val, st), b.DeclType)
 		if bud := env.allocBudget(); bud != nil {
-			if err := bud.chargeAt(allocEstimate(val, false), st); err != nil {
+			if err := bud.chargeAt(copyBytes(val), st); err != nil {
 				return err
 			}
 		}
@@ -2429,7 +2456,7 @@ func (i *Interpreter) execIndexAssign(st *parser.IndexAssignStmt, env *Environme
 		// The stored copy, plus the cells a new key or field added to the root
 		// container (growth deeper in the chain is not seen).
 		grown := elemBytes(rootCopy, false) - elemBytes(binding.Value, false)
-		if err := b.chargeAt(allocEstimate(newVal, false)+max(grown, 0), st); err != nil {
+		if err := b.chargeAt(copyBytes(newVal)+max(grown, 0), st); err != nil {
 			return err
 		}
 	}
@@ -2507,7 +2534,7 @@ func (i *Interpreter) execAppend(st *parser.AppendStmt, env *Environment) error 
 	if b := env.allocBudget(); b != nil {
 		n := int64(1) // one byte
 		if container.Kind == KindList {
-			n = valueCellBytes + allocEstimate(newVal, false)
+			n = valueCellBytes + copyBytes(newVal)
 		}
 		if err := b.chargeAt(n, st); err != nil {
 			return err
@@ -2605,7 +2632,7 @@ func (i *Interpreter) execFieldAssign(st *parser.FieldAssignStmt, env *Environme
 		// The stored copy, plus the cells a new key or field added to the root
 		// container (growth deeper in the chain is not seen).
 		grown := elemBytes(rootCopy, false) - elemBytes(binding.Value, false)
-		if err := b.chargeAt(allocEstimate(newVal, false)+max(grown, 0), st); err != nil {
+		if err := b.chargeAt(copyBytes(newVal)+max(grown, 0), st); err != nil {
 			return err
 		}
 	}
@@ -2771,7 +2798,6 @@ type posNode struct {
 
 func (p posNode) Pos() (int, int)  { return p.line, p.col }
 func (p posNode) Filename() string { return p.file }
-func (p posNode) astNode()         {}
 
 // zeroStructFor builds a zero-initialised struct value for the named
 // struct. Each field gets its type's zero value, recursing through
@@ -4012,7 +4038,7 @@ func (i *Interpreter) evalMapLit(ex *parser.MapLit, env *Environment) (Value, er
 	if b := env.allocBudget(); b != nil {
 		n := 2 * valueCellBytes * int64(len(entries))
 		for k, e := range entries {
-			n += allocEstimate(e.Key, false) + literalElemBytes(ex.Values[k], e.Value)
+			n += copyBytes(e.Key) + literalElemBytes(ex.Values[k], e.Value)
 		}
 		if err := b.chargeAt(n, ex); err != nil {
 			return Value{}, err
@@ -4171,19 +4197,18 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 		}
 		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(i.literalElementValue(lit.Expr, v), declType)})
 	}
-	var sv Value
-	if resolvedNS != "" {
-		sv = ModuleStructVal(resolvedNS, resolvedModPath, ex.Name, out) // resolvedModPath: module identity (empty for a library struct)
-	} else {
-		sv = StructVal(ex.Name, out)
+	if resolvedNS == "" {
+		resolvedModPath = "" // a user struct: the bare name is its identity
 	}
+	// resolvedModPath: module identity (empty for a library struct).
+	sv := StructValOf(literalIdentity(ex, resolvedNS, resolvedModPath, ex.Name, ""), out)
 	// Cache the height only when every field came from the literal; a field
 	// left out took a zero value that literalChild did not measure.
 	if len(ex.Fields) == len(def.Fields) {
 		sv.nest = uint16(h + 1)
 	}
 	if b := env.allocBudget(); b != nil {
-		if err := b.chargeAt(allocEstimate(sv, false), ex); err != nil {
+		if err := b.chargeAt(literalFieldsBytes(out, provided), ex); err != nil {
 			return Value{}, err
 		}
 	}
@@ -4423,7 +4448,7 @@ func (i *Interpreter) evalEnumLit(ex *parser.StructLit, env *Environment) (Value
 			file, line, col := posFor(ex)
 			return Value{}, &runtimeError{Msg: fmt.Sprintf("variant %s.%s carries a payload; construct it as %s.%s{ ... }", def.Name, ex.Name, def.Name, ex.Name), File: file, Line: line, Col: col}
 		}
-		return EnumVal(resolvedNS, resolvedModPath, def.Name, ex.Name, nil), nil
+		return EnumValOf(literalIdentity(ex, resolvedNS, resolvedModPath, def.Name, ex.Name), nil), nil
 	}
 	// The mirror of the check above: a payload-less variant is written bare, so
 	// `Shape.Empty{}` is a mistake worth naming rather than silently accepting.
@@ -4465,10 +4490,10 @@ func (i *Interpreter) evalEnumLit(ex *parser.StructLit, env *Environment) (Value
 		}
 		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(i.literalElementValue(lit.Expr, v), declType)})
 	}
-	ev := EnumVal(resolvedNS, resolvedModPath, def.Name, ex.Name, out)
+	ev := EnumValOf(literalIdentity(ex, resolvedNS, resolvedModPath, def.Name, ex.Name), out)
 	ev.nest = uint16(h + 1)
 	if b := env.allocBudget(); b != nil {
-		if err := b.chargeAt(allocEstimate(ev, false), ex); err != nil {
+		if err := b.chargeAt(literalFieldsBytes(out, provided), ex); err != nil {
 			return Value{}, err
 		}
 	}
@@ -4717,7 +4742,7 @@ func (i *Interpreter) evalSlice(ex *parser.SliceExpr, env *Environment) (Value, 
 		// more (rhsFreshLiteral), so the copy is reported here, once per slice.
 		i.recordCopy(out, ex)
 		if b := env.allocBudget(); b != nil {
-			if err := b.chargeAt(allocEstimate(out, false), ex); err != nil {
+			if err := b.chargeAt(copyBytes(out), ex); err != nil {
 				return Value{}, err
 			}
 		}
@@ -5721,7 +5746,7 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 				i.recordEagerCopy(v, a)
 			}
 			if b := env.depth.budget; b != nil {
-				b.add(allocEstimate(bound, false))
+				b.add(copyBytes(bound))
 			}
 		}
 		if err := callFrame.DefineAt(idx, p.Name, bound, p.Type, false); err != nil {
@@ -5896,7 +5921,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 						i.recordEagerCopy(v, a)
 					}
 					if b := env.depth.budget; b != nil {
-						b.add(allocEstimate(bound, false))
+						b.add(copyBytes(bound))
 					}
 				}
 			}
@@ -5974,7 +5999,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 		}
 		v.nest = 0 // a library may derive its result from an argument (nesting.go)
 		if bud := env.allocBudget(); bud != nil {
-			if err := bud.chargeAt(allocEstimate(v, true), c); err != nil {
+			if err := bud.chargeAt(allocEstimate(v), c); err != nil {
 				return Value{}, err
 			}
 		}
@@ -6092,7 +6117,7 @@ func (i *Interpreter) evalQualifiedCall(c *parser.QualifiedCallExpr, env *Enviro
 	if bud := env.allocBudget(); bud != nil {
 		// A builtin's result is estimated here, at the call site, so no
 		// library has to count what it allocates.
-		if err := bud.chargeAt(allocEstimate(v, true), c); err != nil {
+		if err := bud.chargeAt(allocEstimate(v), c); err != nil {
 			return Value{}, err
 		}
 	}

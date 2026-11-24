@@ -201,8 +201,6 @@ func (n node) height() int {
 // through a map rather than by scanning (an element may carry any number).
 const manyAttrs = 8
 
-func (n node) isElement() bool { return n.el != nil }
-
 // kindName is the node's type as xml.typeOf reports it.
 func (n node) kindName() string {
 	if n.el != nil {

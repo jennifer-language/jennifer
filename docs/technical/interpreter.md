@@ -35,15 +35,21 @@ reinterprets the words, so a value whose `Kind` is rewritten never exposes one
 payload as another, and a wrong-kind scalar read returns 0. Slice getters share
 the backing (`v.List()[i] = x` writes into the value); an append is stored back
 with `v.SetList(append(v.List(), x))`. `Identity` is `(StructNS, ModPath,
-name, variant)`, interned once per type (`InternIdentity`) and never modified:
-values of one type share the pointer, so a type comparison is a pointer
-comparison, and the empty identity is nil.
+name, variant)`, interned once per type (`InternIdentity`, a `sync.Map` whose
+read path takes no lock) and never modified: values of one type share the
+pointer, so a type comparison is a pointer comparison, and the empty identity is
+nil. A struct or enum literal keeps the identity it built on its AST node
+(`parser.StructLit.Ident`, atomic) and skips the lookup on later evaluations.
 
 The rune cursor of M29.13 is not a field: a builtin receives a copy of the
-binding, which would lose it. `runecursor.go` keeps a process-wide 16-slot
-table keyed by a string's data pointer and length, holding its last
-rune-to-byte position, so `$s[a..b]` and `strings.indexOf(s, sub, from)`
-resume the walk instead of starting over.
+binding, which would lose it. `runecursor.go` keeps a process-wide table of 16
+sets of 4 entries, the set chosen by a hash of a string's data pointer and
+length, each entry holding one string's last rune-to-byte position, so
+`$s[a..b]` and `strings.indexOf(s, sub, from)` resume the walk instead of
+starting over. A set replaces its least recently used entry: a scan over a long
+string keeps its cursor while it slices substrings of it, and a string and its
+own prefix each keep theirs. Only strings of 256 bytes or more are entered; the
+table keeps at most 64 of them alive.
 
 `ZeroFor(t parser.Type)` returns the zero value for each declared type and is
 used when a `def` omits its `init` clause: `0`, `0.0`, `""`, `false`,
@@ -867,6 +873,12 @@ the shared type node. The pass is best-effort (an unresolvable type is left for
 a latent idempotency gap: re-resolving an already-stamped *library* alias would
 otherwise hit the "canonical namespace is aliased" rejection. (An importer alias
 to a module stem is also recognised on any later pass via `moduleByNS`.)
+
+A type written `stem.Name`, where `stem` is both a loaded module's file stem and
+a library namespace the program uses, and both declare `Name` (`use json;`
+beside `import "./json.j" as jm;` declaring `Value`), is refused at load
+(`stemTypeClash`): the error names the library and the module and points to the
+alias form. Without the `use`, the stem names the module's type.
 
 ### Func values across the module boundary
 

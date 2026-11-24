@@ -7,4 +7,9 @@ package interpreter
 
 // stackTooDeep is jennifer-tiny's stack-bytes guard (stackguard_tiny.go). Go's
 // goroutine stacks grow, so the default binary relies on MaxCallDepth alone.
-func stackTooDeep(*CallChain) bool { return false }
+func stackTooDeep(dc *CallChain) bool { return dc.stack.tooDeep() }
+
+// stackGuard holds no state in the default binary.
+type stackGuard struct{}
+
+func (*stackGuard) tooDeep() bool { return false }

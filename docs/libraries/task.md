@@ -260,7 +260,7 @@ def t as task of int init spawn {
 | | |
 | --- | --- |
 | Counted | An eager copy (`def`, assignment, a parameter), an append, an index write (and the cells a new key adds), a field write, string `+` and interpolation, a list / map / struct / enum literal, a materialised range or slice, and every builtin's result |
-| Size | One `Value` cell (48 bytes) per list element and struct field, two per map entry, the bytes of a `bytes`, the bytes of a new string, plus the level below extrapolated from the first 8 elements; deeper levels are not counted |
+| Size | One `Value` cell (48 bytes) per list element and struct field, two per map entry, the bytes of a `bytes`, the bytes of a new string. An eager copy, a copied literal element and a slice count every level of the copied value; a builtin's result counts its own level plus the level below, extrapolated from the first 8 elements |
 | Cumulative | Bytes allocated, not live: a value that is dropped stays counted, and `$s = $s + $x` in a loop counts every intermediate string |
 | A second call | Changes the limit and keeps the count; `math.MAX_INT` lifts the limit, the count goes on |
 | `0` or negative | Throws (kind `"runtime"`) |

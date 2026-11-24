@@ -7,7 +7,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,14 +33,24 @@ func markerReceivers(t *testing.T, marker string) map[string]bool {
 	// implementing stmtNode()/exprNode() (e.g. to exercise a walker's
 	// conservative default), and such a type is not part of the real grammar the
 	// walkers must handle.
-	noTests := func(fi os.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }
-	pkgs, err := parser.ParseDir(fset, filepath.Join("..", "parser"), noTests, 0)
+	paths, err := filepath.Glob(filepath.Join("..", "parser", "*.go"))
 	if err != nil {
-		t.Fatalf("parse parser package: %v", err)
+		t.Fatalf("list parser package: %v", err)
+	}
+	var files []*ast.File
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		files = append(files, f)
 	}
 	out := map[string]bool{}
-	for _, pkg := range pkgs {
-		for _, f := range pkg.Files {
+	{
+		for _, f := range files {
 			for _, decl := range f.Decls {
 				fd, ok := decl.(*ast.FuncDecl)
 				if !ok || fd.Recv == nil || len(fd.Recv.List) == 0 || fd.Name.Name != marker {
