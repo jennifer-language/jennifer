@@ -43,6 +43,7 @@ codec: windows-1255
 codec: windows-1256
 codec: windows-1257
 codec: windows-1258
+codec: macintosh
 encode iso-8859-1 'café' bytes = 99 97 102 233
 decode iso-8859-1 = café
 encode windows-1252 '€100' first byte = 128
