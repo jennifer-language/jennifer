@@ -1,33 +1,51 @@
 # gpio
 
-GPIO over the modern `/dev/gpiochipN` **character device** (the GPIO v2 line
-ioctls), the mainline interface that replaces the deprecated sysfs
-`/sys/class/gpio`. **Linux-only**; a stub elsewhere and on `jennifer-tiny`.
+GPIO over the `/dev/gpiochipN` **character device** (the GPIO v2 line ioctls),
+the mainline interface that replaces the deprecated sysfs `/sys/class/gpio`.
+**Linux-only**; a stub elsewhere and on `jennifer-tiny`.
 
-This library reuses the pin-keyed shape of the sysfs-backed `gpio`
-[module](../modules/gpio.md): `setup` / `read` / `write` / `release` plus the
-`IN` / `OUT` direction constants. The chip device is selected once (default
-`/dev/gpiochip0`), and a pin is a line offset on it. The module also takes
-line offsets, on the Raspberry Pi header chip it finds by label, so a script
-moves between the two unchanged when `/dev/gpiochip0` is that chip: Pi 1-4,
-and Pi 5 on current kernels (early Pi 5 kernels number it `/dev/gpiochip4`;
-`gpioinfo` shows the chip labelled `pinctrl-rp1`).
+A chip is a handle: `gpio.open(path)` opens one, and `setup` / `read` /
+`write` / `release` take it with the pin, a line offset on that chip (on a
+Raspberry Pi the BCM GPIO number). The header chip of a Raspberry Pi is
+`/dev/gpiochip0` on Pi 1-4, and on Pi 5 with current kernels (early Pi 5
+kernels number it `/dev/gpiochip4`; `gpiodetect` lists each node with its
+label, `pinctrl-rp1` on a Pi 5).
 
 ```jennifer
 use gpio;
 
-gpio.setup(17, gpio.OUT);
-gpio.write(17, 1);
-gpio.release(17);
+def chip as gpio.Chip init gpio.open("/dev/gpiochip0");
+defer gpio.close($chip);          # releases the chip's pins too
+gpio.setup($chip, 17, gpio.OUT);
+gpio.write($chip, 17, 1);
 ```
 
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
-| `gpio.chip(path)` | `null` | Selects the gpiochip device for later setups (default `/dev/gpiochip0`; env `JENNIFER_GPIO_CHIP` also honoured). |
-| `gpio.setup(pin, direction)` | `null` | Requests the chip line `pin` (a u32 offset; many SoC gpiochips expose 100+ lines) with `gpio.IN` or `gpio.OUT`. An offset the chip does not have surfaces as the kernel's error. Errors if the pin is already set up. |
-| `gpio.read(pin)` | `int` | 0 or 1. |
-| `gpio.write(pin, value)` | `null` | `value` is 0 or 1; the pin must be set up as `gpio.OUT`. |
-| `gpio.release(pin)` | `null` | Releases the line back to the kernel. |
+| `gpio.open(path)` | `gpio.Chip` | Opens a gpiochip device; a node that is not one throws (`not a gpiochip device`). |
+| `gpio.setup(chip, pin, direction)` | `null` | Requests line `pin` (a u32 offset; many SoC gpiochips expose 100+ lines) with `gpio.IN` or `gpio.OUT`. An offset the chip does not have surfaces as the kernel's error. Throws if the pin is already set up on this chip. |
+| `gpio.read(chip, pin)` | `int` | 0 or 1. |
+| `gpio.write(chip, pin, value)` | `null` | `value` is 0 or 1; the pin must be set up as `gpio.OUT`. |
+| `gpio.release(chip, pin)` | `null` | Releases the line back to the kernel. |
+| `gpio.close(chip)` | `null` | Releases every line set up on the chip and closes it. A second `close` does nothing. |
+
+Two chip handles are independent: the same pin number on two chips is two
+lines. Any call but `close` on a closed chip throws `Error{kind: "closed"}`.
+
+## Deprecated: the process-wide chip
+
+Removed in 0.29.0; `jennifer lint` reports each use (L301).
+
+| Deprecated | Use |
+|---|---|
+| `gpio.chip(path)`, `JENNIFER_GPIO_CHIP` | `gpio.open(path)` |
+| `gpio.setup(pin, direction)` | `gpio.setup(chip, pin, direction)` |
+| `gpio.read(pin)` / `gpio.write(pin, value)` | `gpio.read(chip, pin)` / `gpio.write(chip, pin, value)` |
+| `gpio.release(pin)` | `gpio.release(chip, pin)` or `gpio.close(chip)` |
+
+The pin-only forms use the chip `gpio.chip` selected, else `JENNIFER_GPIO_CHIP`,
+else `/dev/gpiochip0`, opened per `setup`. Their pins are separate from those of
+a chip handle.
 
 ## Constants
 
@@ -36,12 +54,13 @@ gpio.release(17);
 | `gpio.IN` | `"in"` |
 | `gpio.OUT` | `"out"` |
 
-The same values as the sysfs module.
+## Errors
 
-The sysfs `gpio` module stays the portable default (it runs on the hobbyist Pi
-kernels it targets); this ioctl library is the successor for targets that ship
-without sysfs GPIO.
+| Kind | Raised for |
+|---|---|
+| `"closed"` | a call on a closed `gpio.Chip` |
+| `"runtime"` | misuse (a bad direction or value, a pin not set up or set up twice) and an operating-system failure (`gpio.open: /dev/gpiochip0: permission denied (add the user to the group that owns the device, often gpio)`) |
 
 ## See also
 
-[gpio module](../modules/gpio.md), [serial](serial.md), [spi](spi.md), [i2c](i2c.md).
+[gpio module](../modules/gpio.md) (sysfs, deprecated), [serial](serial.md), [spi](spi.md), [i2c](i2c.md).

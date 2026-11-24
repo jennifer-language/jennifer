@@ -18,7 +18,14 @@
  * character device but stays available on the hobbyist Pi kernels this targets.
  * GPIO is a Linux-platform feature: off a GPIO-capable host every call reports a
  * clear "base directory not found" error rather than crashing.
+ *
+ * Deprecated: the `gpio` library (`use gpio;`) drives the same pins over the
+ * /dev/gpiochipN character device, the interface the kernel keeps. Open the
+ * chip once and pass it to each call: `gpio.open("/dev/gpiochip0")`, then
+ * `gpio.setup($chip, 17, gpio.OUT)`, `gpio.write($chip, 17, 1)`, ... The
+ * module is removed in 0.29.0.
  * @module gpio
+ * @deprecated use the `gpio` library (`gpio.open(path)` -> `gpio.Chip`); removed in 0.29.0
  * @example
  * import "gpio.j" as gpio;
  * gpio.setup(17, gpio.OUT);

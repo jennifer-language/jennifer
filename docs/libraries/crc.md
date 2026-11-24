@@ -60,8 +60,8 @@ def sum as bytes init crc.finalize($s);
 | -------------------------- | ------------ | ------------------------------------------------------------------ |
 | `crc.stream(algo)`         | `crc.Stream` | Allocate a fresh handle for the named algorithm.                   |
 | `crc.update($s, $bytes)`   | `null`       | Feed one chunk. Mutates the handle's state by side effect.         |
-| `crc.finalize($s)`         | `bytes`      | Compute the checksum and consume the handle. Subsequent calls error. |
-| `crc.discard($s)`          | `null`       | Drop a stream without computing its checksum, releasing its state. Subsequent calls error. |
+| `crc.finalize($s)`         | `bytes`      | Compute the checksum and consume the handle. A later `update` / `finalize` throws kind `"closed"`. |
+| `crc.discard($s)`          | `null`       | Drop a stream without computing its checksum, releasing its state. On a finalized or discarded stream it does nothing, so `defer crc.discard($s);` is safe. |
 
 At most 4096 streams are open at once; each needs a matching `finalize` or
 `discard`.
@@ -75,7 +75,7 @@ All errors are positioned at the call site.
 | Wrong arity | `crc.compute expects 2 arguments (algo, bytes), got 1` |
 | Wrong argument type | `crc.compute: second argument must be bytes, got string` |
 | Unknown algorithm | `crc.compute: unknown algorithm "adler32"; known: "crc32", "crc64"` |
-| Reuse of a finalized stream | `crc.update: stream 3 has already been finalized or never existed` |
+| Reuse of a finalized or discarded stream (kind `"closed"`) | `crc.update: stream 3 has already been finalized or discarded, or never existed` |
 | Leaked streams (kind `"limit"`) | `crc.stream: too many open streams (limit 4096); each needs a matching crc.finalize or discard` |
 
 ## See also

@@ -57,6 +57,15 @@ func Install(in *interpreter.Interpreter) {
 		{Name: "mtimeNanos", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "mode", Type: parser.PrimitiveType(parser.TypeInt)},
 	})
+	// fs.StatBytes is fs.Stat with the path as bytes, for fs.walkBytes: a
+	// name the filesystem holds need not be UTF-8 (M29.50).
+	in.RegisterNamespacedStruct(LibraryName, "StatBytes", []parser.StructField{
+		{Name: "path", Type: parser.PrimitiveType(parser.TypeBytes)},
+		{Name: "size", Type: parser.PrimitiveType(parser.TypeInt)},
+		{Name: "isDir", Type: parser.PrimitiveType(parser.TypeBool)},
+		{Name: "mtimeNanos", Type: parser.PrimitiveType(parser.TypeInt)},
+		{Name: "mode", Type: parser.PrimitiveType(parser.TypeInt)},
+	})
 
 	// fs.File wraps an integer id into the handle registry. See
 	// handles.go for the open/close/read/write/eof machinery.
@@ -108,6 +117,8 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "rename", renameFn)
 	in.RegisterNamespaced(LibraryName, "list", listFn)
 	in.RegisterNamespaced(LibraryName, "walk", walkFn)
+	in.RegisterNamespaced(LibraryName, "listBytes", listBytesFn)
+	in.RegisterNamespaced(LibraryName, "walkBytes", walkBytesFn)
 
 	// Temporary-entry creation (temp.go): unique name, atomic create, path
 	// returned. Strict - any OS failure is a catchable error.
@@ -403,6 +414,9 @@ func realpathFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if evalErr != nil {
 		return interpreter.Null(), fmt.Errorf("fs.realpath: %s: %s", path, osErr(evalErr, path))
 	}
+	if err := checkName("fs.realpath", path, "resolved path", resolved, ""); err != nil {
+		return interpreter.Null(), err
+	}
 	return interpreter.StringVal(resolved), nil
 }
 
@@ -446,6 +460,9 @@ func readlinkFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	target, rlErr := os.Readlink(path)
 	if rlErr != nil {
 		return interpreter.Null(), fmt.Errorf("fs.readlink: %s: %s", path, osErr(rlErr, path))
+	}
+	if err := checkName("fs.readlink", path, "link target", target, ""); err != nil {
+		return interpreter.Null(), err
 	}
 	return interpreter.StringVal(target), nil
 }
@@ -724,6 +741,37 @@ func renameFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.Null(), nil
 }
 
+// checkName refuses a name read from the filesystem that is not valid UTF-8
+// (M29.50): kind "fs", naming the entry (escaped) and the byte offset, and the
+// bytes form to use instead (none for readlink / realpath).
+func checkName(fn, path, what, name, instead string) error {
+	off := limits.InvalidUTF8At(name)
+	if off < 0 {
+		return nil
+	}
+	hint := ""
+	if instead != "" {
+		hint = "; " + instead + " returns names as bytes"
+	}
+	return dataerr.New(dataKind, "%s: %s: %s %q is not valid UTF-8 at byte %d%s", fn, path, what, name, off, hint)
+}
+
+// readNames returns the sorted entry names of the directory at path.
+func readNames(fn, path string) ([]string, error) {
+	entries, readErr := os.ReadDir(path)
+	if readErr != nil {
+		return nil, fmt.Errorf("%s: %s: %s", fn, path, osErr(readErr, path))
+	}
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.Name()
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// listFn implements fs.list(path) -> list of string: the sorted entry names.
+// A name that is not valid UTF-8 throws kind "fs" (fs.listBytes reads any).
 func listFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("fs.list expects 1 argument (path), got %d", len(args))
@@ -732,20 +780,39 @@ func listFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	entries, readErr := os.ReadDir(path)
-	if readErr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.list: %s: %s", path, osErr(readErr, path))
+	names, err := readNames("fs.list", path)
+	if err != nil {
+		return interpreter.Null(), err
 	}
-	names := make([]string, len(entries))
-	for i, e := range entries {
-		names[i] = e.Name()
-	}
-	sort.Strings(names)
 	out := make([]Value, len(names))
 	for i, n := range names {
+		if err := checkName("fs.list", path, "entry", n, "fs.listBytes"); err != nil {
+			return interpreter.Null(), err
+		}
 		out[i] = interpreter.StringVal(n)
 	}
 	return interpreter.ListVal(parser.PrimitiveType(parser.TypeString), out), nil
+}
+
+// listBytesFn implements fs.listBytes(path) -> list of bytes: fs.list with
+// each name as bytes, whatever the filesystem holds.
+func listBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("fs.listBytes expects 1 argument (path), got %d", len(args))
+	}
+	path, err := takeStringArg("fs.listBytes", args, 0, "path")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	names, err := readNames("fs.listBytes", path)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	out := make([]Value, len(names))
+	for i, n := range names {
+		out[i] = interpreter.BytesVal([]byte(n))
+	}
+	return interpreter.ListVal(parser.PrimitiveType(parser.TypeBytes), out), nil
 }
 
 // walkReported maps a path under the resolved walk root back under the
@@ -757,18 +824,17 @@ func walkReported(path, walkRoot, p string) string {
 	return path + strings.TrimPrefix(p, walkRoot)
 }
 
-// walkFn does a depth-first walk with sorted per-directory entries.
+// walkEntry is one entry fs.walk / fs.walkBytes reports.
+type walkEntry struct {
+	path string
+	info os.FileInfo
+}
+
+// walkTree does a depth-first walk with sorted per-directory entries.
 // Skips symlinks (no follow, no report) in v1 to sidestep symlink-loop
 // pitfalls. The root itself is included as the first entry so callers
 // can inspect it (matches Go's `filepath.Walk` behaviour).
-func walkFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	if len(args) != 1 {
-		return interpreter.Null(), fmt.Errorf("fs.walk expects 1 argument (path), got %d", len(args))
-	}
-	path, err := takeStringArg("fs.walk", args, 0, "path")
-	if err != nil {
-		return interpreter.Null(), err
-	}
+func walkTree(fn, path string) ([]walkEntry, error) {
 	// filepath.Walk Lstats the root, so a symlinked root is seen as a symlink
 	// and filtered out below, yielding an empty result instead of the tree.
 	// Resolve the root (only the root) and walk the target, then report each
@@ -778,11 +844,11 @@ func walkFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if fi, lerr := os.Lstat(path); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
 		resolved, rerr := filepath.EvalSymlinks(path)
 		if rerr != nil {
-			return interpreter.Null(), fmt.Errorf("fs.walk: %s: %s", path, osErr(rerr, path))
+			return nil, fmt.Errorf("%s: %s: %s", fn, path, osErr(rerr, path))
 		}
 		walkRoot = resolved
 	}
-	var results []Value
+	var results []walkEntry
 	walkErr := filepath.Walk(walkRoot, func(p string, info os.FileInfo, werr error) error {
 		if werr != nil {
 			// Below the root, an unreadable entry does not fail the walk
@@ -794,7 +860,7 @@ func walkFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 				return werr
 			}
 			if info != nil && info.IsDir() {
-				results = append(results, makeStat(walkReported(path, walkRoot, p), info))
+				results = append(results, walkEntry{walkReported(path, walkRoot, p), info})
 			}
 			return nil
 		}
@@ -805,12 +871,60 @@ func walkFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return nil
 		}
-		results = append(results, makeStat(walkReported(path, walkRoot, p), info))
+		results = append(results, walkEntry{walkReported(path, walkRoot, p), info})
 		return nil
 	})
 	if walkErr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.walk: %s: %s", path, osErr(walkErr, path, walkRoot))
+		return nil, fmt.Errorf("%s: %s: %s", fn, path, osErr(walkErr, path, walkRoot))
+	}
+	return results, nil
+}
+
+// walkFn implements fs.walk(path) -> list of fs.Stat. A path that is not
+// valid UTF-8 throws kind "fs" (fs.walkBytes reads any).
+func walkFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("fs.walk expects 1 argument (path), got %d", len(args))
+	}
+	path, err := takeStringArg("fs.walk", args, 0, "path")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	entries, err := walkTree("fs.walk", path)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	results := make([]Value, len(entries))
+	for i, e := range entries {
+		if err := checkName("fs.walk", path, "entry", e.path, "fs.walkBytes"); err != nil {
+			return interpreter.Null(), err
+		}
+		results[i] = makeStat(e.path, e.info)
 	}
 	statType := parser.NamespacedStructType(LibraryName, "Stat")
 	return interpreter.ListVal(statType, results), nil
+}
+
+// walkBytesFn implements fs.walkBytes(path) -> list of fs.StatBytes: fs.walk
+// with each path as bytes, whatever the filesystem holds.
+func walkBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("fs.walkBytes expects 1 argument (path), got %d", len(args))
+	}
+	path, err := takeStringArg("fs.walkBytes", args, 0, "path")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	entries, err := walkTree("fs.walkBytes", path)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	results := make([]Value, len(entries))
+	for i, e := range entries {
+		st := makeStat(e.path, e.info)
+		fields := append([]interpreter.StructField(nil), st.Fields...)
+		fields[0].Value = interpreter.BytesVal([]byte(e.path))
+		results[i] = interpreter.NamespacedStructVal(LibraryName, "StatBytes", fields)
+	}
+	return interpreter.ListVal(parser.NamespacedStructType(LibraryName, "StatBytes"), results), nil
 }

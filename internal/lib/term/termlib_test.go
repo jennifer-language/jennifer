@@ -6,8 +6,10 @@
 package termlib
 
 import (
+	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -18,21 +20,24 @@ import (
 
 func TestReadByte(t *testing.T) {
 	ctx := interpreter.BuiltinCtx{In: strings.NewReader("AB")}
-	for _, want := range []int64{'A', 'B', -1, -1} {
-		v, err := readByteFn(ctx, nil)
-		if err != nil {
-			t.Fatalf("readByte: %v", err)
+	for _, want := range []int64{'A', 'B', gotClosed, gotClosed} {
+		if got := readOne(t, ctx); got != want {
+			t.Errorf("readByte = %d, want %d", got, want)
 		}
-		if v.Kind != interpreter.KindInt || v.Int != want {
-			t.Errorf("readByte = %v, want %d", v, want)
-		}
+	}
+	// No input reader at all is the end of input too.
+	if got := readOne(t, interpreter.BuiltinCtx{}); got != gotClosed {
+		t.Errorf("readByte without input = %d, want closed", got)
+	}
+	if got := readTimeout(t, interpreter.BuiltinCtx{}, 0); got != gotClosed {
+		t.Errorf("readByteTimeout without input = %d, want closed", got)
 	}
 }
 
 // TestReadByteBulk drains a large stream one byte at a time. The shared stdin
 // layer reads one bounded chunk ahead on demand, so memory is flat regardless of
 // input size; this confirms it returns every byte in order and terminates
-// cleanly at -1 (no hang, no accumulation).
+// cleanly with "closed" (no hang, no accumulation).
 func TestReadByteBulk(t *testing.T) {
 	const n = 100000
 	buf := make([]byte, n)
@@ -49,11 +54,10 @@ func TestReadByteBulk(t *testing.T) {
 			t.Fatalf("readByte[%d] = %d, want %d", i, v.Int, buf[i])
 		}
 	}
-	// Exactly drained: the next read is -1, and stays -1.
+	// Exactly drained: the next read throws "closed", and keeps throwing it.
 	for k := 0; k < 3; k++ {
-		v, _ := readByteFn(ctx, nil)
-		if v.Int != -1 {
-			t.Fatalf("post-drain read = %d, want -1", v.Int)
+		if got := readOne(t, ctx); got != gotClosed {
+			t.Fatalf("post-drain read = %d, want closed", got)
 		}
 	}
 }
@@ -103,12 +107,13 @@ func TestRestoreInvalid(t *testing.T) {
 	if _, err := restoreFn(interpreter.BuiltinCtx{}, []Value{interpreter.IntVal(1)}); err == nil {
 		t.Error("restore of a non-State value should error")
 	}
-	// A State whose id is not in the registry (stale / already restored).
+	// A State already restored (or never live): a second restore does
+	// nothing (M29.46).
 	stale := interpreter.NamespacedStructVal(LibraryName, "State", []interpreter.StructField{
 		{Name: "id", Value: interpreter.IntVal(999)},
 	})
-	if _, err := restoreFn(interpreter.BuiltinCtx{}, []Value{stale}); err == nil {
-		t.Error("restore of a stale State should error")
+	if _, err := restoreFn(interpreter.BuiltinCtx{}, []Value{stale}); err != nil {
+		t.Errorf("restore of a restored State: %v, want no error", err)
 	}
 }
 
@@ -200,7 +205,7 @@ func TestRestoreAllClears(t *testing.T) {
 }
 
 // A reader may legally return (0, nil) - which is NOT end-of-input; readByte
-// must retry it and deliver the next byte, and report -1 only at a real EOF.
+// must retry it and deliver the next byte, and throw "closed" only at a real EOF.
 type stutterReader struct{ steps []string }
 
 func (r *stutterReader) Read(p []byte) (int, error) {
@@ -225,27 +230,66 @@ func TestReadByteRetriesEmptyRead(t *testing.T) {
 	if v.Int != int64('A') {
 		t.Errorf("readByte after empty reads = %d, want %d ('A')", v.Int, 'A')
 	}
-	// After the steps are exhausted, a real EOF yields -1.
-	v, err = readByteFn(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if v.Int != -1 {
-		t.Errorf("readByte at EOF = %d, want -1", v.Int)
+	// After the steps are exhausted, a real EOF throws "closed".
+	if got := readOne(t, ctx); got != gotClosed {
+		t.Errorf("readByte at EOF = %d, want closed", got)
 	}
 }
 
-// readTimeout calls term.readByteTimeout(ms) and returns the int result.
+// gotTimeout and gotClosed stand for the "timeout" and "closed" errors in the
+// read helpers' results, so a test reads as a sequence of outcomes.
+const (
+	gotTimeout = -2
+	gotClosed  = -1
+)
+
+// outcome maps a term read's result to the byte, gotTimeout or gotClosed,
+// failing the test on any other error.
+func outcome(t *testing.T, what string, v Value, err error) int64 {
+	t.Helper()
+	switch {
+	case err == nil:
+		return v.Int
+	case errKind(err) == "timeout":
+		return gotTimeout
+	case errKind(err) == "closed":
+		return gotClosed
+	}
+	t.Fatalf("%s: %v", what, err)
+	return 0
+}
+
+// readTimeout calls term.readByteTimeout(ms).
 func readTimeout(t *testing.T, ctx interpreter.BuiltinCtx, ms int64) int64 {
 	t.Helper()
 	v, err := readByteTimeoutFn(ctx, []Value{interpreter.IntVal(ms)})
-	if err != nil {
-		t.Fatalf("readByteTimeout(%d): %v", ms, err)
-	}
-	return v.Int
+	return outcome(t, fmt.Sprintf("readByteTimeout(%d)", ms), v, err)
 }
 
-// A timed read returns the byte when one arrives in time, -2 when none does, and
+// readOne calls term.readByte().
+func readOne(t *testing.T, ctx interpreter.BuiltinCtx) int64 {
+	t.Helper()
+	v, err := readByteFn(ctx, nil)
+	return outcome(t, "readByte", v, err)
+}
+
+// errKind is the kind of a builtin's error: a KindedError's Kind field, ""
+// (runtime) for a plain error.
+func errKind(err error) string {
+	v := reflect.ValueOf(err)
+	if v.Kind() == reflect.Pointer {
+		v = v.Elem()
+	}
+	if v.Kind() == reflect.Struct {
+		if f := v.FieldByName("Kind"); f.IsValid() && f.Kind() == reflect.String {
+			return f.String()
+		}
+	}
+	return ""
+}
+
+// A timed read returns the byte when one arrives in time, throws "timeout" when
+// none does, and
 // a read that timed out stays in flight: the byte it eventually yields is the
 // next one any term read returns, so nothing is lost or reordered.
 func TestReadByteTimeout(t *testing.T) {
@@ -253,15 +297,15 @@ func TestReadByteTimeout(t *testing.T) {
 	r, w := io.Pipe()
 	defer w.Close()
 	ctx := interpreter.BuiltinCtx{In: r}
-	if got := readTimeout(t, ctx, 0); got != -2 {
-		t.Errorf("poll with nothing to read = %d, want -2", got)
+	if got := readTimeout(t, ctx, 0); got != gotTimeout {
+		t.Errorf("poll with nothing to read = %d, want timeout", got)
 	}
 	go func() { _, _ = w.Write([]byte{27}) }()
 	if got := readTimeout(t, ctx, 2000); got != 27 {
 		t.Errorf("byte in time = %d, want 27", got)
 	}
-	if got := readTimeout(t, ctx, 20); got != -2 {
-		t.Errorf("nothing in time = %d, want -2", got)
+	if got := readTimeout(t, ctx, 20); got != gotTimeout {
+		t.Errorf("nothing in time = %d, want timeout", got)
 	}
 	// The timed-out read is still pending: the next write lands in it, and a
 	// blocking readByte collects it.
@@ -273,16 +317,16 @@ func TestReadByteTimeout(t *testing.T) {
 		t.Errorf("next byte = %d, want 'y'", got)
 	}
 	w.Close()
-	if got := readTimeout(t, ctx, 2000); got != -1 {
-		t.Errorf("at end of input = %d, want -1", got)
+	if got := readTimeout(t, ctx, 2000); got != gotClosed {
+		t.Errorf("at end of input = %d, want closed", got)
 	}
 }
 
 func TestReadByteTimeoutArgs(t *testing.T) {
 	ctx := interpreter.BuiltinCtx{In: strings.NewReader("")}
-	for _, args := range [][]Value{nil, {interpreter.IntVal(-1)}, {interpreter.StringVal("5")}} {
-		if _, err := readByteTimeoutFn(ctx, args); err == nil {
-			t.Errorf("readByteTimeout(%v) should error", args)
+	for _, args := range [][]Value{nil, {interpreter.IntVal(-1)}, {interpreter.IntVal(maxTimeoutMs + 1)}, {interpreter.StringVal("5")}} {
+		if _, err := readByteTimeoutFn(ctx, args); err == nil || errKind(err) != "" {
+			t.Errorf("readByteTimeout(%v): %v, want a runtime error", args, err)
 		}
 	}
 	if _, err := readByteTimeoutFn(interpreter.BuiltinCtx{InREPL: true}, []Value{interpreter.IntVal(1)}); err == nil {

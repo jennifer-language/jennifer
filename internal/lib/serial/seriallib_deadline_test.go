@@ -89,7 +89,8 @@ use encoding;
 def p as serial.Port init serial.open(%q, 9600);
 try { serial.setReadDeadline($p, -1); } catch (e) { io.printf("%%s;", $e.message); }
 serial.setWriteDeadline($p, 1000);
-io.printf("%%d;", serial.write($p, encoding.encode("utf-8", "ok")));
+serial.write($p, encoding.encode("utf-8", "ok"));
+io.printf("wrote;");
 serial.setWriteDeadline($p, 0);
 serial.close($p);
 try { serial.setReadDeadline($p, 10); } catch (e) { io.printf("closed handle"); }`, slave))
@@ -97,7 +98,7 @@ try { serial.setReadDeadline($p, 10); } catch (e) { io.printf("closed handle"); 
 		t.Fatalf("run: %v (out=%q)", err, out)
 	}
 	if !strings.Contains(out, "serial.setReadDeadline: ms must be 0 (clear) or positive, got -1;") ||
-		!strings.Contains(out, "2;") || !strings.HasSuffix(out, "closed handle") {
+		!strings.Contains(out, "wrote;") || !strings.HasSuffix(out, "closed handle") {
 		t.Errorf("got %q", out)
 	}
 }

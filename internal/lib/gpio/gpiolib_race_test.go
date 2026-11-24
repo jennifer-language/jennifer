@@ -41,7 +41,7 @@ func TestReleaseWaitsForIoctl(t *testing.T) {
 				t.Fatal(err)
 			}
 			linesMu.Lock()
-			lines[5] = &lineState{fd: fd, dir: "out"}
+			lines[lineKey{0, 5}] = &lineState{fd: fd, dir: "out"}
 			linesMu.Unlock()
 
 			entered, finish := make(chan struct{}), make(chan struct{})

@@ -4,11 +4,12 @@
 package libsig
 
 func init() {
+	addDataKind("serial", "serial")
 	add("serial", `
 open(string, int) serial.Port
 openWith(string, serial.Options) serial.Port
 read(serial.Port, int) bytes
-write(serial.Port, bytes) int
+write(serial.Port, bytes) null
 flush(serial.Port) null
 close(serial.Port) null
 setReadDeadline(serial.Port, int) null

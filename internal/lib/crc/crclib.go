@@ -186,7 +186,7 @@ func updateFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	entry, ok := streams[id]
 	streamsMu.Unlock()
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("crc.update: stream %d has already been finalized or never existed", id)
+		return interpreter.Null(), interpreter.KindedError("closed", fmt.Sprintf("crc.update: stream %d has already been finalized or discarded, or never existed", id))
 	}
 	entry.mu.Lock()
 	entry.h.Write(args[1].Bytes)
@@ -209,7 +209,7 @@ func finalizeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	}
 	streamsMu.Unlock()
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("crc.finalize: stream %d has already been finalized or never existed", id)
+		return interpreter.Null(), interpreter.KindedError("closed", fmt.Sprintf("crc.finalize: stream %d has already been finalized or discarded, or never existed", id))
 	}
 	entry.mu.Lock()
 	digest := entry.h.Sum(nil)
@@ -221,7 +221,8 @@ func finalizeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 }
 
 // discardFn drops a live stream without computing its checksum, releasing its
-// state. The abort path for a stream opened but abandoned before finalize.
+// state. The abort path for a stream opened but abandoned before finalize, and
+// safe in a `defer`: on a finalized or discarded stream it does nothing.
 func discardFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("crc.discard expects 1 argument (stream), got %d", len(args))
@@ -230,13 +231,10 @@ func discardFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	// Discarding a finalized or discarded stream does nothing (M29.46).
 	streamsMu.Lock()
-	_, ok := streams[id]
 	delete(streams, id)
 	streamsMu.Unlock()
-	if !ok {
-		return interpreter.Null(), fmt.Errorf("crc.discard: stream %d has already been finalized or never existed", id)
-	}
 	return interpreter.Null(), nil
 }
 

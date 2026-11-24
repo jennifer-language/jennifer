@@ -23,8 +23,8 @@ while a read of stdin blocks.
 | `term.makeRaw(stream)` | `term.State` | Put the terminal into raw mode; `stream` must be `"stdin"` (raw mode governs input). Returns a handle for `restore`. |
 | `term.restore(state)` | `null` | Undo `makeRaw`, restoring the terminal. The handle is single-use. |
 | `term.size(stream)` | `term.Size` | The terminal's `{rows, cols}` (query `"stdout"`). Catchable error when there is no size to report: not a terminal, or a terminal with no window size set (see [Terminal size](#terminal-size)). |
-| `term.readByte()` | `int` | The next raw byte from stdin (`0`-`255`), or `-1` at end of input. |
-| `term.readByteTimeout(ms)` | `int` | Like `readByte`, but `-2` when no byte arrives within `ms` milliseconds; `ms` `0` polls. |
+| `term.readByte()` | `int` | The next raw byte from stdin (`0`-`255`); throws `"closed"` at end of input. |
+| `term.readByteTimeout(ms)` | `int` | Like `readByte`, but throws `"timeout"` when no byte arrives within `ms` milliseconds; `ms` `0` polls. |
 
 `stream` is `"stdin"` / `"stdout"` / `"stderr"` (the same names as
 `os.isTerminal`). A stream that is not a terminal - a pipe or a redirect - is a
@@ -50,11 +50,18 @@ if (not os.isTerminal("stdin")) {
     defer term.restore($state);                  # runs however this block exits
     def running as bool init true;
     while ($running) {
-        def b as int init term.readByte();       # blocks until a key is pressed
-        if ($b == -1 or $b == 113) {             # -1 = end of input, 113 = 'q'
-            $running = false;
-        } else {
-            io.printf("byte %d\r\n", $b);         # raw mode: newline is not cooked
+        try {
+            def b as int init term.readByte();   # blocks until a key is pressed
+            if ($b == 113) {                     # 'q'
+                $running = false;
+            } else {
+                io.printf("byte %d\r\n", $b);     # raw mode: newline is not cooked
+            }
+        } catch (e) {
+            if ($e.kind != "closed") {
+                throw $e;
+            }
+            $running = false;                    # end of input
         }
     }
 }
@@ -67,7 +74,8 @@ restore runs on **every** exit path - including a `throw` unwinding through the
 block ([control-flow > `defer`](../user-guide/control-flow.md#defer-deterministic-cleanup)).
 In raw mode the newline is not cooked, so prints need an explicit `\r\n`. The
 `term.State` handle is **single-use**: a second `term.restore` of the same handle
-is an error, so a stale handle never clobbers a live terminal. At most 256
+does nothing, so a stale handle never clobbers a live terminal and an explicit
+restore before the deferred one is harmless. At most 256
 states are active at once; one more `makeRaw` throws kind `"limit"`.
 
 As a **backstop**, the `jennifer` CLI cooks the terminal back on the way out even
@@ -79,14 +87,15 @@ bypasses it.
 
 ## Reading keys
 
-`term.readByte` returns one raw byte from stdin (`0`-`255`), or `-1` at end of
-input. In raw mode it returns the instant a key is pressed. It reads **bytes**,
+`term.readByte` returns one raw byte from stdin (`0`-`255`) and throws
+`"closed"` at end of input. In raw mode it returns the instant a key is pressed. It reads **bytes**,
 not decoded keys: a plain key is one byte, but an arrow key or a function key
 arrives as a multi-byte escape sequence (`ESC [ A` for Up, ...). Decoding those
 into key events is left to a TUI layer on top.
 
-`term.readByteTimeout(ms)` is the bounded form: the byte, `-1` at end of input,
-or `-2` when `ms` milliseconds pass with no byte (`0` polls without waiting). It
+`term.readByteTimeout(ms)` is the bounded form: the byte, or `"timeout"` when
+`ms` milliseconds pass with no byte (`0` polls without waiting); `"closed"` at
+end of input as `readByte`. It
 tells a lone `Escape` key from the start of an escape sequence (a terminal writes
 a sequence's bytes in one burst, so a short wait after `ESC` that times out - the
 `screen` module uses 50 ms - means a bare Escape), and polls input from a loop
@@ -98,8 +107,8 @@ times out loses nothing: the byte it was waiting for is the next one any read
 returns, whether that is `term.readByte`, `term.readByteTimeout`, or an `io`
 read such as `io.readLine` or `io.readBytes`. A byte `io.eof()` peeked is still
 there for `term.readByte`, and the end of input (or a read error, such as a
-closed stdin) reached by one library is what the other sees too: `-1` from
-`term`, `io.eof()` true. Stdin is not read until the first read asks for input,
+closed stdin) reached by one library is what the other sees too: `"closed"`
+from `term`, `io.eof()` true. Stdin is not read until the first read asks for input,
 and only as much as that read needs (one chunk ahead at most), so a program that
 switches between raw keys and `io.readLine` lines gets each in the mode active
 when it is read; a read still pending from a timed-out `term` read takes the
@@ -108,8 +117,13 @@ terminal mode set by the time the key arrives.
 ```jennifer
 def b as int init term.readByte();
 if ($b == 27) {
-    def next as int init term.readByteTimeout(50);
-    if ($next == -2) {
+    try {
+        def next as int init term.readByteTimeout(50);
+        # the second byte of an escape sequence
+    } catch (e) {
+        if ($e.kind != "timeout") {
+            throw $e;
+        }
         # a lone Escape key
     }
 }
@@ -117,6 +131,18 @@ if ($b == 27) {
 
 `term.readByte` and `term.readByteTimeout` are refused inside the REPL, which owns
 the terminal for its own line editor.
+
+## Errors
+
+| Kind | Thrown by | When |
+| ---- | --------- | ---- |
+| `"closed"` | `readByte`, `readByteTimeout` | End of input. |
+| `"timeout"` | `readByteTimeout` | No byte within `ms`. The read stays in flight: its byte is the next one any read returns. |
+| `"limit"` | `makeRaw` | More than 256 raw-mode states active. |
+| `"runtime"` | every call | A wrong argument, `ms` negative or above 9,223,372,036,854 (the largest a duration holds), a stream that is not a terminal, a read error (a closed stdin), a call inside the REPL. |
+
+0.28.0 replaced the `-1` (end of input) and `-2` (timeout) return values with
+the `"closed"` and `"timeout"` errors.
 
 ## Terminal size
 

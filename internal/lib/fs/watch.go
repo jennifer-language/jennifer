@@ -13,6 +13,7 @@ import (
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
+	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
 // Polling filesystem watch. Deliberately mtime-polling (pure stdlib,
@@ -71,7 +72,13 @@ var (
 )
 
 func installWatch(in *interpreter.Interpreter) {
+	// Options of watchWith: intervalMs 0 is the default (300 ms); otherwise
+	// at least 20, as the deprecated positional interval of fs.watch.
+	in.RegisterNamespacedStruct(LibraryName, "WatchOptions", []parser.StructField{
+		{Name: "intervalMs", Type: parser.PrimitiveType(parser.TypeInt)},
+	})
 	in.RegisterNamespaced(LibraryName, "watch", watchFn)
+	in.RegisterNamespaced(LibraryName, "watchWith", watchWithFn)
 	in.RegisterNamespaced(LibraryName, "next", watchNextFn)
 	in.RegisterNamespaced(LibraryName, "hasEvent", watchHasEventFn)
 	// fs.close (handles.go) stops a watcher too - it dispatches on the struct.
@@ -126,6 +133,9 @@ func makeEvent(e watchEvent) Value {
 	})
 }
 
+// watchFn implements `fs.watch(path)`. The positional interval
+// `fs.watch(path, intervalMs)` is deprecated (lint L301, removed in 0.29.0):
+// fs.watchWith takes it in an fs.WatchOptions.
 func watchFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 && len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("fs.watch expects 1 or 2 arguments (path[, intervalMs]), got %d", len(args))
@@ -139,19 +149,66 @@ func watchFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if args[1].Kind != interpreter.KindInt {
 			return interpreter.Null(), fmt.Errorf("fs.watch: intervalMs must be int, got %s", args[1].Kind)
 		}
-		intervalMs = args[1].Int
-		if intervalMs < minWatchIntervalMs {
-			return interpreter.Null(), fmt.Errorf("fs.watch: intervalMs must be >= %d, got %d", minWatchIntervalMs, intervalMs)
-		}
-		// An interval so large that intervalMs-ms overflows a time.Duration would
-		// wrap negative and panic time.NewTicker inside the watcher goroutine - an
-		// asynchronous, uncatchable crash. Reject it here, before the goroutine
-		// starts, as a catchable error.
-		if !limits.DurationFitsUnits(intervalMs, time.Millisecond) {
-			return interpreter.Null(), fmt.Errorf("fs.watch: intervalMs %d is too large", intervalMs)
+		intervalMs, err = checkWatchInterval("fs.watch", args[1].Int)
+		if err != nil {
+			return interpreter.Null(), err
 		}
 	}
+	return startWatcher(path, intervalMs)
+}
 
+// watchWithFn implements `fs.watchWith(path, fs.WatchOptions) -> fs.Watcher`:
+// fs.watch with its poll interval in an options struct; intervalMs 0 is the
+// default.
+func watchWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	const fn = "fs.watchWith"
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("%s expects 2 arguments (path, fs.WatchOptions), got %d", fn, len(args))
+	}
+	path, err := takeStringArg(fn, args, 0, "path")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	o := args[1]
+	if o.Kind != interpreter.KindStruct || o.StructNS != LibraryName || o.StructName != "WatchOptions" {
+		return interpreter.Null(), fmt.Errorf("%s: options must be an fs.WatchOptions, got %s", fn, o.Kind)
+	}
+	intervalMs := int64(defaultWatchIntervalMs)
+	for _, f := range o.Fields {
+		if f.Name != "intervalMs" {
+			continue
+		}
+		if f.Value.Kind != interpreter.KindInt {
+			return interpreter.Null(), fmt.Errorf("%s: fs.WatchOptions.intervalMs must be int, got %s", fn, f.Value.Kind)
+		}
+		if f.Value.Int != 0 {
+			intervalMs, err = checkWatchInterval(fn, f.Value.Int)
+			if err != nil {
+				return interpreter.Null(), err
+			}
+		}
+	}
+	return startWatcher(path, intervalMs)
+}
+
+// checkWatchInterval accepts a poll interval of at least minWatchIntervalMs
+// that fits a time.Duration.
+func checkWatchInterval(fn string, ms int64) (int64, error) {
+	if ms < minWatchIntervalMs {
+		return 0, fmt.Errorf("%s: intervalMs must be >= %d, got %d", fn, minWatchIntervalMs, ms)
+	}
+	// An interval so large that intervalMs-ms overflows a time.Duration would
+	// wrap negative and panic time.NewTicker inside the watcher goroutine - an
+	// asynchronous, uncatchable crash. Reject it here, before the goroutine
+	// starts, as a catchable error.
+	if !limits.DurationFitsUnits(ms, time.Millisecond) {
+		return 0, fmt.Errorf("%s: intervalMs %d is too large", fn, ms)
+	}
+	return ms, nil
+}
+
+// startWatcher registers a watcher on path and starts its poll loop.
+func startWatcher(path string, intervalMs int64) (Value, error) {
 	watchMu.Lock()
 	if len(watchers) >= maxWatchers {
 		watchMu.Unlock()
@@ -178,7 +235,7 @@ func resolveWatcher(fnName string, id int64) (*watcher, error) {
 	defer watchMu.Unlock()
 	w, ok := watchers[id]
 	if !ok {
-		return nil, fmt.Errorf("%s: fs.Watcher id %d is not open (already closed, or never opened)", fnName, id)
+		return nil, interpreter.KindedError("closed", fmt.Sprintf("%s: fs.Watcher id %d is not open (already closed, or never opened)", fnName, id))
 	}
 	return w, nil
 }
@@ -201,7 +258,7 @@ func watchNextFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	case e := <-w.events:
 		return makeEvent(e), nil
 	case <-w.done:
-		return interpreter.Null(), fmt.Errorf("fs.next: fs.Watcher id %d was closed", id)
+		return interpreter.Null(), interpreter.KindedError("closed", fmt.Sprintf("fs.next: fs.Watcher id %d was closed", id))
 	}
 }
 
@@ -228,7 +285,7 @@ func closeWatcher(id int64) error {
 	w, ok := watchers[id]
 	if !ok {
 		watchMu.Unlock()
-		return fmt.Errorf("fs.close: fs.Watcher id %d is not open (already closed?)", id)
+		return nil // a second close does nothing (M29.46)
 	}
 	delete(watchers, id)
 	watchMu.Unlock()

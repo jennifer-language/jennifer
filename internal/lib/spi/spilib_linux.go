@@ -71,7 +71,27 @@ type devState struct {
 	f       *os.File
 	mode    uint8
 	speedHz uint32
-	bufsiz  int // spidev's per-message buffer, read at open
+	bits    uint8 // bits per word; 0 means 8
+	bufsiz  int   // spidev's per-message buffer, read at open
+}
+
+// wordBytes is the bytes one word takes in a transfer buffer (spidev: 1 for up
+// to 8 bits, 2 up to 16, 4 above).
+func (d *devState) wordBytes() int {
+	switch {
+	case d.bits == 0 || d.bits <= 8:
+		return 1
+	case d.bits <= 16:
+		return 2
+	}
+	return 4
+}
+
+func (d *devState) bitsPerWord() uint8 {
+	if d.bits == 0 {
+		return 8
+	}
+	return d.bits
 }
 
 // defaultBufsiz is spidev's default buffer size (its bufsiz module parameter).
@@ -148,7 +168,7 @@ func resolveDev(fn string, args []Value) (*devState, error) {
 	defer devsMu.Unlock()
 	d, ok := devs[id]
 	if !ok {
-		return nil, fmt.Errorf("%s: spi.Device id %d is not open (already closed, or never opened)", fn, id)
+		return nil, interpreter.KindedError("closed", fmt.Sprintf("%s: spi.Device id %d is not open (already closed, or never opened)", fn, id))
 	}
 	return d, nil
 }
@@ -162,13 +182,12 @@ func ioctlPtr(fd int, req uintptr, p unsafe.Pointer) error {
 }
 
 // applyConfig pushes mode / bits / speed to the device.
-func applyConfig(fd int, mode uint8, speedHz uint32) error {
-	bits := uint8(8)
+func applyConfig(fd int, mode uint8, speedHz uint32, bits uint8) error {
 	if err := ioctl(fd, spiWrMode, unsafe.Pointer(&mode)); err != nil {
 		return fmt.Errorf("setting mode %d: %s", mode, explain(err))
 	}
 	if err := ioctl(fd, spiWrBits, unsafe.Pointer(&bits)); err != nil {
-		return fmt.Errorf("setting bits-per-word: %s", explain(err))
+		return fmt.Errorf("setting %d bits per word: %s", bits, explain(err))
 	}
 	if err := ioctl(fd, spiWrMaxSpeedHz, unsafe.Pointer(&speedHz)); err != nil {
 		return fmt.Errorf("setting speed %d Hz: %s", speedHz, explain(err))
@@ -176,7 +195,41 @@ func applyConfig(fd int, mode uint8, speedHz uint32) error {
 	return nil
 }
 
-// spi.open(path) -> spi.Device. Defaults to mode 0, 500 kHz, 8 bits/word.
+// defaultSpeedHz is the clock spi.open and a zero Options.speedHz use.
+const defaultSpeedHz = 500000
+
+// checkModeSpeed validates a mode (0..3, CPOL/CPHA) and a clock in Hz.
+func checkModeSpeed(fn string, mode, speed int64) error {
+	if mode < 0 || mode > 3 {
+		return fmt.Errorf("%s: mode must be 0..3, got %d", fn, mode)
+	}
+	// speed_hz is a u32: 2^32 used to truncate to 0 ("keep the current max").
+	if speed <= 0 || speed > math.MaxUint32 {
+		return fmt.Errorf("%s: speedHz must be in 1..%d, got %d", fn, uint32(math.MaxUint32), speed)
+	}
+	return nil
+}
+
+// openDevice opens path and applies the configuration.
+func openDevice(fn, path string, mode uint8, speedHz uint32, bits uint8) (Value, error) {
+	f, oerr := os.OpenFile(path, os.O_RDWR, 0)
+	if oerr != nil {
+		return interpreter.Null(), fmt.Errorf("%s: %s: %s", fn, path, explain(oerr))
+	}
+	if cerr := applyConfig(int(f.Fd()), mode, speedHz, bits); cerr != nil {
+		_ = f.Close()
+		return interpreter.Null(), fmt.Errorf("%s: %s: %v", fn, path, cerr)
+	}
+	devsMu.Lock()
+	nextID++
+	id := nextID
+	devs[id] = &devState{f: f, mode: mode, speedHz: speedHz, bits: bits, bufsiz: spidevBufsiz()}
+	devsMu.Unlock()
+	return devio.Handle(LibraryName, "Device", id), nil
+}
+
+// spi.open(path) -> spi.Device: spi.openWith with every option at its default
+// (mode 0, 500 kHz, 8 bits per word).
 func openFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err := devio.WantArgs("spi.open", args, 1); err != nil {
 		return interpreter.Null(), err
@@ -185,24 +238,55 @@ func openFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	f, oerr := os.OpenFile(path, os.O_RDWR, 0)
-	if oerr != nil {
-		return interpreter.Null(), fmt.Errorf("spi.open: %s: %s", path, explain(oerr))
+	return openDevice("spi.open", path, 0, defaultSpeedHz, 8)
+}
+
+// spi.openWith(path, spi.Options) -> spi.Device. A zero field takes the
+// default: mode 0, speedHz 500000, bitsPerWord 8.
+func openWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	const fn = "spi.openWith"
+	if err := devio.WantArgs(fn, args, 2); err != nil {
+		return interpreter.Null(), err
 	}
-	const defSpeed = 500000
-	if cerr := applyConfig(int(f.Fd()), 0, defSpeed); cerr != nil {
-		_ = f.Close()
-		return interpreter.Null(), fmt.Errorf("spi.open: %s: %v", path, cerr)
+	path, err := devio.StringArg(fn, args, 0, "path")
+	if err != nil {
+		return interpreter.Null(), err
 	}
-	devsMu.Lock()
-	nextID++
-	id := nextID
-	devs[id] = &devState{f: f, mode: 0, speedHz: defSpeed, bufsiz: spidevBufsiz()}
-	devsMu.Unlock()
-	return devio.Handle(LibraryName, "Device", id), nil
+	opts := args[1]
+	if opts.Kind != interpreter.KindStruct || opts.StructNS != LibraryName || opts.StructName != "Options" {
+		return interpreter.Null(), fmt.Errorf("%s: second argument must be a spi.Options, got %s", fn, opts.Kind)
+	}
+	var mode, speed, bits int64
+	for _, f := range opts.Fields {
+		if f.Value.Kind != interpreter.KindInt {
+			continue
+		}
+		switch f.Name {
+		case "mode":
+			mode = f.Value.Int
+		case "speedHz":
+			speed = f.Value.Int
+		case "bitsPerWord":
+			bits = f.Value.Int
+		}
+	}
+	if speed == 0 {
+		speed = defaultSpeedHz
+	}
+	if bits == 0 {
+		bits = 8
+	}
+	if err := checkModeSpeed(fn, mode, speed); err != nil {
+		return interpreter.Null(), err
+	}
+	if bits < 1 || bits > 32 {
+		return interpreter.Null(), fmt.Errorf("%s: bitsPerWord must be 1..32 (0 for the default 8), got %d", fn, bits)
+	}
+	return openDevice(fn, path, uint8(mode), uint32(speed), uint8(bits))
 }
 
 // spi.configure(dev, mode, speedHz) -> null. mode is 0..3 (CPOL/CPHA).
+// Deprecated (M29.49): spi.openWith sets the configuration at open.
 func configureFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err := devio.WantArgs("spi.configure", args, 3); err != nil {
 		return interpreter.Null(), err
@@ -219,19 +303,15 @@ func configureFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if mode < 0 || mode > 3 {
-		return interpreter.Null(), fmt.Errorf("spi.configure: mode must be 0..3, got %d", mode)
-	}
-	// speed_hz is a u32: 2^32 used to truncate to 0 ("keep the current max").
-	if speed <= 0 || speed > math.MaxUint32 {
-		return interpreter.Null(), fmt.Errorf("spi.configure: speedHz must be in 1..%d, got %d", uint32(math.MaxUint32), speed)
+	if err := checkModeSpeed("spi.configure", mode, speed); err != nil {
+		return interpreter.Null(), err
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.f == nil {
 		return interpreter.Null(), interpreter.RaiseError("closed", "spi.configure: the device was closed", ctx.File, ctx.Line, ctx.Col)
 	}
-	if cerr := applyConfig(int(d.f.Fd()), uint8(mode), uint32(speed)); cerr != nil {
+	if cerr := applyConfig(int(d.f.Fd()), uint8(mode), uint32(speed), d.bitsPerWord()); cerr != nil {
 		return interpreter.Null(), fmt.Errorf("spi.configure: %v", cerr)
 	}
 	d.mode = uint8(mode)
@@ -275,13 +355,16 @@ func transferFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(tx) > d.bufsiz {
 		return interpreter.Null(), limitError(ctx, len(tx), d.bufsiz)
 	}
+	if w := d.wordBytes(); len(tx)%w != 0 {
+		return interpreter.Null(), fmt.Errorf("spi.transfer: %d bits per word take %d bytes each; %d bytes is not a whole number of words", d.bitsPerWord(), w, len(tx))
+	}
 	rx := make([]byte, len(tx))
 	xfer := spiIocTransfer{
 		txBuf:       uint64(uintptr(unsafe.Pointer(&tx[0]))),
 		rxBuf:       uint64(uintptr(unsafe.Pointer(&rx[0]))),
 		length:      uint32(len(tx)),
 		speedHz:     d.speedHz,
-		bitsPerWord: 8,
+		bitsPerWord: d.bitsPerWord(),
 	}
 	if terr := ioctl(int(d.f.Fd()), spiMessage1(), unsafe.Pointer(&xfer)); terr != nil {
 		if errors.Is(terr, unix.EMSGSIZE) {
@@ -295,7 +378,7 @@ func transferFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.BytesVal(rx), nil
 }
 
-// spi.close(dev) -> null.
+// spi.close(dev) -> null. A second close of the same device does nothing.
 func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err := devio.WantArgs("spi.close", args, 1); err != nil {
 		return interpreter.Null(), err
@@ -308,7 +391,7 @@ func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	d, ok := devs[id]
 	if !ok {
 		devsMu.Unlock()
-		return interpreter.Null(), fmt.Errorf("spi.close: spi.Device id %d is not open (already closed?)", id)
+		return interpreter.Null(), nil
 	}
 	delete(devs, id)
 	devsMu.Unlock()

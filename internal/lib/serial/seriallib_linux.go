@@ -38,6 +38,12 @@ type portState struct {
 	deadline time.Time
 	// exclusive: configure set TIOCEXCL, which close clears again.
 	exclusive bool
+	// marked: parity is on, so the line discipline marks a byte received
+	// with a parity or framing error (PARMRK) and read decodes the marks.
+	marked bool
+	// rmu serialises marked reads and guards the decode state below.
+	rmu sync.Mutex
+	dec parityDecoder
 }
 
 // clampMillis converts a non-negative millisecond count to a time.Duration,
@@ -127,7 +133,7 @@ func resolvePort(fn string, args []Value) (*portState, error) {
 	defer portsMu.Unlock()
 	p, ok := ports[id]
 	if !ok {
-		return nil, fmt.Errorf("%s: serial.Port id %d is not open (already closed, or never opened)", fn, id)
+		return nil, interpreter.KindedError("closed", fmt.Sprintf("%s: serial.Port id %d is not open (already closed, or never opened)", fn, id))
 	}
 	return p, nil
 }
@@ -211,10 +217,10 @@ func makeRaw(t *unix.Termios, c lineConfig) {
 	switch c.parity {
 	case "even":
 		t.Cflag |= unix.PARENB
-		t.Iflag |= unix.INPCK
+		t.Iflag |= unix.INPCK | unix.PARMRK
 	case "odd":
 		t.Cflag |= unix.PARENB | unix.PARODD
-		t.Iflag |= unix.INPCK
+		t.Iflag |= unix.INPCK | unix.PARMRK
 	}
 	if c.stopBits == 2 {
 		t.Cflag |= unix.CSTOPB
@@ -309,7 +315,7 @@ func openPort(fn, path string, c lineConfig) (Value, error) {
 	portsMu.Lock()
 	nextID++
 	id := nextID
-	ports[id] = &portState{f: f, exclusive: !c.shared}
+	ports[id] = &portState{f: f, exclusive: !c.shared, marked: c.parity != "none"}
 	portsMu.Unlock()
 	return devio.Handle(LibraryName, "Port", id), nil
 }
@@ -404,6 +410,9 @@ func readFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	if p.marked {
+		return readMarked(ctx, p, sz)
+	}
 	// A tty read returns at most its line-discipline buffer (4 KiB).
 	buf := make([]byte, min(sz, 64<<10))
 	stop := watchCancel(ctx, p)
@@ -426,7 +435,7 @@ func readFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.BytesVal(buf[:got]), nil
 }
 
-// serial.write(port, data) -> int (bytes written). A write deadline
+// serial.write(port, data) -> null; every byte is written or it throws. A write deadline
 // (serial.setWriteDeadline) that passes makes it throw kind "timeout"; a
 // hung-up port, kind "closed".
 func writeFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
@@ -441,14 +450,14 @@ func writeFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	wrote, werr := p.f.Write(data)
+	_, werr := p.f.Write(data)
 	if werr != nil && hungUp(werr) {
 		return interpreter.Null(), interpreter.RaiseError("closed", "serial.write: port hung up (device unplugged or the other end closed)", ctx.File, ctx.Line, ctx.Col)
 	}
 	if werr != nil {
 		return interpreter.Null(), failure(ctx, "serial.write", "write", werr)
 	}
-	return interpreter.IntVal(int64(wrote)), nil
+	return interpreter.Null(), nil
 }
 
 // applyDeadline is the body of serial.setReadDeadline / setWriteDeadline: a
@@ -516,7 +525,7 @@ func flushFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.Null(), nil
 }
 
-// serial.close(port) -> null.
+// serial.close(port) -> null. A second close of the same port does nothing.
 func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err := devio.WantArgs("serial.close", args, 1); err != nil {
 		return interpreter.Null(), err
@@ -529,7 +538,7 @@ func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	p, ok := ports[id]
 	if !ok {
 		portsMu.Unlock()
-		return interpreter.Null(), fmt.Errorf("serial.close: serial.Port id %d is not open (already closed?)", id)
+		return interpreter.Null(), nil
 	}
 	delete(ports, id)
 	portsMu.Unlock()

@@ -9,9 +9,10 @@
 //
 // Surface: `term.makeRaw(stream)` -> `term.State` and `term.restore(state)`
 // (enter / leave raw mode); `term.size(stream)` -> `term.Size{rows, cols}`;
-// `term.readByte()` -> int (one raw byte from stdin, -1 at end of input); and
-// `term.readByteTimeout(ms)` -> int (the same, or -2 when ms pass first - what
-// tells a lone Escape from the start of an escape sequence).
+// `term.readByte()` -> int (one raw byte from stdin; kind "closed" at end of
+// input); and `term.readByteTimeout(ms)` -> int (the same, or kind "timeout"
+// when ms pass first - what tells a lone Escape from the start of an escape
+// sequence).
 //
 // Build-tag split like `net` / `os`: the default `jennifer` binary ships the
 // real implementation (termlib_std.go, over golang.org/x/term - already a

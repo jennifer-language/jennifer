@@ -58,7 +58,7 @@ func makeChan(t *testing.T, in *interpreter.Interpreter, capacity int64) interpr
 
 func TestInstallRegistersEveryBuiltin(t *testing.T) {
 	in := newLib(t)
-	for _, name := range []string{"make", "send", "recv", "recvTimeout", "close", "select", "len", "capacity"} {
+	for _, name := range []string{"make", "send", "recv", "recvTimeout", "close", "select", "selectTimeout", "len", "capacity"} {
 		if in.LookupNamespacedBuiltin("channel", name) == nil {
 			t.Errorf("channel.%s is not registered by Install", name)
 		}
@@ -159,7 +159,7 @@ func TestCloseAndDoubleClose(t *testing.T) {
 	in := newLib(t)
 	ch := makeChan(t, in, 0)
 	mustInvoke(t, in, "close", ch)
-	wantErr(t, in, "close", "already closed", ch)
+	mustInvoke(t, in, "close", ch) // a second close does nothing (M29.46)
 }
 
 func TestLenTracksBuffer(t *testing.T) {

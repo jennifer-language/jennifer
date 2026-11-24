@@ -55,6 +55,9 @@ func TestOpenFileSamePathSharesStore(t *testing.T) {
 	call(t, r.setFn, a, str("x"), str("1"), iv(0))
 	call(t, r.setFn, b, str("y"), str("2"), iv(0))
 	call(t, r.closeFn, a)
+	// M29.46: a second close of one handle does nothing; it must not drop the
+	// other handle's reference to the shared store.
+	call(t, r.closeFn, a)
 	if got := call(t, r.getFn, b, str("x")); got.Str != "1" {
 		t.Errorf("get x via b = %q, want 1", got.Str)
 	}
@@ -66,7 +69,16 @@ func TestOpenFileSamePathSharesStore(t *testing.T) {
 			t.Errorf("reopened get %s = %q, want %q", k, got.Str, want)
 		}
 	}
-	if _, err := r.setFn(ctx, []interpreter.Value{b, str("z"), str("3"), iv(0)}); err == nil {
-		t.Error("set after every handle closed: want a closed-store error")
+	if _, err := r.setFn(ctx, []interpreter.Value{b, str("z"), str("3"), iv(0)}); closedKind(err) != "closed" {
+		t.Errorf("set after every handle closed: want kind closed, got %v", err)
 	}
+	if _, err := r.getFn(ctx, []interpreter.Value{a, str("x")}); closedKind(err) != "closed" {
+		t.Errorf("get on a closed handle: want kind closed, got %v", err)
+	}
+}
+
+// closedKind reports the kind a catch would see for err.
+func closedKind(err error) string {
+	kind, _, _, _, _ := interpreter.ClassifyError(err)
+	return kind
 }

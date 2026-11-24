@@ -60,8 +60,9 @@ type store struct {
 	path   string
 	writes int // mutations since the last active-expiry sweep
 	// key is the canonical path an openFile store is registered under in
-	// registry.paths, and refs counts the openFile handles sharing it; both
-	// are guarded by registry.mu.
+	// registry.paths, and refs counts the open handles sharing it (each
+	// openFile of one path gets its own handle id, so a second close of one
+	// handle cannot drop another's reference); both are guarded by registry.mu.
 	key  string
 	refs int
 	// onDisk is what this store last read from or wrote to path: whether the
@@ -275,7 +276,7 @@ func parseFile(path string, data []byte) (map[string]entry, error) {
 type registry struct {
 	mu     sync.Mutex
 	stores map[int64]*store
-	paths  map[string]int64 // canonical openFile path -> handle id; made on first openFile
+	paths  map[string]*store // canonical openFile path -> its store; made on first openFile
 	nextID int64
 }
 
@@ -369,7 +370,7 @@ func (r *registry) resolve(fnName string, v interpreter.Value) (*store, error) {
 	s, ok := r.stores[id]
 	r.mu.Unlock()
 	if !ok {
-		return nil, fmt.Errorf("%s: kv.Store is closed or invalid", fnName)
+		return nil, interpreter.KindedError("closed", fmt.Sprintf("%s: kv.Store is closed or invalid", fnName))
 	}
 	return s, nil
 }
@@ -471,21 +472,24 @@ func (r *registry) openFileFn(_ interpreter.BuiltinCtx, args []interpreter.Value
 	// cannot both load and register separate stores.
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if id, ok := r.paths[key]; ok {
-		r.stores[id].refs++
-		return makeStore(id), nil
+	if s, ok := r.paths[key]; ok {
+		s.refs++
+		r.nextID++
+		r.stores[r.nextID] = s
+		return makeStore(r.nextID), nil
 	}
 	data, version, lerr := loadFile(path)
 	if lerr != nil {
 		return interpreter.Null(), fmt.Errorf("kv.openFile: %w", lerr)
 	}
 	if r.paths == nil {
-		r.paths = map[string]int64{}
+		r.paths = map[string]*store{}
 	}
 	r.nextID++
 	id := r.nextID
-	r.stores[id] = &store{data: data, path: path, key: key, refs: 1, onDisk: version}
-	r.paths[key] = id
+	s := &store{data: data, path: path, key: key, refs: 1, onDisk: version}
+	r.stores[id] = s
+	r.paths[key] = s
 	return makeStore(id), nil
 }
 
@@ -768,8 +772,10 @@ func (r *registry) touchFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (
 }
 
 // incrFn implements `kv.incr(store, key, delta) -> int`: atomically add delta to
-// the numeric value at key and return the new value, or -1 when the key is absent
-// (it is not created - mirroring memcache). `delta` is signed, so a negative
+// the numeric value at key and return the new value. An absent (or expired) key
+// starts at 0 and is created without expiry, as Redis's INCR, so a counter needs
+// no `has` check and two tasks cannot race between check and increment (M29.38).
+// `delta` is signed, so a negative
 // delta decrements (there is no separate `decr` - one signed verb). Unlike
 // memcached's DECR it does NOT floor at 0; a counter may go negative. A
 // non-numeric stored value errors.
@@ -794,7 +800,7 @@ func (r *registry) incrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 	defer s.mu.Unlock()
 	e, ok := live(s, key, now)
 	if !ok {
-		return interpreter.IntVal(-1), nil
+		e = entry{value: "0"}
 	}
 	if e.obj != nil {
 		return interpreter.Null(), fmt.Errorf("kv.incr: value at %q is a %s, not a number", key, objectType(*e.obj))
@@ -818,7 +824,7 @@ func (r *registry) incrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 }
 
 // closeFn implements `kv.close(store)`: drop the store and free its handle.
-// Idempotent (closing an already-closed store is a no-op).
+// Idempotent (closing an already-closed handle is a no-op, M29.46).
 func (r *registry) closeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("kv.close expects 1 argument (store), got %d", len(args))
@@ -830,13 +836,10 @@ func (r *registry) closeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (
 		if f.Name == "id" && f.Value.Kind == interpreter.KindInt {
 			r.mu.Lock()
 			if s, ok := r.stores[f.Value.Int]; ok {
-				if s.refs > 1 {
-					s.refs--
-				} else {
-					delete(r.stores, f.Value.Int)
-					if s.key != "" {
-						delete(r.paths, s.key)
-					}
+				delete(r.stores, f.Value.Int)
+				s.refs--
+				if s.refs <= 0 && s.key != "" {
+					delete(r.paths, s.key)
 				}
 			}
 			r.mu.Unlock()

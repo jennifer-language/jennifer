@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 // Package spilib implements Jennifer's `spi` library: SPI devices
-// (`/dev/spidev0.0`, ...). Open a device, set mode / speed, then `transfer`
+// (`/dev/spidev0.0`, ...). Open a device with its mode / speed / word size, then `transfer`
 // bytes full-duplex (write and read happen together over one exchange), the
 // `SPI_IOC_MESSAGE` ioctl that plain `fs` cannot issue.
 //
@@ -27,7 +27,15 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespacedStruct(LibraryName, "Device", []parser.StructField{
 		{Name: "id", Type: parser.PrimitiveType(parser.TypeInt)},
 	})
+	// Configuration for openWith; open() is openWith with every field zero
+	// (mode 0, 500 kHz, 8 bits per word).
+	in.RegisterNamespacedStruct(LibraryName, "Options", []parser.StructField{
+		{Name: "mode", Type: parser.PrimitiveType(parser.TypeInt)},
+		{Name: "speedHz", Type: parser.PrimitiveType(parser.TypeInt)},
+		{Name: "bitsPerWord", Type: parser.PrimitiveType(parser.TypeInt)},
+	})
 	in.RegisterNamespaced(LibraryName, "open", openFn)
+	in.RegisterNamespaced(LibraryName, "openWith", openWithFn)
 	in.RegisterNamespaced(LibraryName, "configure", configureFn)
 	in.RegisterNamespaced(LibraryName, "transfer", transferFn)
 	in.RegisterNamespaced(LibraryName, "close", closeFn)

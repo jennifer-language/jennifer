@@ -56,8 +56,9 @@ stays an ordinary identifier everywhere else (a field or parameter named
 | `channel.send(ch, value)` | `null` | Checks `value` against the channel's `T`, deep-copies it in, then sends (blocking per capacity). Wrong type is a catchable error; a send on a closed channel is `Error{kind: "closed"}`. |
 | `channel.recv(ch)` | `T` | Blocks and returns the next value. On a closed **and** drained channel it throws a catchable `Error{kind: "closed"}` ("receive on a closed channel"). |
 | `channel.recvTimeout(ch, ms)` | `T` | `recv` waiting at most `ms` milliseconds: the next value, or a catchable `Error{kind: "timeout"}`. A timeout takes nothing (a value sent later stays for the next receive); `0` polls. Closed and drained throws as `recv`; `task.cancel` wakes it. |
-| `channel.close(ch)` | `null` | Closes the channel so a draining receiver sees the end. Double-close is a catchable error. |
+| `channel.close(ch)` | `null` | Closes the channel so a draining receiver sees the end. A second `close` does nothing. |
 | `channel.select(chs)` | `T` | Fan-in: the next value from any of the channels; drops closed ones and throws `Error{kind: "closed"}` when all are closed and drained. |
+| `channel.selectTimeout(chs, ms)` | `T` | `select` waiting at most `ms` milliseconds: the next value, or a catchable `Error{kind: "timeout"}`. A timeout takes nothing; `0` polls. All closed and drained throws as `select`; `task.cancel` wakes it. |
 | `channel.len(ch)` | `int` | Number of values currently buffered. |
 | `channel.capacity(ch)` | `int` | The channel's buffer capacity (0 = unbuffered). |
 
@@ -128,6 +129,9 @@ while ($open) {
 }
 ```
 
+`channel.selectTimeout(chs, ms)` bounds the wait: `"timeout"` when no channel
+has a value within `ms` (`0` polls), with nothing taken.
+
 `select` returns the received **value**, not an index of which channel fired (a
 channel receive is destructive and Jennifer has no multiple-return, so an
 index-plus-value form would need a different shape). It is the merge / fan-in
@@ -139,11 +143,11 @@ Channel operations block like Go's: an unbuffered `send` waits for a receiver, a
 `recv` waits for a value. A channel with no counterpart (an unbuffered `send`
 nothing will receive, a `recv` on a channel nothing will send to or close)
 **hangs** the program, the same sharp edge as a non-terminating `spawn`;
-`recvTimeout` bounds the wait instead. It does *not* trigger Go's "all goroutines asleep" deadlock abort: the
+`recvTimeout` / `selectTimeout` bound the wait instead. It does *not* trigger Go's "all goroutines asleep" deadlock abort: the
 interpreter keeps a signal-handler goroutine alive (for `SIGUSR1` diagnostics), so
 the runtime never sees every goroutine blocked, and the program waits until it is
 killed rather than aborting. A spawn body blocked in `channel.send` / `recv` /
-`select` wakes on [`task.cancel`](task.md#cancellation): the call raises "task
+`select` (or a timeout form) wakes on [`task.cancel`](task.md#cancellation): the call raises "task
 cancelled". `channel.close` also unblocks waiters: a parked `send` raises "send on
 a closed channel", a drained `recv` raises "receive on a closed channel" (both
 kind `"closed"`).
@@ -155,8 +159,18 @@ kind `"closed"`).
 | Producer / consumer | One spawn sends, the main goroutine drains until close (the opening example). |
 | Receive with a deadline | `channel.recvTimeout($ch, 500)` in a `try`, with `catch (e) { if ($e.kind != "timeout") { throw $e; } ... }` for the idle case. No need to spawn a `recv` task, `task.waitTimeout`, then `task.cancel` + `task.wait` to rescue a value that raced the cancel. |
 | Fan-out (worker pool) | Several spawned workers `recv` from one job channel; closing it signals shutdown, and each worker's `recv` then ends. |
-| Fan-in | Several spawned producers `send` into one channel (or `channel.select` over several channels) that one consumer drains. |
+| Fan-in | Several spawned producers `send` into one channel (or `channel.select` over several channels) that one consumer drains; `channel.selectTimeout` for one with a deadline. |
 | Pipeline | Stage N reads its input channel and sends into stage N+1's; each stage closes its output when its input drains. |
+
+## Errors
+
+| Kind | Thrown by | When |
+| ---- | --------- | ---- |
+| `"closed"` | `send`, `recv`, `recvTimeout`, `select`, `selectTimeout` | A send on a closed channel; a receive from a closed, drained channel (every channel, for the select forms). |
+| `"timeout"` | `recvTimeout`, `selectTimeout` | No value within `ms`; nothing is taken. |
+| `"cancelled"` | every blocking call | `task.cancel` of the spawn blocked in it. |
+| `"limit"` | `make` | A capacity above the cap. |
+| `"runtime"` | every call | A wrong argument or element type, an empty list for the select forms, `ms` negative or above 9,223,372,036,854 (the largest a duration holds). |
 
 ## See also
 

@@ -11,6 +11,7 @@ recv(channel of any) any
 recvTimeout(channel of any, int) any
 close(channel of any) null
 select(list of channel of any) any
+selectTimeout(list of channel of any, int) any
 len(channel of any) int
 capacity(channel of any) int
 `)

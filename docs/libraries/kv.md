@@ -35,10 +35,10 @@ io.printf("%s\n", kv.get($store, "greeting"));
 | `kv.keys(store[, prefix])` | `list of string` | the unexpired keys, sorted; only those starting with `prefix` when given. A snapshot: sweep a store whose keys you no longer track (a counter keyed by a vanished owner). O(n) in the store's size |
 | `kv.delete(store, key)` | `bool` | remove the key; whether it existed |
 | `kv.touch(store, key, ttl)` | `bool` | re-arm the key's expiry; whether it existed |
-| `kv.incr(store, key, delta)` | `int` | add `delta` (signed: **negative decrements**, no separate `decr`) to the numeric value; the new value, or `-1` when the key is absent (it is **not** created) |
+| `kv.incr(store, key, delta)` | `int` | add `delta` (signed: **negative decrements**, no separate `decr`) to the numeric value and return the new value; an absent or expired key starts at 0 and is created without expiry |
 | `kv.setValue(store, key, value, ttl)` | | store an **opaque library value** (`json.Value`, `toml.Value`, `yaml.Value`, `xml.Value`, ...), shared, not copied; in-memory stores only (see [Values](#values-shared-parsed-data)) |
 | `kv.getValue(store, key)` | the stored value | the value `setValue` stored, shared with every other reader; an error when absent / expired (check `kv.has` first) |
-| `kv.close(store)` | | drop the store and free its handle |
+| `kv.close(store)` | | drop the handle; the store goes when its last handle is closed. A second `close` does nothing |
 
 ## Semantics
 
@@ -55,11 +55,14 @@ io.printf("%s\n", kv.get($store, "greeting"));
   unbounded working set**, use `memcache` / `redis` (a server-side `maxmemory`
   eviction policy) via the [`kvstore`](../modules/kvstore.md) selector; `close`
   frees the whole store.
-- **`incr` mirrors `memcache`.** It does not create the key (returns `-1` when
-  absent) and errors on a non-numeric value, so it composes into the same
-  increment-then-add window pattern the distributed backends use. `delta` is
-  **signed**: `kv.incr($s, $k, -1)` decrements. Unlike memcached's `DECR` it does **not** floor at
-  0; clamp yourself if you need a non-negative counter.
+- **`incr` creates an absent key at 0**, as Redis's `INCR`: `kv.incr($s, "n", 5)`
+  on an absent key stores and returns 5, so a counter needs no `has` check and
+  two tasks cannot race between a check and the increment. The created key has
+  no expiry; for a counter with a TTL, `kv.add($s, $k, "0", ttl)` first (a
+  no-op when the key exists), then `incr`, which keeps the expiry. A
+  non-integer value throws. `delta` is **signed**: `kv.incr($s, $k, -1)`
+  decrements, and -1 is an ordinary count. It does **not** floor at 0; clamp
+  yourself if you need a non-negative counter.
 - **Handles are shared, values are copies.** The `kv.Store` handle shares one
   backing map (across value-copies, `spawn`, and an `import`ed module boundary);
   the string values it stores are ordinary copies, and an opaque value stored
@@ -146,6 +149,7 @@ kv.setValue($cache, "registry", json.set($doc, "/updated", json.decode("true")),
 | `"kv"` | a `kv.openFile` file that is not a kv store or is damaged (`kv.openFile: /dir/x.kv:3: malformed entry (want "key value expiry")`, `kv.openFile: /dir/x.kv: the last line is not terminated (a truncated write?)`); the file is left as it is |
 | `"kv"` | a mutation of a `kv.openFile` store whose file another writer changed, deleted or created since this store last read or wrote it (`kv.set: /dir/x.kv changed since this store last read or wrote it (another writer); ...`); nothing is written |
 | `"timeout"` | a flush waited 15 s for another writer's lock (`<path>.lock`) |
+| `"closed"` | any call but `close` on a closed handle (`kv.get: kv.Store is closed or invalid`) |
 | `"runtime"` | everything else: misuse (below) and a file that cannot be read or written |
 
 ### Messages
@@ -156,12 +160,11 @@ separate keys) rather than telling them apart by the message:
 | Call | Raises `"runtime"` when |
 | ---- | ----------------------- |
 | `kv.set` / `add` / `setValue` / `touch` | the `ttl` is negative (`kv.set: ttl must be >= 0 (0 = no expiry), got -1`) |
-| `kv.incr` | the value is not an integer (`kv.incr: value at "k" is not a number`), the sum overflows `int64`, or the key holds a `setValue` value. An absent key is no error: `-1` |
+| `kv.incr` | the value is not an integer (`kv.incr: value at "k" is not a number`), the sum overflows `int64`, or the key holds a `setValue` value. An absent key is no error: it starts at 0 |
 | `kv.get` | the key holds a `setValue` value (an absent key is no error: `""`) |
 | `kv.getValue` | the key is absent or expired, or holds a string |
 | `kv.setValue` | the value is no opaque library value (a string, list, map or struct), or the store is a `kv.openFile` store |
 | any mutation of a `kv.openFile` store | the flush fails (`kv.set: open /dir/x.kv.tmp...: no such file or directory`); the store is left unchanged |
-| any call but `close` | the store is closed (`kv.get: kv.Store is closed or invalid`) |
 
 ```jennifer
 use io;

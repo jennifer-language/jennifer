@@ -34,4 +34,9 @@ serveDir(httpd.Request, string) null
 serveFileEtag(httpd.Request, string) null
 serveDirEtag(httpd.Request, string) null
 `)
+	// M29.48: certificate fields and the etag switch in httpd.Options.
+	deprecate("httpd", "listenTLS", "`httpd.listenWith(addr, httpd.Options{certPem: ..., keyPem: ...})`", "0.29.0")
+	deprecate("httpd", "listenTLSWith", "`httpd.listenWith` with `certPem` / `keyPem` in its `httpd.Options`", "0.29.0")
+	deprecate("httpd", "serveFileEtag", "`httpd.serveFile` on a server opened with `httpd.Options{etag: true}`", "0.29.0")
+	deprecate("httpd", "serveDirEtag", "`httpd.serveDir` on a server opened with `httpd.Options{etag: true}`", "0.29.0")
 }

@@ -5,8 +5,7 @@
 
 // Stub of the `gpio` library for non-Linux hosts and the TinyGo `jennifer-tiny`
 // build: the GPIO character device is a Linux `/dev` + ioctl feature those
-// builds do not carry. (The sysfs-backed `gpio` MODULE is the portable default;
-// this ioctl library lands only where sysfs GPIO is unavailable.)
+// builds do not carry.
 
 package gpiolib
 
@@ -17,12 +16,14 @@ import (
 )
 
 func unavailable(fn string) (Value, error) {
-	return interpreter.Null(), fmt.Errorf("%s: the gpiochip character device is Linux-only; use the default `jennifer` binary on Linux (or the sysfs `gpio` module)", fn)
+	return interpreter.Null(), fmt.Errorf("%s: the gpiochip character device is Linux-only; use the default `jennifer` binary on Linux", fn)
 }
 
 // ResetForTest is a no-op where no state exists.
 func ResetForTest() {}
 
+func openFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error)  { return unavailable("gpio.open") }
+func closeFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) { return unavailable("gpio.close") }
 func chipFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error)  { return unavailable("gpio.chip") }
 func setupFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) { return unavailable("gpio.setup") }
 func readFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error)  { return unavailable("gpio.read") }

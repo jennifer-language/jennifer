@@ -10,7 +10,8 @@
 // atomics, are the coordination primitive: shared locks would violate value
 // semantics and stay rejected.
 //
-// Surface: make / send / recv / close, plus a fan-in select and len / capacity.
+// Surface: make / send / recv / close, plus a fan-in select, the bounded
+// recvTimeout / selectTimeout, and len / capacity.
 //
 // The Go package is named channellib so it doesn't collide with the `channel`
 // type keyword if anyone imports it by short name.
@@ -39,6 +40,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "recvTimeout", recvTimeoutFn)
 	in.RegisterNamespaced(LibraryName, "close", closeFn)
 	in.RegisterNamespaced(LibraryName, "select", selectFn)
+	in.RegisterNamespaced(LibraryName, "selectTimeout", selectTimeoutFn)
 	in.RegisterNamespaced(LibraryName, "len", lenFn)
 	in.RegisterNamespaced(LibraryName, "capacity", capacityFn)
 }
@@ -150,6 +152,18 @@ func closedErr(msg string) error { return interpreter.KindedError("closed", msg)
 // maxTimeoutMillis is the largest ms a time.Duration holds.
 const maxTimeoutMillis = int64(math.MaxInt64) / int64(time.Millisecond)
 
+// timeoutMillis reads an xTimeout's ms: an int from 0 (poll) to
+// maxTimeoutMillis; anything else is a "runtime" error.
+func timeoutMillis(fn string, v interpreter.Value) (int64, error) {
+	if v.Kind != interpreter.KindInt {
+		return 0, fmt.Errorf("%s: ms must be int, got %s", fn, v.Kind)
+	}
+	if v.Int < 0 || v.Int > maxTimeoutMillis {
+		return 0, fmt.Errorf("%s: ms must be 0 to %d, got %d", fn, maxTimeoutMillis, v.Int)
+	}
+	return v.Int, nil
+}
+
 // recvTimeoutFn: channel.recvTimeout(ch, ms) -> T. channel.recv bounded by a
 // millisecond deadline: the next value if one arrives within ms, else a
 // catchable Error{kind: "timeout"}. No value is taken on a timeout (one that
@@ -164,12 +178,9 @@ func recvTimeoutFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interp
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if args[1].Kind != interpreter.KindInt {
-		return interpreter.Null(), fmt.Errorf("channel.recvTimeout: ms must be int, got %s", args[1].Kind)
-	}
-	ms := args[1].Int
-	if ms < 0 || ms > maxTimeoutMillis {
-		return interpreter.Null(), fmt.Errorf("channel.recvTimeout: ms must be 0 to %d, got %d", maxTimeoutMillis, ms)
+	ms, err := timeoutMillis("channel.recvTimeout", args[1])
+	if err != nil {
+		return interpreter.Null(), err
 	}
 	timer := time.NewTimer(time.Duration(ms) * time.Millisecond)
 	defer timer.Stop()
@@ -187,9 +198,9 @@ func recvTimeoutFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interp
 }
 
 // closeFn: channel.close(ch) -> null. Closes the channel so a draining receiver
-// sees the end. Closing an already-closed channel is a catchable error (not a Go
-// panic). After close, further sends are catchable errors; buffered values still
-// receive until drained.
+// sees the end. Closing an already-closed channel does nothing (M29.46). After
+// close, further sends throw kind "closed"; buffered values still receive until
+// drained.
 func closeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("channel.close expects 1 argument (channel), got %d", len(args))
@@ -198,9 +209,7 @@ func closeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if !state.CloseOnce() {
-		return interpreter.Null(), fmt.Errorf("channel.close: channel is already closed")
-	}
+	state.CloseOnce()
 	return interpreter.Null(), nil
 }
 
@@ -215,21 +224,11 @@ func selectFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("channel.select expects 1 argument (list of channel), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindList {
-		return interpreter.Null(), fmt.Errorf("channel.select: argument must be a list of channel, got %s", args[0].Kind)
+	states, err := selectList("channel.select", args[0])
+	if err != nil {
+		return interpreter.Null(), err
 	}
-	states := make([]*interpreter.ChannelState, 0, len(args[0].List))
-	for i, e := range args[0].List {
-		s, err := extractChannel(fmt.Sprintf("channel.select: element %d", i), e)
-		if err != nil {
-			return interpreter.Null(), err
-		}
-		states = append(states, s)
-	}
-	if len(states) == 0 {
-		return interpreter.Null(), fmt.Errorf("channel.select: the list is empty (no channels to select on)")
-	}
-	v, ok, err := selectRecv(states, ctx.Cancel.CancelSignal())
+	v, ok, _, err := selectRecv(states, ctx.Cancel.CancelSignal(), nil)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -237,6 +236,57 @@ func selectFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		return v, nil
 	}
 	return interpreter.Null(), closedErr("channel.select: all channels are closed")
+}
+
+// selectList reads select's list-of-channel argument (non-empty).
+func selectList(fn string, v interpreter.Value) ([]*interpreter.ChannelState, error) {
+	if v.Kind != interpreter.KindList {
+		return nil, fmt.Errorf("%s: argument must be a list of channel, got %s", fn, v.Kind)
+	}
+	states := make([]*interpreter.ChannelState, 0, len(v.List))
+	for i, e := range v.List {
+		s, err := extractChannel(fmt.Sprintf("%s: element %d", fn, i), e)
+		if err != nil {
+			return nil, err
+		}
+		states = append(states, s)
+	}
+	if len(states) == 0 {
+		return nil, fmt.Errorf("%s: the list is empty (no channels to select on)", fn)
+	}
+	return states, nil
+}
+
+// selectTimeoutFn: channel.selectTimeout(channels, ms) -> T. channel.select
+// bounded by a millisecond deadline: the next value from whichever channel is
+// ready first, else a catchable Error{kind: "timeout"}. Nothing is taken on a
+// timeout. ms 0 polls. Every channel closed and drained throws as select does;
+// task.cancel wakes it like select.
+func selectTimeoutFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("channel.selectTimeout expects 2 arguments (list of channel, ms), got %d", len(args))
+	}
+	states, err := selectList("channel.selectTimeout", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	ms, err := timeoutMillis("channel.selectTimeout", args[1])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	timer := time.NewTimer(time.Duration(ms) * time.Millisecond)
+	defer timer.Stop()
+	v, ok, timedOut, err := selectRecv(states, ctx.Cancel.CancelSignal(), timer.C)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if timedOut {
+		return interpreter.Null(), interpreter.KindedError("timeout", fmt.Sprintf("channel.selectTimeout: timed out after %d ms", ms))
+	}
+	if ok {
+		return v, nil
+	}
+	return interpreter.Null(), closedErr("channel.selectTimeout: all channels are closed")
 }
 
 // selectStart rotates the channel a select polls first, so a channel that always
@@ -251,8 +301,11 @@ var selectStart atomic.Uint32
 // missed then pokes the waker (see interpreter/waitset.go). A sender that has
 // poked but not yet parked on an unbuffered channel is not receivable yet;
 // HasPendingSend covers that brief window with a short retry instead of a sleep
-// on the waker. cancel (nil never fires) aborts the wait with ErrTaskCancelled.
-func selectRecv(states []*interpreter.ChannelState, cancel <-chan struct{}) (interpreter.Value, bool, error) {
+// on the waker. cancel (nil never fires) aborts the wait with ErrTaskCancelled;
+// timeout (nil never fires) ends it with timedOut, having taken nothing. Every
+// channel is polled once before the timeout is looked at, so a 0 ms timeout
+// still takes a value that is ready.
+func selectRecv(states []*interpreter.ChannelState, cancel <-chan struct{}, timeout <-chan time.Time) (v interpreter.Value, ok, timedOut bool, err error) {
 	waker := interpreter.NewWaker()
 	for _, s := range states {
 		s.Subscribe(waker)
@@ -275,7 +328,7 @@ func selectRecv(states []*interpreter.ChannelState, cancel <-chan struct{}) (int
 				continue
 			}
 			if ok {
-				return v, true, nil
+				return v, true, false, nil
 			}
 			// Closed and drained: drop it and rescan the rest.
 			live = append(live[:i], live[i+1:]...)
@@ -294,7 +347,9 @@ func selectRecv(states []*interpreter.ChannelState, cancel <-chan struct{}) (int
 			// longer than a few yields (it is on another thread).
 			select {
 			case <-cancel:
-				return interpreter.Value{}, false, interpreter.ErrTaskCancelled()
+				return interpreter.Value{}, false, false, interpreter.ErrTaskCancelled()
+			case <-timeout:
+				return interpreter.Value{}, false, true, nil
 			default:
 			}
 			spins++
@@ -309,10 +364,12 @@ func selectRecv(states []*interpreter.ChannelState, cancel <-chan struct{}) (int
 		select {
 		case <-waker:
 		case <-cancel:
-			return interpreter.Value{}, false, interpreter.ErrTaskCancelled()
+			return interpreter.Value{}, false, false, interpreter.ErrTaskCancelled()
+		case <-timeout:
+			return interpreter.Value{}, false, true, nil
 		}
 	}
-	return interpreter.Value{}, false, nil
+	return interpreter.Value{}, false, false, nil
 }
 
 // lenFn: channel.len(ch) -> int. The number of values currently buffered (Go

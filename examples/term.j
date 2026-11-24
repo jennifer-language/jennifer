@@ -28,11 +28,18 @@ if (not os.isTerminal("stdin")) {
     def state as term.State init term.makeRaw("stdin");
     def running as bool init true;
     while ($running) {
-        def b as int init term.readByte();
-        if ($b == -1 or $b == 113) { # -1 = end of input, 113 = 'q'
-            $running = false;
-        } else {
-            io.printf("byte %d\r\n", $b);
+        try {
+            def b as int init term.readByte();
+            if ($b == 113) { # 'q'
+                $running = false;
+            } else {
+                io.printf("byte %d\r\n", $b);
+            }
+        } catch (e) {
+            if ($e.kind != "closed") {
+                throw $e;
+            }
+            $running = false; # end of input
         }
     }
     term.restore($state);

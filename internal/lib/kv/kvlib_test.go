@@ -39,7 +39,7 @@ func call(t *testing.T, fn func(interpreter.BuiltinCtx, []interpreter.Value) (in
 }
 
 // TestSetGetIncr covers the common path: store, read, increment, add-if-absent,
-// touch, delete, and the memcache-style -1 from incr on a missing key.
+// touch, delete, and incr creating a missing key at 0.
 func TestSetGetIncr(t *testing.T) {
 	r := &registry{stores: map[int64]*store{}}
 	st := mustOpen(t, r)
@@ -79,8 +79,18 @@ func TestSetGetIncr(t *testing.T) {
 	if got := call(t, r.getFn, st, str("missing")); got.Str != "" {
 		t.Errorf("get missing = %q, want empty", got.Str)
 	}
-	if got := call(t, r.incrFn, st, str("missing"), iv(1)); got.Int != -1 {
-		t.Errorf("incr missing = %d, want -1", got.Int)
+	// M29.38: an absent key starts at 0 and is created; -1 is an ordinary count.
+	if got := call(t, r.incrFn, st, str("missing"), iv(5)); got.Int != 5 {
+		t.Errorf("incr missing by 5 = %d, want 5", got.Int)
+	}
+	if got := call(t, r.getFn, st, str("missing")); got.Str != "5" {
+		t.Errorf("get after incr of an absent key = %q, want 5", got.Str)
+	}
+	if got := call(t, r.incrFn, st, str("down"), iv(-1)); got.Int != -1 {
+		t.Errorf("incr absent by -1 = %d, want -1", got.Int)
+	}
+	if got := call(t, r.incrFn, st, str("down"), iv(-1)); got.Int != -2 {
+		t.Errorf("incr -1 by -1 = %d, want -2", got.Int)
 	}
 }
 

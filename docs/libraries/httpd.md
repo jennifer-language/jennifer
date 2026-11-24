@@ -55,14 +55,14 @@ for (def i in 0..4) {
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `httpd.listen(addr)` | `httpd.Server` | Start listening. `"127.0.0.1:8080"` (TCP), `":0"` (ephemeral TCP port), or `"unix:/run/app.sock"` (a Unix domain socket). |
-| `httpd.listenWith(addr, opts)` | `httpd.Server` | Like `listen`, with per-server limits from an `httpd.Options` (see [Tuning the body / concurrency limits](#tuning-the-body--concurrency-limits)). |
-| `httpd.listenTLS(addr, cert, key)` | `httpd.Server` | HTTPS; `cert` / `key` are PEM `bytes`. HTTP/2 negotiated automatically. Takes the same addresses as `listen`, `unix:` included. |
-| `httpd.listenTLSWith(addr, cert, key, opts)` | `httpd.Server` | Like `listenTLS`, with an `httpd.Options` trailing the cert/key. |
+| `httpd.listenWith(addr, opts)` | `httpd.Server` | Like `listen`, with an `httpd.Options` (see [Tuning the body / concurrency limits](#tuning-the-body--concurrency-limits)): per-server limits, `certPem` / `keyPem` for HTTPS (PEM `bytes`, both or neither; HTTP/2 negotiated automatically, `unix:` addresses included), `etag` for the static-file verbs. |
+| `httpd.listenTLS(addr, cert, key)` | `httpd.Server` | **Deprecated**, removed in 0.29.0 (lint L301): `listenWith(addr, httpd.Options{certPem: cert, keyPem: key})`. |
+| `httpd.listenTLSWith(addr, cert, key, opts)` | `httpd.Server` | **Deprecated**, removed in 0.29.0: `listenWith` with `certPem` / `keyPem` in `opts`. Setting them in `opts` too is an error. |
 | `httpd.setMaxBufferBudget(bytes)` | `null` | Move the process-wide memory-guard ceiling (default 4 GiB) that `listenWith` enforces; raise it for a big-RAM host, lower it for a small one (floored at 10 MiB). |
 | `httpd.setMaxBufferBudgetFromRAM(fraction)` | `int` | Opt-in, cgroup-aware: set the budget to `fraction` (`0 < f <= 1`) of the detected machine limit (min of host RAM and any cgroup limit); returns the bytes it set. Errors on a host where the limit can't be determined. |
 | `httpd.address(srv)` | `string` | The actual bound address (resolve `":0"` to the chosen port). |
 | `httpd.maxInFlight(srv)` | `int` | The server's in-flight request limit (`maxInFlight`), so a serve loop can bound its own workers to match (`web.serveOn` does). |
-| `httpd.accept(srv)` | `httpd.Request` | Block for the next request. Errors once the server is shut down. |
+| `httpd.accept(srv)` | `httpd.Request` | Block for the next request. Once the server is shut down (a parked `accept` included) it throws `Error{kind: "closed"}`. |
 | `httpd.method(req)` | `string` | `"GET"`, `"POST"`, ... |
 | `httpd.path(req)` | `string` | URL path, decoded, e.g. `/users/42`. Never has a `.` or `..` segment and is always valid UTF-8: the engine answers other requests `400` itself (see below the table). |
 | `httpd.query(req, name)` | `string` | Query parameter (`""` if absent), decoded. |
@@ -77,17 +77,18 @@ for (def i in 0..4) {
 | `httpd.setHeader(req, name, value)` | `null` | Set a response header (before `respond`). An invalid name (not an RFC 9110 token) or a value with a control character (CR, LF, NUL, ...) is an error, never silently dropped or rewritten, and so is `Transfer-Encoding` (the server frames the response). |
 | `httpd.etag(req, tag)` | `bool` | Set the `ETag` validator and honour a conditional GET: answers `304` and returns `true` (stop) when the request's `If-None-Match` matches `tag` (`412` for a method other than GET / HEAD), else returns `false` (send the full body). A `tag` with a quote, space or control character is an error. |
 | `httpd.respond(req, status, body)` | `null` | Send the response; `body` is a `string` or `bytes`. `status` is a final status, `200` to `999` (a 1xx is an error). A `Content-Length` header that does not match the body is an error, except on a HEAD answer, a `204` or a `304`. |
-| `httpd.serveFile(req, path)` | `null` | Answer with a file (content type, range requests handled by `net/http`). A directory is served through its `index.html`; one without is `404` unless `dirListing` is on. |
+| `httpd.serveFile(req, path)` | `null` | Answer with a file (content type, range requests handled by `net/http`). A directory is served through its `index.html`; one without is `404` unless `dirListing` is on. With `etag` on, plus a content-hash `ETag` (see [Static files](#static-files)). |
 | `httpd.serveDir(req, root)` | `null` | Answer with the file under `root` matching the request path (neither `..` nor a symlink can escape `root`). Dotfiles, directories without an `index.html` and symlinks out of `root` are `404` (see [Static files](#static-files)). |
-| `httpd.serveFileEtag(req, path)` | `null` | Like `serveFile`, plus a content-hash `ETag` (SHA-256, cached by mtime+size) so a revalidating client gets a `304`. |
-| `httpd.serveDirEtag(req, root)` | `null` | Like `serveDir`, plus the same content-hash `ETag`. |
-| `httpd.shutdown(srv)` | `null` | Graceful drain: stop accepting, unblock parked `accept` calls, answer requests not yet accepted `503`, give accepted requests 5 s to be answered and written, then close what is left. |
+| `httpd.serveFileEtag(req, path)` | `null` | **Deprecated**, removed in 0.29.0: `serveFile` on a server opened with `httpd.Options{etag: true}`. `serveFile` with a content-hash `ETag` whatever the option. |
+| `httpd.serveDirEtag(req, root)` | `null` | **Deprecated**, removed in 0.29.0: `serveDir` on a server opened with `httpd.Options{etag: true}`. |
+| `httpd.shutdown(srv)` | `null` | Graceful drain: stop accepting, unblock parked `accept` calls, answer requests not yet accepted `503`, give accepted requests 5 s to be answered and written, then close what is left. A second `shutdown` does nothing. |
 
 Each request must be answered **exactly once**: a second `respond` /
 `serveFile` / `serveDir` on the same request, or a `setHeader` after the
-answer, is an error. A write to a request the engine already answered after the
-respond timeout fails with an error of kind `"closed"` that says so
-(`httpd.timedOut` tells it from the program's own double answer).
+answer, throws `Error{kind: "closed"}` (`request already answered`). A write to
+a request the engine already answered after the respond timeout fails with
+kind `"closed"` too, and says so (`httpd.timedOut` tells it from the program's
+own double answer).
 
 `httpd.path`, `query`, `rawQuery` and `header` return strings, so the engine
 answers **400** itself, before reading the body and before `accept` sees the
@@ -106,6 +107,10 @@ copy, but every copy refers to the same underlying server / request. That is
 what lets a copied `Server` handle inside a `spawn` worker pull from the same
 accept queue. At most 4096 servers are open at once; one more `listen` throws
 kind `"limit"` until a `shutdown` frees a slot.
+
+A call on a shut-down server (`httpd.Server id 2 is not running ...`) or on a
+finished request (`httpd.Request id 7 is not open ...`) throws
+`Error{kind: "closed"}`; `shutdown` of a shut-down server does nothing.
 
 ## Request-scoped notes
 
@@ -175,8 +180,8 @@ symlink. `serveFile` answers with the path it is given and follows its links.
 `If-Modified-Since` (Go's `http.ServeContent`), so a browser revalidates a static
 file without extra code. They do **not** add an `ETag`: an mtime is a per-file-copy
 validator, so two replicas serving identical bytes disagree. When you want a
-validator that is stable across replicas, use **`serveFileEtag` /
-`serveDirEtag`**: they behave exactly like the plain verbs but also set a
+validator that is stable across replicas, open the server with
+**`httpd.Options{etag: true}`**: `serveFile` / `serveDir` then also set a
 strong `ETag` that is the SHA-256 of the file content, so an unchanged file
 answers `304` regardless of which replica serves it. The digest is cached per
 `(path, mtime, size)`, so a hot file is hashed once, not on every hit; an edit
@@ -184,8 +189,8 @@ answers `304` regardless of which replica serves it. The digest is cached per
 the engine while it sends the response, not inside the verb, so your handler
 returns at once, and concurrent requests for the same cold file share one hash.
 The first request for a large cold file still waits for a full read before its
-bytes start; use the cached verbs when cross-replica revalidation is worth
-that, and keep the plain verbs otherwise.
+bytes start; turn `etag` on when cross-replica revalidation is worth that, and
+leave it off otherwise.
 
 ## Conditional requests (ETags)
 
@@ -219,8 +224,8 @@ while (true) {
 build id), so the engine hashes nothing on your behalf. A content hash is stable
 across replicas (unlike an mtime); a strong hash of the exact bytes is the safe
 default. `web.etag($ctx, tag)` is the framework wrapper over this same engine
-call. For **static files**, `serveFileEtag` / `serveDirEtag` (above) do this
-for you: a cached content-hash `ETag` without your handler computing anything.
+call. For **static files**, the `etag` option (above) does this for you: a
+cached content-hash `ETag` without your handler computing anything.
 
 ## Response headers and the `Server` line
 
@@ -263,7 +268,7 @@ handlers call.)
 ## Graceful shutdown
 
 `httpd.shutdown` closes the listener, wakes any workers blocked in
-`httpd.accept` (they get an error so their loops can exit), answers queued
+`httpd.accept` (they get `Error{kind: "closed"}` so their loops can exit), answers queued
 requests that no worker has accepted with `503`, and gives accepted requests 5 s
 to be answered and written before returning. A request still unanswered after
 that gets `503`, and connections still busy (a long download) are closed, so a
@@ -330,7 +335,7 @@ processes behind one `upstream {}` block.
 
 ## Tuning the body / concurrency limits
 
-`httpd.listen` / `listenTLS` open a server with two safety limits: a **10 MiB**
+`httpd.listen` opens a server with two safety limits: a **10 MiB**
 request-body cap and a **256** in-flight-request ceiling. They bound worst-case
 memory: the engine buffers each body fully into RAM before your program sees
 it, so the worst case is `maxInFlight x maxBodyBytes` (`256 x 10 MiB = 2.56 GiB`
@@ -338,8 +343,7 @@ at the defaults), held as bytes actually received rather than per slot.
 Raising the body cap also raises that ceiling; the two knobs
 split a fixed memory budget the way your traffic needs it.
 
-`httpd.listenWith(addr, opts)` (and `httpd.listenTLSWith(addr, cert, key, opts)`)
-open a server with an explicit `httpd.Options`:
+`httpd.listenWith(addr, opts)` opens a server with an explicit `httpd.Options`:
 
 | Field | Meaning |
 | ----- | ------- |
@@ -349,8 +353,10 @@ open a server with an explicit `httpd.Options`:
 | `bodyTimeoutMs as int` | How long a client may take to send its whole request body; past it the engine answers `408`. Any single read also gives up after 10 s of silence. `0` selects the default 60 s; negative is an error. A server taking only small bodies can set a few seconds. |
 | `writeTimeoutMs as int` | How long writing one response may take; past it the engine drops the connection, so a client that stops reading cannot hold an in-flight slot. `0` selects the default 5 minutes; negative is an error. A server sending large downloads to slow clients can raise it. |
 | `maxHeaderBytes as int` | Cap on the request line plus headers; past it the client gets `431`. `0` selects the default 64 KiB (well above what browsers send); at most 1 MiB (`net/http`'s own default); negative is an error. Headers are read before the body budget applies, so this is what bounds a header-only request. |
-| `dirListing as bool` | Let `serveDir` / `serveDirEtag` answer a directory without an `index.html` with a file listing. `false` (the default): `404`. |
-| `followSymlinks as bool` | Let `serveDir` / `serveDirEtag` follow a symlink to a target outside `root`. `false` (the default): `404` (see [Static files](#static-files)). |
+| `dirListing as bool` | Let `serveDir` answer a directory without an `index.html` with a file listing. `false` (the default): `404`. |
+| `followSymlinks as bool` | Let `serveDir` follow a symlink to a target outside `root`. `false` (the default): `404` (see [Static files](#static-files)). |
+| `etag as bool` | Let `serveFile` / `serveDir` send a content-hash `ETag` and answer a matching `If-None-Match` with `304` (see [Static files](#static-files)). `false` (the default): no `ETag`. |
+| `certPem as bytes`, `keyPem as bytes` | The PEM certificate (chain) and private key: the server speaks HTTPS. Set both or neither (one alone is an error); a pair that does not match is an error. |
 
 A `0` field takes that limit's default, so you can tune one and leave the others
 (as a library struct, `httpd.Options{...}` may also leave a field out; it takes
@@ -470,7 +476,7 @@ long handler can check before it starts work whose reply has nowhere to go.
 ## Scope and limits
 
 - **HTTP/1.1** over plaintext; **HTTP/2** is negotiated automatically over TLS
-  by `net/http`. `httpd.listenTLS` floors the negotiated protocol at TLS 1.2
+  by `net/http`. A TLS server floors the negotiated protocol at TLS 1.2
   (TLS 1.0 / 1.1 are deprecated by RFC 8996).
 
 - The request body is buffered with a **10 MiB cap** by default; a body over the

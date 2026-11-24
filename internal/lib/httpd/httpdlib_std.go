@@ -179,6 +179,9 @@ type serverLimits struct {
 	// followSymlinks lets serveDir follow a symlink to a target outside its
 	// root (httpd.Options.followSymlinks); off, such a target is a 404.
 	followSymlinks bool
+	// etag makes serveFile / serveDir send a content ETag and answer a
+	// matching If-None-Match with 304 (httpd.Options.etag).
+	etag bool
 }
 
 // defaultLimits are httpd.listen's limits (read at call time, so tests that
@@ -222,7 +225,7 @@ func resolveLimits(o serverOpts) (serverLimits, error) {
 	case o.maxHeader > 0:
 		maxHeader = o.maxHeader
 	}
-	return serverLimits{maxBody: maxBody, inFlight: inFlight, respondTimeout: respond, bodyTimeout: body, writeTimeout: write, maxHeader: int(maxHeader), dirListing: o.dirListing, followSymlinks: o.followSymlinks}, nil
+	return serverLimits{maxBody: maxBody, inFlight: inFlight, respondTimeout: respond, bodyTimeout: body, writeTimeout: write, maxHeader: int(maxHeader), dirListing: o.dirListing, followSymlinks: o.followSymlinks, etag: o.etag}, nil
 }
 
 // defaultMaxInFlight caps concurrent in-flight (body-buffered) requests for a
@@ -377,7 +380,7 @@ func resolveServer(fnName string, id int64) (*serverState, error) {
 		if id == 0 {
 			return nil, fmt.Errorf("%s: httpd.Server is unset (a zero value, not one httpd.listen returned)", fnName)
 		}
-		return nil, fmt.Errorf("%s: httpd.Server id %d is not running (already shut down, or never started)", fnName, id)
+		return nil, interpreter.KindedError("closed", fmt.Sprintf("%s: httpd.Server id %d is not running (already shut down, or never started)", fnName, id))
 	}
 	return st, nil
 }
@@ -410,7 +413,7 @@ func resolveReq(fnName string, id int64) (*reqState, error) {
 		if timedOut[id] {
 			return nil, lateReplyErr(fnName)
 		}
-		return nil, fmt.Errorf("%s: httpd.Request id %d is not open (already responded, or never accepted)", fnName, id)
+		return nil, interpreter.KindedError("closed", fmt.Sprintf("%s: httpd.Request id %d is not open (already responded, or never accepted)", fnName, id))
 	}
 	return rs, nil
 }
@@ -452,9 +455,9 @@ func answeredErr(fnName string, rs *reqState) error {
 	}
 	msg := "request already answered"
 	if fnName == "" {
-		return fmt.Errorf("%s", msg)
+		return interpreter.KindedError("closed", msg)
 	}
-	return fmt.Errorf("%s: %s", fnName, msg)
+	return interpreter.KindedError("closed", fnName+": "+msg)
 }
 
 // timedOutFn implements httpd.timedOut(req) -> bool: whether the engine itself
@@ -1080,8 +1083,8 @@ func listenFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return openServer("httpd.listen", addr, defaultLimits())
 }
 
-// listenWithFn is httpd.listen with an explicit httpd.Options{maxBodyBytes,
-// maxInFlight}; a 0 field selects that limit's default.
+// listenWithFn is httpd.listen with an explicit httpd.Options; a 0 field
+// selects that limit's default, and certPem + keyPem serve TLS.
 func listenWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("httpd.listenWith expects 2 arguments (address, httpd.Options), got %d", len(args))
@@ -1097,6 +1100,12 @@ func listenWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	lim, err := resolveLimits(o)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("httpd.listenWith: %v", err)
+	}
+	if (len(o.certPem) > 0) != (len(o.keyPem) > 0) {
+		return interpreter.Null(), fmt.Errorf("httpd.listenWith: set both httpd.Options.certPem and keyPem for TLS, or neither")
+	}
+	if len(o.certPem) > 0 {
+		return openServerTLS("httpd.listenWith", addr, o.certPem, o.keyPem, lim)
 	}
 	return openServer("httpd.listenWith", addr, lim)
 }
@@ -1188,6 +1197,9 @@ func listenTLSWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("httpd.listenTLSWith: %v", err)
 	}
+	if len(o.certPem) > 0 || len(o.keyPem) > 0 {
+		return interpreter.Null(), fmt.Errorf("httpd.listenTLSWith: the certificate is in the arguments; leave httpd.Options.certPem and keyPem empty (or use httpd.listenWith)")
+	}
 	return openServerTLS("httpd.listenTLSWith", addr, certPEM, keyPEM, lim)
 }
 
@@ -1253,8 +1265,20 @@ func shutdownFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	if id != 0 {
+		serversMu.Lock()
+		_, live := servers[id]
+		serversMu.Unlock()
+		if !live {
+			return interpreter.Null(), nil // a second shutdown does nothing (M29.46)
+		}
+	}
 	st, err := resolveServer("httpd.shutdown", id)
 	if err != nil {
+		// unset, or shut down by another task in between
+		if id != 0 {
+			return interpreter.Null(), nil
+		}
 		return interpreter.Null(), err
 	}
 	// Answer requests not yet accepted with 503 and wake accept() callers;
@@ -1299,7 +1323,7 @@ func acceptFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	case rs := <-st.reqs:
 		return makeRequest(rs.id), nil
 	case <-st.closing:
-		return interpreter.Null(), fmt.Errorf("httpd.accept: server has been shut down")
+		return interpreter.Null(), interpreter.KindedError("closed", "httpd.accept: server has been shut down")
 	}
 }
 
@@ -1704,7 +1728,7 @@ func serveFileFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if unlistedDir(rs, p) {
 		return answerWithStatus(rs, http.StatusNotFound, "not found")
 	}
-	return answerWithFile(rs, p)
+	return answerWithFileEtag(rs, p, rs.srv != nil && rs.srv.etag)
 }
 
 func serveDirFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
@@ -1716,7 +1740,7 @@ func serveDirFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if !ok {
 		return v, err
 	}
-	return answerWithDirFile(rs, root, full, false)
+	return answerWithDirFile(rs, root, full, rs.srv != nil && rs.srv.etag)
 }
 
 // serveDirArgs validates the (httpd.Request, root) arguments shared by serveDir
@@ -1975,16 +1999,10 @@ func answerWithStatus(rs *reqState, status int, body string) (Value, error) {
 	return interpreter.Null(), nil
 }
 
-// answerWithFile marks a request to be answered by ServeFile from the handler
-// goroutine.
-func answerWithFile(rs *reqState, p string) (Value, error) {
-	return answerWithFileEtag(rs, p, false)
-}
-
-// answerWithFileEtag is answerWithFile plus a content ETag the handler sets
-// before ServeFile (so http.ServeContent answers a matching If-None-Match with a
-// 304). The digest is computed later, by the handler goroutine; etag false
-// behaves exactly like answerWithFile.
+// answerWithFileEtag marks a request to be answered by ServeFile from the
+// handler goroutine; with etag, plus a content ETag the handler sets before
+// ServeFile (so http.ServeContent answers a matching If-None-Match with a 304).
+// The digest is computed later, by the handler goroutine.
 func answerWithFileEtag(rs *reqState, p string, etag bool) (Value, error) {
 	rs.mu.Lock()
 	if rs.responded {

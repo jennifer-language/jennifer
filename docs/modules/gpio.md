@@ -1,5 +1,21 @@
 # `gpio` - Raspberry-Pi GPIO over sysfs
 
+> **Deprecated - removed in 0.29.0.** The kernel deprecates sysfs GPIO; the
+> [`gpio` library](../libraries/gpio.md) drives the same pins over
+> `/dev/gpiochipN`. It takes a chip handle instead of a chip selection:
+>
+> | Module (sysfs) | Library (`use gpio;`) |
+> |---|---|
+> | `import "gpio.j" as gpio;` | `use gpio;` then `def chip as gpio.Chip init gpio.open("/dev/gpiochip0");` |
+> | `gpio.setup(17, gpio.OUT)` | `gpio.setup($chip, 17, gpio.OUT)` |
+> | `gpio.write(17, 1)` / `gpio.read(17)` | `gpio.write($chip, 17, 1)` / `gpio.read($chip, 17)` |
+> | `gpio.release(17)` | `gpio.release($chip, 17)`, or `gpio.close($chip)` for all of the chip's pins |
+> | `gpio.useChip(label)`, `JENNIFER_GPIO_CHIP_LABEL` | `gpio.open` of that chip's device node (`gpiodetect` lists node and label) |
+> | `gpio.GLOBAL` (global numbers) | none: a pin is always the line offset on its chip |
+>
+> Pin numbers are the same line offsets (the BCM GPIO number on a Raspberry
+> Pi); the device node of the header chip depends on the board and kernel.
+
 `import "gpio.j" as gpio;`
 
 General-purpose I/O pins on a Raspberry Pi (or any Linux single-board computer)

@@ -34,8 +34,8 @@ func TestTimedOutKeyThenReadLine(t *testing.T) {
 	r, w := io.Pipe()
 	defer w.Close()
 	ctx := interpreter.BuiltinCtx{In: r, Out: &bytes.Buffer{}}
-	if got := readTimeout(t, ctx, 20); got != -2 {
-		t.Fatalf("idle timed read = %d, want -2", got)
+	if got := readTimeout(t, ctx, 20); got != gotTimeout {
+		t.Fatalf("idle timed read = %d, want timeout", got)
 	}
 	go func() { _, _ = w.Write([]byte("hello\nZ")) }()
 	v, err := ioCall(t, "readLine", ctx)
@@ -79,8 +79,8 @@ func TestEOFReachesBothReaders(t *testing.T) {
 	ResetForTest()
 	r, w := io.Pipe()
 	ctx := interpreter.BuiltinCtx{In: r, Out: &bytes.Buffer{}}
-	if got := readTimeout(t, ctx, 10); got != -2 {
-		t.Fatalf("idle timed read = %d, want -2", got)
+	if got := readTimeout(t, ctx, 10); got != gotTimeout {
+		t.Fatalf("idle timed read = %d, want timeout", got)
 	}
 	_ = w.Close()
 	if v, err := ioCall(t, "eof", ctx); err != nil || !v.Bool {
@@ -89,18 +89,18 @@ func TestEOFReachesBothReaders(t *testing.T) {
 	if _, err := ioCall(t, "readLine", ctx); err == nil || !strings.Contains(err.Error(), "end of input") {
 		t.Errorf("io.readLine after close: %v", err)
 	}
-	if got := readTimeout(t, ctx, 2000); got != -1 {
-		t.Errorf("term timed read at EOF = %d, want -1", got)
+	if got := readTimeout(t, ctx, 2000); got != gotClosed {
+		t.Errorf("term timed read at EOF = %d, want closed", got)
 	}
-	if v, err := readByteFn(ctx, nil); err != nil || v.Int != -1 {
-		t.Errorf("term.readByte at EOF = %v, %v; want -1", v, err)
+	if got := readOne(t, ctx); got != gotClosed {
+		t.Errorf("term.readByte at EOF = %d, want closed", got)
 	}
 
 	// The other order: term sees the end first, io agrees.
 	stdinbuf.ResetForTest()
 	ctx = interpreter.BuiltinCtx{In: strings.NewReader(""), Out: &bytes.Buffer{}}
-	if v, _ := readByteFn(ctx, nil); v.Int != -1 {
-		t.Errorf("term.readByte on empty input = %d", v.Int)
+	if got := readOne(t, ctx); got != gotClosed {
+		t.Errorf("term.readByte on empty input = %d", got)
 	}
 	if v, err := ioCall(t, "readLines", ctx); err != nil || len(v.List) != 0 {
 		t.Errorf("io.readLines after term EOF = %v, %v; want []", v, err)
@@ -117,7 +117,7 @@ func TestClosedStdinReachesBothReaders(t *testing.T) {
 	defer w.Close()
 	_ = r.Close()
 	ctx := interpreter.BuiltinCtx{In: r, Out: &bytes.Buffer{}}
-	if _, err := readByteTimeoutFn(ctx, []Value{interpreter.IntVal(1000)}); err == nil || !strings.Contains(err.Error(), "closed") {
+	if _, err := readByteTimeoutFn(ctx, []Value{interpreter.IntVal(1000)}); err == nil || errKind(err) != "" || !strings.Contains(err.Error(), "closed") {
 		t.Errorf("term.readByteTimeout on closed stdin: %v", err)
 	}
 	if _, err := ioCall(t, "readLine", ctx); err == nil || !strings.Contains(err.Error(), "closed") {

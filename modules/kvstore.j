@@ -187,7 +187,7 @@ export func touch(store as Store, key as string, ttlSec as int) {
  * (at 1, with a `ttlSec`-second expiry) on the first hit. The atomic-counter-plus-TTL
  * primitive a fixed-window rate limiter is built from - portable across all three
  * backends (redis `SET NX EX` then `INCR`, so the key never exists without its
- * TTL; memcache / kv `incr` else `add`).
+ * TTL; memcache `incr` else `add`; kv `add` then `incr`).
  * @param store {Store} the store
  * @param key {string} the counter key
  * @param ttlSec {int} the TTL to arm on the first hit (seconds)
@@ -219,12 +219,14 @@ export func incrWindow(store as Store, key as string, ttlSec as int) {
             return $n;
         }
         when Local(p) {
+            # kv.incr creates an absent key at 0 but without a TTL, so arm the
+            # window first: add is a no-op when the counter exists, and incr
+            # keeps its expiry. A counter that expired between the two starts
+            # again at 1 and is re-armed.
+            kv.add($p.local, $key, "0", $ttlSec);
             def n as int init kv.incr($p.local, $key, 1);
-            if ($n == -1) {
-                if (kv.add($p.local, $key, "1", $ttlSec)) {
-                    return 1;
-                }
-                return kv.incr($p.local, $key, 1);
+            if ($n == 1 and $ttlSec > 0) {
+                kv.touch($p.local, $key, $ttlSec);
             }
             return $n;
         }

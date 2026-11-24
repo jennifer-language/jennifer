@@ -25,6 +25,7 @@ func TestGpioStructSizesMatchABI(t *testing.T) {
 		{"gpio_v2_line_config_attribute", unsafe.Sizeof(gpioV2LineConfigAttribute{}), 24},
 		{"gpio_v2_line_config", unsafe.Sizeof(gpioV2LineConfig{}), 272},
 		{"gpio_v2_line_request", unsafe.Sizeof(gpioV2LineRequest{}), 592},
+		{"gpiochip_info", unsafe.Sizeof(gpioChipInfo{}), 68},
 	} {
 		if c.got != c.want {
 			t.Errorf("sizeof(%s) = %d, want %d (kernel ABI)", c.name, c.got, c.want)
@@ -32,6 +33,9 @@ func TestGpioStructSizesMatchABI(t *testing.T) {
 	}
 	// The ioctl numbers must encode those exact sizes (the read/write dir bits
 	// plus the size field are what the kernel dispatches on).
+	if gpioGetInfo != 0x8044b401 { // GPIO_GET_CHIPINFO_IOCTL
+		t.Errorf("GPIO_GET_CHIPINFO_IOCTL = %#x, want 0x8044b401", gpioGetInfo)
+	}
 	if want := iowr(0x07, 592); gpioGetLine != want {
 		t.Errorf("GPIO_V2_GET_LINE ioctl = %#x, want %#x", gpioGetLine, want)
 	}

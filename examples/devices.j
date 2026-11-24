@@ -29,9 +29,10 @@ try {
 
 # spi: full-duplex transfer (send one byte, read one back).
 try {
-    def dev as spi.Device init spi.open("/dev/spidev0.0");
+    def dev as spi.Device init spi.openWith(
+        "/dev/spidev0.0",
+        spi.Options{mode: 0, speedHz: 1000000});
     defer spi.close($dev);
-    spi.configure($dev, 0, 1000000);
     def cmd as bytes;
     $cmd[] = 0x9f; # e.g. a JEDEC read-id opcode
     def rx as bytes init spi.transfer($dev, $cmd);
@@ -50,11 +51,12 @@ try {
     io.printf("i2c: no device\n");
 }
 
-# gpio: drive an output pin (pin-keyed, like the sysfs gpio module).
+# gpio: drive an output pin on the first GPIO chip.
 try {
-    gpio.setup(17, gpio.OUT);
-    defer gpio.release(17);
-    gpio.write(17, 1);
+    def chip as gpio.Chip init gpio.open("/dev/gpiochip0");
+    defer gpio.close($chip); # releases the chip's pins too
+    gpio.setup($chip, 17, gpio.OUT);
+    gpio.write($chip, 17, 1);
     io.printf("gpio: pin 17 driven high\n");
 } catch (e) {
     io.printf("gpio: no device\n");

@@ -43,8 +43,8 @@ Boundary-friendly predicates plus a full `fs.stat`.
 | `fs.isFile(path)`   | `bool`    | True iff the path exists and is a regular file. False for missing.           |
 | `fs.isDir(path)`    | `bool`    | True iff the path exists and is a directory. False for missing.              |
 | `fs.stat(path)`     | `fs.Stat` | Missing path errors. Pair with `fs.exists` when tolerating absent files.     |
-| `fs.realpath(path)` | `string`  | Absolute, symlink-resolved canonical path. A missing / unresolvable path errors. |
-| `fs.readlink(path)` | `string`  | The target a symlink points to, **verbatim** (the stored link text, not resolved; use `fs.realpath` to fully resolve). A non-symlink or missing path errors. |
+| `fs.realpath(path)` | `string`  | Absolute, symlink-resolved canonical path. A missing / unresolvable path errors; a result that is not valid UTF-8 throws kind `"fs"`. |
+| `fs.readlink(path)` | `string`  | The target a symlink points to, **verbatim** (the stored link text, not resolved; use `fs.realpath` to fully resolve). A non-symlink or missing path errors; a target that is not valid UTF-8 throws kind `"fs"`. |
 | `fs.symlink(target, linkPath)` | `null` | Create a symlink at `linkPath` pointing to `target` (argument order mirrors `ln -s TARGET LINK`). An already-existing `linkPath` errors; `fs.remove` it first to re-point. |
 | `fs.mkfifo(path[, mode])` | `null` | Create a named pipe (FIFO) at `path`, owner-only `0o600` unless `mode` (in `[0, 0o777]`, less the umask) says otherwise. An existing `path` errors. Unix only; elsewhere a catchable error. |
 
@@ -83,6 +83,8 @@ def struct fs.Stat {
     mode as int            # POSIX permission bits (e.g. 0o644, 0o755)
 };
 ```
+
+`fs.StatBytes` (from `fs.walkBytes`) has the same fields with `path as bytes`.
 
 `mtimeNanos` is an `int`, not a `time.Time`, which keeps `fs`
 independent of the `time` library. Converting is one line:
@@ -179,8 +181,16 @@ mode string would hide the recursive intent at the call site).
 | `fs.remove(path)`       | `null`            | Removes one file or one empty directory. Non-empty dir errors. |
 | `fs.removeAll(path)`    | `null`            | Recursive delete. Explicit second verb.                        |
 | `fs.rename(old, new)`   | `null`            | Same-filesystem rename; cross-fs is a boundary error. An existing **file** at `new` is replaced, atomically on Linux / macOS (POSIX `rename(2)`): the write-temp-then-rename way to save a config or certificate with no window where the file is missing. Replacing a directory errors. |
-| `fs.list(path)`         | `list of string`  | Sorted entry names. Non-recursive.                             |
-| `fs.walk(path)`         | `list of fs.Stat` | Depth-first, sorted, includes `path` itself as the first entry. Skips symlinks below the root (a symlinked root is followed). An unreadable directory below the root is listed but not descended into; an unreadable root is an error. |
+| `fs.list(path)`         | `list of string`  | Sorted entry names. Non-recursive. A name that is not valid UTF-8 throws kind `"fs"`. |
+| `fs.listBytes(path)`    | `list of bytes`   | `fs.list` with each name as `bytes`, whatever the filesystem holds. |
+| `fs.walk(path)`         | `list of fs.Stat` | Depth-first, sorted, includes `path` itself as the first entry. Skips symlinks below the root (a symlinked root is followed). An unreadable directory below the root is listed but not descended into; an unreadable root is an error. A path that is not valid UTF-8 throws kind `"fs"`. |
+| `fs.walkBytes(path)`    | `list of fs.StatBytes` | `fs.walk` with each path as `bytes`: `fs.StatBytes` is `fs.Stat` with `path as bytes`. |
+
+Linux filesystems store any byte but `/` and NUL in a name. `list`, `walk`,
+`readlink` and `realpath` return names as `string`, so they refuse one that is
+not valid UTF-8 (`fs.list: /srv/in: entry "a\xffb" is not valid UTF-8 at byte 1;
+fs.listBytes returns names as bytes`); a program that must handle any name uses
+`listBytes` / `walkBytes`.
 
 ```jennifer
 use fs;
@@ -263,7 +273,7 @@ Unknown mode strings error with the known set listed.
 | Call                       | Returns    | Notes                                                                     |
 | -------------------------- | ---------- | ------------------------------------------------------------------------- |
 | `fs.open(path, mode)`      | `fs.File`  | Opens per the mode string.                                                |
-| `fs.close($f)`             | `null`     | Removes the handle from the registry; later ops on the id error.         |
+| `fs.close($f)`             | `null`     | Removes the handle from the registry; later ops on the id throw kind `"closed"`. A second `close` does nothing. |
 | `fs.readLine($f)`          | `string`   | One line; `\r\n` / `\n` stripped. Errors on EOF; check `fs.eof` first. A line over 256 MiB (32 MiB on `jennifer-tiny`) is an error. An invalid UTF-8 line is consumed and is an error with the offset in the line; use `fs.readBytes($f, n)` for binary data. |
 | `fs.readChars($f, n)`      | `string`   | Up to `n` runes, UTF-8 decoded. Partial result on EOF, sticky-EOF flip. `n` above 64 Mi (8 Mi on `jennifer-tiny`) is an error. An invalid byte is an error with its offset in this call's read (bytes before it consumed); use `fs.readBytes($f, n)` for binary data. |
 | `fs.readBytes($f, n)`      | `bytes`    | Up to `n` bytes, `n` <= 256 MiB (32 MiB on `jennifer-tiny`); the buffer grows with the data read. Partial result on EOF, sticky-EOF flip. |
@@ -337,7 +347,7 @@ semantics like `task of T`:
 def a as fs.File init fs.open("x.txt", "read");
 def b as fs.File init $a;              # `b` and `a` reference the same file
 fs.close($a);                          # closes for both
-def s as string init fs.readLine($b);  # errors: id is not open
+def s as string init fs.readLine($b);  # throws kind "closed": id is not open
 ```
 
 ## Watching for changes
@@ -350,8 +360,8 @@ other work (a dev server rebuilding on save, a live reloader).
 | Call                     | Returns      | Notes                                                                        |
 | ------------------------ | ------------ | ---------------------------------------------------------------------------- |
 | `fs.watch(path)`         | `fs.Watcher` | Watch a file, or a directory recursively. Default poll ~300 ms.              |
-| `fs.watch(path, intervalMs)` | `fs.Watcher` | Same, with an explicit poll interval (>= 20 ms, and small enough to fit a duration; a larger value is a catchable error). |
-| `fs.next($w)`            | `fs.Event`   | Block until the next change; errors if the watcher is closed (which is how a blocked loop is released). |
+| `fs.watchWith(path, fs.WatchOptions)` | `fs.Watcher` | Same, polling every `WatchOptions.intervalMs`: `0` is the ~300 ms default, otherwise at least 20 and small enough to fit a duration (a smaller, negative or larger value is a catchable error). |
+| `fs.next($w)`            | `fs.Event`   | Block until the next change; throws kind `"closed"` if the watcher is closed (which is how a blocked loop is released). |
 | `fs.hasEvent($w)`        | `bool`       | Whether an event is queued (non-blocking peek).                              |
 | `fs.close($w)`           | `null`       | Stop the watcher. `fs.close` is polymorphic over `fs.File` and `fs.Watcher`. |
 
@@ -362,7 +372,7 @@ An `fs.Event` is `{ path as string, kind as string, isDir as bool }`, where
 
 ```jennifer
 use fs; use io;
-def w as fs.Watcher init fs.watch("content", 200);
+def w as fs.Watcher init fs.watchWith("content", fs.WatchOptions{intervalMs: 200});
 def worker as task of null init spawn {
     try {
         while (true) {
@@ -439,9 +449,10 @@ is correct but sequential. See
 
 | Kind | Raised for |
 |---|---|
-| `"fs"` | text that is not valid UTF-8 in `readString`, `readLine`, `readChars` and `readSecretString`; a secret file refused by `readSecretBytes` / `readSecretString` ([Reading a secret](#reading-a-secret)) |
+| `"fs"` | text that is not valid UTF-8 in `readString`, `readLine`, `readChars` and `readSecretString`, and a name that is not in `list`, `walk`, `readlink` and `realpath`; a secret file refused by `readSecretBytes` / `readSecretString` ([Reading a secret](#reading-a-secret)) |
 | `"limit"` | a size cap, the open-handle or watcher count |
-| `"runtime"` | an operating-system failure (a missing file, a permission denied, ...) and misuse: a wrong argument, an unknown mode, a handle used after close or in the wrong mode |
+| `"closed"` | any call but `close` on a closed `fs.File` or `fs.Watcher`, and an `fs.next` the watcher's close wakes |
+| `"runtime"` | an operating-system failure (a missing file, a permission denied, ...) and misuse: a wrong argument, an unknown mode, a handle used in the wrong mode |
 
 ### Messages
 
@@ -457,11 +468,12 @@ path or handle id in the message. An operating-system failure reads
 | Missing parent given to `fs.mkdir` (use `fs.mkdirAll`) | `fs.mkdir: PATH: no such file or directory` |
 | Wrong mode for the operation (same shape in reverse for a read handle given a write) | `fs.readLine: fs.File "x.txt" was opened in mode "write"; open with mode "read" to read` |
 | Unknown mode string | `fs.open: unknown mode "rw"; known: "read", "write", "append"` |
-| Use after close | `fs.readLine: fs.File id 3 is not open (already closed, or never opened)` |
+| Use after close, kind `"closed"` | `fs.readLine: fs.File id 3 is not open (already closed, or never opened)` |
 | Negative count | `fs.readChars: n must be non-negative, got -1` |
 | Size limits, kind `"limit"` (as is reaching the open-handle or watcher count) | `fs.readBytes: PATH exceeds the 268435456-byte limit; read it in chunks with fs.open and fs.readBytes($f, n)` (also `readString`), `fs.readLine: PATH: line exceeds the 268435456-byte limit`, `fs.readChars: N exceeds the 67108864-character per-call limit` |
 | Secrets, kind `"fs"` (see [Reading a secret](#reading-a-secret)) | `fs.readSecretBytes: PATH has group or other permissions (mode 0644); run chmod 600 PATH` |
 | Invalid UTF-8 in a text read, kind `"fs"` (also `fs.readLine`, `fs.readChars` and `fs.readSecretString`; the offset is within the returned text; the `bytes` reads accept any content) | `fs.readString: PATH: invalid UTF-8 at byte 5` |
+| A name that is not UTF-8, kind `"fs"` (the offset is within the name; `walk` names the whole path) | `fs.list: PATH: entry "a\xffb" is not valid UTF-8 at byte 1; fs.listBytes returns names as bytes`, `fs.readlink: PATH: link target "t\xff" is not valid UTF-8 at byte 1` |
 
 Every error is catchable with `try` / `catch`:
 
@@ -475,6 +487,15 @@ try {
     io.printf("no config, using defaults: %s\n", $e.message);
 }
 ```
+
+## Deprecated
+
+Each still works and is removed in 0.29.0; `jennifer lint` reports a call
+(L301).
+
+| Deprecated | Use instead |
+| --- | --- |
+| `fs.watch(path, intervalMs)` | `fs.watchWith(path, fs.WatchOptions{intervalMs: ...})` |
 
 ## What's left out
 

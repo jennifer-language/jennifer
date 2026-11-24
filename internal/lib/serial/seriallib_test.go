@@ -83,14 +83,13 @@ while (len($got) < 5) {
     }
 }
 io.printf("[%%s]", encoding.decode("utf-8", $got));
-def n as int init serial.write($p, encoding.encode("utf-8", "PONG"));
-io.printf("wrote=%%d", $n);
+serial.write($p, encoding.encode("utf-8", "PONG"));
 serial.close($p);`, slave))
 	if err != nil {
 		t.Fatalf("run: %v (out=%q)", err, out)
 	}
-	if out != "[PING\n]wrote=4" {
-		t.Errorf("got %q, want [PING\\n]wrote=4", out)
+	if out != "[PING\n]" {
+		t.Errorf("got %q, want [PING\\n]", out)
 	}
 	// The port's PONG must reach the master side. Read until it appears rather
 	// than assuming the first chunk holds it: the PTY echoes the pre-open master

@@ -121,7 +121,7 @@ func resolveHandle(fnName string, id int64) (*handleState, error) {
 	defer handlesMu.Unlock()
 	h, ok := handles[id]
 	if !ok {
-		return nil, fmt.Errorf("%s: fs.File id %d is not open (already closed, or never opened)", fnName, id)
+		return nil, interpreter.KindedError("closed", fmt.Sprintf("%s: fs.File id %d is not open (already closed, or never opened)", fnName, id))
 	}
 	return h, nil
 }
@@ -198,8 +198,10 @@ func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	handlesMu.Lock()
 	h, ok := handles[id]
 	if !ok {
+		// A second close does nothing (M29.46), so a deferred close and an
+		// explicit one can both run.
 		handlesMu.Unlock()
-		return interpreter.Null(), fmt.Errorf("fs.close: fs.File id %d is not open (already closed?)", id)
+		return interpreter.Null(), nil
 	}
 	delete(handles, id)
 	handlesMu.Unlock()

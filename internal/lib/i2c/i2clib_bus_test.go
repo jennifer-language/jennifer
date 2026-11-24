@@ -27,13 +27,14 @@ func addBus(f *os.File) Value {
 	return devio.Handle(LibraryName, "Bus", nextID)
 }
 
-// TestReadCappedAtKernelClamp: i2c-dev returns at most 8192 bytes per read,
-// so a 256 MiB request must not allocate 256 MiB. A regular file stands in
-// for the bus.
-func TestReadCappedAtKernelClamp(t *testing.T) {
+// TestMessageLimit (M29.49): i2c-dev moves at most 8192 bytes per message, so
+// a longer read / readReg / write / writeReg throws kind "limit" instead of
+// transferring a shortened message; 8192 itself goes through. A regular file
+// stands in for the bus.
+func TestMessageLimit(t *testing.T) {
 	ResetForTest()
 	path := filepath.Join(t.TempDir(), "bus")
-	if err := os.WriteFile(path, make([]byte, 10000), 0o600); err != nil {
+	if err := os.WriteFile(path, make([]byte, 20000), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	f, err := os.OpenFile(path, os.O_RDWR, 0)
@@ -41,18 +42,52 @@ func TestReadCappedAtKernelClamp(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := addBus(f)
+	ctx := interpreter.BuiltinCtx{}
+	iv, bv := interpreter.IntVal, interpreter.BytesVal
+	v, err := readFn(ctx, []Value{b, iv(8192)})
+	if err != nil || len(v.Bytes) != 8192 {
+		t.Fatalf("read 8192: %d bytes, %v", len(v.Bytes), err)
+	}
+	if _, err := writeRegFn(ctx, []Value{b, iv(1), bv(make([]byte, 8191))}); err != nil {
+		t.Fatalf("writeReg of 8191 data bytes: %v", err)
+	}
 	var m0, m1 runtime.MemStats
 	runtime.ReadMemStats(&m0)
-	v, err := readFn(interpreter.BuiltinCtx{}, []Value{b, interpreter.IntVal(1 << 28)})
+	for name, call := range map[string]func() error{
+		"read":     func() error { _, err := readFn(ctx, []Value{b, iv(8193)}); return err },
+		"read big": func() error { _, err := readFn(ctx, []Value{b, iv(1 << 28)}); return err },
+		"readReg":  func() error { _, err := readRegFn(ctx, []Value{b, iv(1), iv(8193)}); return err },
+		"write":    func() error { _, err := writeFn(ctx, []Value{b, bv(make([]byte, 8193))}); return err },
+		"writeReg": func() error { _, err := writeRegFn(ctx, []Value{b, iv(1), bv(make([]byte, 8192))}); return err },
+	} {
+		if kind, _, _, _, _ := interpreter.ClassifyError(call()); kind != "limit" {
+			t.Errorf("%s: kind %q, want limit", name, kind)
+		}
+	}
 	runtime.ReadMemStats(&m1)
+	if got := m1.TotalAlloc - m0.TotalAlloc; got > 1<<20 {
+		t.Errorf("refused reads allocated %d bytes", got)
+	}
+}
+
+// TestClosedBus (M29.46): any call on a closed bus is kind "closed"; a second
+// close does nothing.
+func TestClosedBus(t *testing.T) {
+	ResetForTest()
+	f, err := os.Create(filepath.Join(t.TempDir(), "bus"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(v.Bytes) != 8192 {
-		t.Errorf("read %d bytes, want 8192", len(v.Bytes))
+	b := addBus(f)
+	ctx := interpreter.BuiltinCtx{}
+	for i := 0; i < 2; i++ {
+		if _, err := closeFn(ctx, []Value{b}); err != nil {
+			t.Fatalf("close %d: %v", i+1, err)
+		}
 	}
-	if got := m1.TotalAlloc - m0.TotalAlloc; got > 1<<20 {
-		t.Errorf("read allocated %d bytes", got)
+	_, err = readFn(ctx, []Value{b, interpreter.IntVal(1)})
+	if kind, _, _, _, _ := interpreter.ClassifyError(err); kind != "closed" {
+		t.Errorf("read after close: kind %q (%v)", kind, err)
 	}
 }
 

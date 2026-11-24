@@ -29,6 +29,8 @@ removeAll(string) null
 rename(string, string) null
 list(string) list of string
 walk(string) list of fs.Stat
+listBytes(string) list of bytes
+walkBytes(string) list of fs.StatBytes
 makeTempFile(string?, string?, string?) string
 makeTempDir(string?, string?) string
 open(string, string) fs.File
@@ -42,7 +44,10 @@ writeString(string|fs.File, string) null
 writeBytes(string|fs.File, bytes) null
 sync(fs.File) null
 eof(fs.File) bool
+# The interval of watch is a deprecated shape (lint L301, removed in
+# 0.29.0); the signature keeps accepting it until then.
 watch(string, int?) fs.Watcher
+watchWith(string, fs.WatchOptions) fs.Watcher
 next(fs.Watcher) fs.Event
 hasEvent(fs.Watcher) bool
 `)

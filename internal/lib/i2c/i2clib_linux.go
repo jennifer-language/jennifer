@@ -62,9 +62,15 @@ var rdwr = func(fd int, d *i2cRdwrData) (int, error) {
 	return int(r), nil
 }
 
-// maxRead is i2c-dev's per-read clamp (i2cdev_read: count > 8192 -> 8192); a
-// larger buffer would only be allocated and left unused.
+// maxRead is i2c-dev's per-message limit (i2cdev_read / i2cdev_write clamp a
+// larger count to 8192, I2C_RDWR refuses one). A longer read or write throws
+// kind "limit" rather than transferring a silently shortened message (M29.49).
 const maxRead = 8192
+
+// overMessage is the "limit" error for a message longer than maxRead.
+func overMessage(ctx interpreter.BuiltinCtx, fn, what string, n int64) error {
+	return interpreter.RaiseError("limit", fmt.Sprintf("%s: a message is at most %d bytes (i2c-dev), got %d %s", fn, maxRead, n, what), ctx.File, ctx.Line, ctx.Col)
+}
 
 // busState is one open bus. mu serialises the transfers on it, so readReg's
 // pointer write and read are not interleaved with another task's transfer,
@@ -138,7 +144,7 @@ func resolveBus(fn string, args []Value) (*busState, error) {
 	defer busesMu.Unlock()
 	b, ok := buses[id]
 	if !ok {
-		return nil, fmt.Errorf("%s: i2c.Bus id %d is not open (already closed, or never opened)", fn, id)
+		return nil, interpreter.KindedError("closed", fmt.Sprintf("%s: i2c.Bus id %d is not open (already closed, or never opened)", fn, id))
 	}
 	return b, nil
 }
@@ -193,7 +199,10 @@ func readFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	buf := make([]byte, min(sz, maxRead))
+	if sz > maxRead {
+		return interpreter.Null(), overMessage(ctx, "i2c.read", "to read", n)
+	}
+	buf := make([]byte, sz)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	got, rerr := unix.Read(int(b.f.Fd()), buf)
@@ -218,6 +227,9 @@ func writeFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	data, err := devio.BytesArg("i2c.write", args, 1, "data")
 	if err != nil {
 		return interpreter.Null(), err
+	}
+	if len(data) > maxRead {
+		return interpreter.Null(), overMessage(ctx, "i2c.write", "to write", int64(len(data)))
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -254,6 +266,9 @@ func readRegFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	if sz > maxRead {
+		return interpreter.Null(), overMessage(ctx, "i2c.readReg", "to read", n)
+	}
 	// Two transfers (a STOP between them), held as one unit against other
 	// tasks on this bus.
 	b.mu.Lock()
@@ -261,7 +276,7 @@ func readRegFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if _, werr := unix.Write(int(b.f.Fd()), []byte{byte(reg)}); werr != nil {
 		return interpreter.Null(), failure(ctx, fmt.Sprintf("i2c.readReg: selecting register 0x%02x", reg), b.addr, werr)
 	}
-	buf := make([]byte, min(sz, maxRead))
+	buf := make([]byte, sz)
 	got, rerr := unix.Read(int(b.f.Fd()), buf)
 	if rerr != nil {
 		return interpreter.Null(), failure(ctx, "i2c.readReg", b.addr, rerr)
@@ -292,6 +307,9 @@ func writeRegFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	if reg < 0 || reg > 0xff {
 		return interpreter.Null(), fmt.Errorf("i2c.writeReg: register %d out of byte range (0..255)", reg)
+	}
+	if len(data)+1 > maxRead {
+		return interpreter.Null(), overMessage(ctx, "i2c.writeReg", "to write (the register pointer and the data)", int64(len(data)+1))
 	}
 	frame := make([]byte, 0, len(data)+1)
 	frame = append(frame, byte(reg))
@@ -359,7 +377,7 @@ func writeReadFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.BytesVal(rx), nil
 }
 
-// i2c.close(bus) -> null.
+// i2c.close(bus) -> null. A second close of the same bus does nothing.
 func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err := devio.WantArgs("i2c.close", args, 1); err != nil {
 		return interpreter.Null(), err
@@ -372,7 +390,7 @@ func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	b, ok := buses[id]
 	if !ok {
 		busesMu.Unlock()
-		return interpreter.Null(), fmt.Errorf("i2c.close: i2c.Bus id %d is not open (already closed?)", id)
+		return interpreter.Null(), nil
 	}
 	delete(buses, id)
 	busesMu.Unlock()

@@ -452,9 +452,9 @@ leaves CORS off), `allowMethods`, `allowHeaders`, `allowCredentials` (bool), and
 
 **Static files are already cached:** `web.serveFile` / `web.serveDir` ride Go's
 file server (`httpd.serveFile` / `httpd.serveDir`), which sets `Last-Modified`
-and answers `If-Modified-Since` (and `Range`) on its own. They set no `ETag`;
-for a content-hash `ETag` call `httpd.serveFileEtag` / `httpd.serveDirEtag` on
-`$ctx.req` directly. **Plain cache headers** are a one-liner -
+and answers `If-Modified-Since` (and `Range`) on its own. They add a
+content-hash `ETag` when the server was opened with `httpd.Options{etag: true}`
+(`httpd.listenWith`). **Plain cache headers** are a one-liner -
 `web.setHeader($ctx, "Cache-Control", "max-age=3600")` - so there is no wrapper
 for them.
 

@@ -21,7 +21,7 @@ func TestInstallRegistersEveryCrcBuiltin(t *testing.T) {
 }
 
 // TestDiscardStream covers crc.discard: a stream handle can be dropped without
-// finalizing, and using it afterward (or discarding twice) is a catchable error.
+// finalizing; a second discard does nothing and any other use is kind "closed".
 func TestDiscardStream(t *testing.T) {
 	resetForTest()
 	t.Cleanup(resetForTest)
@@ -33,13 +33,18 @@ func TestDiscardStream(t *testing.T) {
 	if _, err := discardFn(interpreter.BuiltinCtx{}, []interpreter.Value{s}); err != nil {
 		t.Fatalf("discard: %v", err)
 	}
-	// A second discard errors (the handle is already gone).
-	if _, err := discardFn(interpreter.BuiltinCtx{}, []interpreter.Value{s}); err == nil {
-		t.Error("second discard should error")
+	// A second discard does nothing (M29.46).
+	if _, err := discardFn(interpreter.BuiltinCtx{}, []interpreter.Value{s}); err != nil {
+		t.Errorf("second discard: %v", err)
 	}
-	// Using the discarded handle also errors.
-	if _, err := updateFn(interpreter.BuiltinCtx{}, []interpreter.Value{s, interpreter.BytesVal([]byte("x"))}); err == nil {
-		t.Error("update after discard should error")
+	// Using the discarded handle is kind "closed".
+	_, err = updateFn(interpreter.BuiltinCtx{}, []interpreter.Value{s, interpreter.BytesVal([]byte("x"))})
+	if kind, _, _, _, _ := interpreter.ClassifyError(err); kind != "closed" {
+		t.Errorf("update after discard: kind %q (%v)", kind, err)
+	}
+	_, err = finalizeFn(interpreter.BuiltinCtx{}, []interpreter.Value{s})
+	if kind, _, _, _, _ := interpreter.ClassifyError(err); kind != "closed" {
+		t.Errorf("finalize after discard: kind %q (%v)", kind, err)
 	}
 	// arity + non-stream errors.
 	if _, err := discardFn(interpreter.BuiltinCtx{}, nil); err == nil {

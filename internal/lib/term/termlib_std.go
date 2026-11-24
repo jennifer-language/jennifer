@@ -14,6 +14,7 @@ package termlib
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sort"
 	"sync"
@@ -150,8 +151,8 @@ func makeRawFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 }
 
 // restoreFn implements term.restore(state) -> null. The handle is consumed: a
-// second restore of the same state is an error, so a cooked terminal is never
-// clobbered by a stale handle.
+// second restore of the same state does nothing (M29.46: kind to `defer`), so
+// a stale handle never clobbers the terminal. Ids are never reused.
 func restoreFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("term.restore expects 1 argument (state), got %d", len(args))
@@ -167,7 +168,7 @@ func restoreFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	statesMu.Unlock()
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("term.restore: state already restored or not a live handle")
+		return interpreter.Null(), nil
 	}
 	if rerr := term.Restore(entry.fd, entry.prev); rerr != nil {
 		return interpreter.Null(), fmt.Errorf("term.restore: %v", rerr)
@@ -199,11 +200,15 @@ func sizeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 }
 
 // readKey returns the next byte from the shared stdin reader (stdinbuf, the
-// same buffer `io` reads from): 0-255, -1 at end of input, or -2 when wait
-// (>= 0) passes first; wait < 0 blocks. A read that times out leaves its fill
-// in flight, so the byte it yields is the next one any read (`term` or `io`)
-// returns: nothing is lost or reordered, and no second reader touches stdin.
-func readKey(in io.Reader, wait time.Duration) (int64, error) {
+// same buffer `io` reads from), throwing kind "closed" at end of input and,
+// when wait (>= 0) passes first, kind "timeout"; wait < 0 blocks. A read that
+// times out leaves its fill in flight, so the byte it yields is the next one
+// any read (`term` or `io`) returns: nothing is lost or reordered, and no
+// second reader touches stdin.
+func readKey(fn string, in io.Reader, wait time.Duration, ms int64) (Value, error) {
+	if in == nil {
+		return interpreter.Null(), endOfInput(fn)
+	}
 	r := stdinbuf.For(in)
 	var (
 		b   byte
@@ -217,18 +222,24 @@ func readKey(in io.Reader, wait time.Duration) (int64, error) {
 	}
 	switch {
 	case !ok:
-		return -2, nil
+		return interpreter.Null(), interpreter.KindedError("timeout", fmt.Sprintf("%s: no byte within %d ms", fn, ms))
 	case err == io.EOF:
-		return -1, nil
+		return interpreter.Null(), endOfInput(fn)
 	case err != nil:
-		return 0, err
+		return interpreter.Null(), fmt.Errorf("%s: %v", fn, err)
 	}
-	return int64(b), nil
+	return interpreter.IntVal(int64(b)), nil
+}
+
+// endOfInput is the error of a read at the end of input: kind "closed", the
+// generic kind of a closed peer.
+func endOfInput(fn string) error {
+	return interpreter.KindedError("closed", fn+": end of input")
 }
 
 // readByteFn implements term.readByte() -> int: the next raw byte from stdin
-// (0-255), or -1 at end of input. In raw mode this returns as soon as a key is
-// pressed. Refused inside the REPL.
+// (0-255); kind "closed" at end of input. In raw mode this returns as soon as a
+// key is pressed. Refused inside the REPL.
 func readByteFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if ctx.InREPL {
 		return interpreter.Null(), fmt.Errorf("term.readByte: not available inside the REPL")
@@ -236,20 +247,13 @@ func readByteFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 0 {
 		return interpreter.Null(), fmt.Errorf("term.readByte expects 0 arguments, got %d", len(args))
 	}
-	if ctx.In == nil {
-		return interpreter.IntVal(-1), nil
-	}
-	b, err := readKey(ctx.In, -1)
-	if err != nil {
-		return interpreter.Null(), fmt.Errorf("term.readByte: %v", err)
-	}
-	return interpreter.IntVal(b), nil
+	return readKey("term.readByte", ctx.In, -1, 0)
 }
 
 // readByteTimeoutFn implements term.readByteTimeout(ms) -> int: like readByte,
-// but gives up after ms milliseconds and returns -2 (distinct from -1, end of
-// input); ms == 0 polls. A read that times out stays in flight, so the byte it
-// eventually yields is the next one any read of stdin (`term` or `io`) returns.
+// but throws kind "timeout" when no byte arrives within ms milliseconds; ms 0
+// polls. A read that times out stays in flight, so the byte it eventually
+// yields is the next one any read of stdin (`term` or `io`) returns.
 func readByteTimeoutFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if ctx.InREPL {
 		return interpreter.Null(), fmt.Errorf("term.readByteTimeout: not available inside the REPL")
@@ -259,21 +263,14 @@ func readByteTimeoutFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) 
 	}
 	ms := args[0].Int
 	if ms < 0 || ms > maxTimeoutMs {
-		return interpreter.Null(), fmt.Errorf("term.readByteTimeout: ms must be in [0, %d], got %d", maxTimeoutMs, ms)
+		return interpreter.Null(), fmt.Errorf("term.readByteTimeout: ms must be 0 to %d, got %d", maxTimeoutMs, ms)
 	}
-	if ctx.In == nil {
-		return interpreter.IntVal(-1), nil
-	}
-	b, err := readKey(ctx.In, time.Duration(ms)*time.Millisecond)
-	if err != nil {
-		return interpreter.Null(), fmt.Errorf("term.readByteTimeout: %v", err)
-	}
-	return interpreter.IntVal(b), nil
+	return readKey("term.readByteTimeout", ctx.In, time.Duration(ms)*time.Millisecond, ms)
 }
 
-// maxTimeoutMs bounds readByteTimeout's wait (24 hours), far above any key
-// timeout, so the duration arithmetic cannot overflow.
-const maxTimeoutMs = 24 * 60 * 60 * 1000
+// maxTimeoutMs is the largest ms a time.Duration holds, the bound of every
+// xTimeout (M29.45).
+const maxTimeoutMs = int64(math.MaxInt64) / int64(time.Millisecond)
 
 // stateID extracts the registry id from a term.State handle.
 func stateID(fnName string, v Value) (int, error) {

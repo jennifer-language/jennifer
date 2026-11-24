@@ -22,6 +22,9 @@ func unavailable(fn string) (Value, error) {
 func ResetForTest() {}
 
 func openFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) { return unavailable("spi.open") }
+func openWithFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("spi.openWith")
+}
 func configureFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("spi.configure")
 }

@@ -122,8 +122,8 @@ func TestMakeRawParity(t *testing.T) {
 	if tio.Cflag != want {
 		t.Errorf("cflag = %#o, want %#o", tio.Cflag, want)
 	}
-	if tio.Iflag&unix.INPCK == 0 {
-		t.Error("INPCK not set with parity")
+	if tio.Iflag&(unix.INPCK|unix.PARMRK) != unix.INPCK|unix.PARMRK {
+		t.Error("INPCK / PARMRK not set with parity")
 	}
 }
 
