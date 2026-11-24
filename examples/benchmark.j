@@ -47,6 +47,29 @@ use stats;
 use linalg;
 use ml;
 import "./benchmark/tree.j" as btree;
+import "../modules/args.j" as args;
+
+# Command line: --format text (default) / json, --suite v1 (default) / v2 /
+# v3 / v4 / all.
+def cli as args.Result init args.parse(
+    args.flag(
+        args.flag(
+            args.parser("benchmark", "Jennifer benchmark suite"),
+            "format",
+            "",
+            "text",
+            "text or json"),
+        "suite",
+        "",
+        "v1",
+        "v1, v2, v3, v4 or all"),
+    os.ARGS);
+if ($cli.done) {
+    io.printf("%s\n", $cli.helpText);
+    exit 0;
+}
+def const FORMAT as string init args.asString($cli, "format");
+def const SUITE as string init args.asString($cli, "suite");
 
 # --- Tunables ------------------------------------------------------
 # Bump these if the suite runs too fast to see meaningful numbers, or
@@ -920,7 +943,7 @@ func runV2() {
         workloads: $benches,
         parallel: $noPar
     };
-    if (os.flag("--format") == "json") {
+    if (FORMAT == "json") {
         emitJson($rep);
     } else {
         emitText($rep);
@@ -1300,7 +1323,7 @@ func runV4() {
         workloads: $benches,
         parallel: $noPar
     };
-    if (os.flag("--format") == "json") {
+    if (FORMAT == "json") {
         emitJson($rep);
     } else {
         emitText($rep);
@@ -1372,7 +1395,7 @@ func runV3() {
         workloads: $benches,
         parallel: $noPar
     };
-    if (os.flag("--format") == "json") {
+    if (FORMAT == "json") {
         emitJson($rep);
     } else {
         emitText($rep);
@@ -1382,10 +1405,7 @@ func runV3() {
 # --- Suite dispatch ------------------------------------------------
 # --suite v1 (default) / v2 / v3 / v4 / all. A suite's workloads are frozen; new
 # coverage goes in a new suite version, never into an old one.
-def suite as string init os.flag("--suite");
-if ($suite == "") {
-    $suite = "v1";
-}
+def suite as string init SUITE;
 if ($suite != "v1" and $suite != "v2" and $suite != "v3" and $suite != "v4" and $suite != "all") {
     io.printf("unknown --suite %s (use v1, v2, v3, v4, or all)\n", $suite);
     exit 1;
@@ -1531,7 +1551,7 @@ def report as Report init Report{
 
 # --format json emits one JSON object (for a perf database); anything else
 # (or absent) prints the human table.
-if (os.flag("--format") == "json") {
+if (FORMAT == "json") {
     emitJson($report);
 } else {
     emitText($report);

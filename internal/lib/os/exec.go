@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	stdos "os"
 	"os/exec"
 	"path/filepath"
@@ -407,6 +408,9 @@ func sameSpawnFile(f *stdos.File, path string) bool {
 // keys, each "capture" (default; returned by os.wait), "inherit" (the parent's
 // stream, so a child's diagnostics appear live), "discard", or a file path
 // containing a separator. Any other key or mode is an error.
+//
+// The options map is deprecated (lint L301, removed in 0.29.0): os.spawnWith
+// takes the same modes in an os.SpawnOptions struct.
 func spawnFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if !execSupported() {
 		return interpreter.Null(), execUnsupportedErr("os.spawn")
@@ -425,17 +429,63 @@ func spawnFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		}
 		opts = args[1]
 	}
+	outMode, errMode, err := spawnOptions("os.spawn", opts)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return spawnProcess("os.spawn", argv, outMode, errMode)
+}
+
+// spawnWithFn implements `os.spawnWith(argv, os.SpawnOptions) -> os.Process`:
+// os.spawn with each stream's mode in an options struct. The zero value
+// captures both streams, so os.spawnWith(argv, os.SpawnOptions{}) is
+// os.spawn(argv).
+func spawnWithFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	const fn = "os.spawnWith"
+	if !execSupported() {
+		return interpreter.Null(), execUnsupportedErr(fn)
+	}
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("%s expects 2 arguments (argv list, os.SpawnOptions), got %d", fn, len(args))
+	}
+	argv, err := argvFromList(fn, args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	o := args[1]
+	if o.Kind != interpreter.KindStruct || o.StructNS != LibraryName || o.StructName != "SpawnOptions" {
+		return interpreter.Null(), fmt.Errorf("%s: options must be an os.SpawnOptions, got %s", fn, o.Kind)
+	}
+	var outMode, errMode string
+	for _, f := range o.Fields {
+		if f.Name != "stdout" && f.Name != "stderr" {
+			continue
+		}
+		if f.Value.Kind != interpreter.KindString {
+			return interpreter.Null(), fmt.Errorf("%s: os.SpawnOptions.%s must be string, got %s", fn, f.Name, f.Value.Kind)
+		}
+		if err := checkSpawnMode(fn, f.Name, f.Value.Str); err != nil {
+			return interpreter.Null(), err
+		}
+		if f.Name == "stdout" {
+			outMode = f.Value.Str
+		} else {
+			errMode = f.Value.Str
+		}
+	}
+	return spawnProcess(fn, argv, outMode, errMode)
+}
+
+// spawnProcess starts argv with its streams wired per outMode / errMode (each
+// checked by checkSpawnMode) and registers the handle.
+func spawnProcess(fn string, argv []string, outMode, errMode string) (interpreter.Value, error) {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.WaitDelay = procWaitDelay
 	state := &processState{cmd: cmd, done: make(chan struct{})}
 
 	// Resolve each stream's destination (default: capture). On a file-open error
 	// close any file already opened for the other stream, so no fd leaks.
-	outMode, errMode, err := spawnOptions("os.spawn", opts)
-	if err != nil {
-		return interpreter.Null(), err
-	}
-	outW, outBuf, outFile, err := resolveSpawnStream("os.spawn", "stdout", outMode, stdos.Stdout)
+	outW, outBuf, outFile, err := resolveSpawnStream(fn, "stdout", outMode, stdos.Stdout)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -446,7 +496,7 @@ func spawnFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		// One descriptor for both: exec passes the same *os.File as fd 1 and 2.
 		errW = outW
 	} else {
-		errW, errBuf, errFile, err = resolveSpawnStream("os.spawn", "stderr", errMode, stdos.Stderr)
+		errW, errBuf, errFile, err = resolveSpawnStream(fn, "stderr", errMode, stdos.Stderr)
 		if err != nil {
 			if outFile != nil {
 				_ = outFile.Close()
@@ -467,11 +517,11 @@ func spawnFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	handlesMu.Unlock()
 	if tooMany {
 		closeSpawnFiles(outFile, errFile)
-		return interpreter.Null(), limits.Capf("os.spawn: too many live child processes (limit %d); each os.spawn needs a matching os.wait or os.release", maxProcHandles)
+		return interpreter.Null(), limits.Capf("%s: too many live child processes (limit %d); each os.spawn needs a matching os.wait or os.release", fn, maxProcHandles)
 	}
 	if err := cmd.Start(); err != nil {
 		closeSpawnFiles(outFile, errFile)
-		return interpreter.Null(), fmt.Errorf("os.spawn: %v", err)
+		return interpreter.Null(), fmt.Errorf("%s: %v", fn, err)
 	}
 	// The real OS pid, captured now (cmd.Process is set once Start succeeds). It is
 	// informational only; os.wait / poll / kill / release use the registry handle.
@@ -532,23 +582,54 @@ func closeSpawnFiles(files ...*stdos.File) {
 // code. Subsequent calls on the same handle return the same result
 // (idempotent).
 func waitFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return waitProcess("os.wait", args, false)
+	return waitProcess(interpreter.BuiltinCtx{}, "os.wait", args, false, false)
 }
 
 // waitBytesFn implements `os.waitBytes(p) -> os.BytesResult`: os.wait with
 // the captured streams as bytes. Either form may read the same handle.
 func waitBytesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return waitProcess("os.waitBytes", args, true)
+	return waitProcess(interpreter.BuiltinCtx{}, "os.waitBytes", args, true, false)
 }
 
-// waitProcess is os.wait (asBytes false) and os.waitBytes (asBytes true).
-func waitProcess(fnName string, args []interpreter.Value, asBytes bool) (interpreter.Value, error) {
-	if len(args) != 1 {
+// waitTimeoutFn implements `os.waitTimeout(p, ms) -> os.Result`: os.wait
+// bounded by a millisecond deadline. When the process has not exited in time
+// it throws kind "timeout" and leaves the process running; a later wait (or
+// os.kill) still works. ms 0 polls. task.cancel wakes it with "task cancelled".
+func waitTimeoutFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return waitProcess(ctx, "os.waitTimeout", args, false, true)
+}
+
+// waitBytesTimeoutFn implements `os.waitBytesTimeout(p, ms) ->
+// os.BytesResult`: os.waitTimeout with the captured streams as bytes.
+func waitBytesTimeoutFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return waitProcess(ctx, "os.waitBytesTimeout", args, true, true)
+}
+
+// maxTimeoutMillis is the largest ms a time.Duration holds.
+const maxTimeoutMillis = int64(math.MaxInt64) / int64(time.Millisecond)
+
+// waitProcess is os.wait / os.waitBytes and, with bounded, their xTimeout
+// forms, which take a second argument ms (0 to maxTimeoutMillis; 0 polls).
+func waitProcess(ctx interpreter.BuiltinCtx, fnName string, args []interpreter.Value, asBytes, bounded bool) (interpreter.Value, error) {
+	if !bounded && len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("%s expects 1 argument (process handle), got %d", fnName, len(args))
+	}
+	if bounded && len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("%s expects 2 arguments (process handle, ms), got %d", fnName, len(args))
 	}
 	handle, err := extractHandle(fnName, args[0])
 	if err != nil {
 		return interpreter.Null(), err
+	}
+	var ms int64
+	if bounded {
+		if args[1].Kind != interpreter.KindInt {
+			return interpreter.Null(), fmt.Errorf("%s: ms must be int, got %s", fnName, args[1].Kind)
+		}
+		ms = args[1].Int
+		if ms < 0 || ms > maxTimeoutMillis {
+			return interpreter.Null(), fmt.Errorf("%s: ms must be 0 to %d, got %d", fnName, maxTimeoutMillis, ms)
+		}
 	}
 	handlesMu.Lock()
 	state, ok := handles[handle]
@@ -556,7 +637,13 @@ func waitProcess(fnName string, args []interpreter.Value, asBytes bool) (interpr
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("%s: unknown process handle (%d)", fnName, handle)
 	}
-	<-state.done
+	if bounded {
+		if err := awaitExit(ctx, fnName, state, ms); err != nil {
+			return interpreter.Null(), err
+		}
+	} else {
+		<-state.done
+	}
 	// A non-ExitError from cmd.Wait (a stdout/stderr pipe-copy failure, say)
 	// means the process didn't cleanly report an exit code - surfacing exit 0
 	// with partial output would be reporting success where there was none.
@@ -573,6 +660,38 @@ func waitProcess(fnName string, args []interpreter.Value, asBytes bool) (interpr
 	// stays in the registry so os.wait / os.poll remain idempotent; a
 	// long-running spawner drops handles it is done with via os.release.
 	return captureResult(fnName, asBytes, state.exitCode, state.outRaw, state.errRaw, state.outTrunc, state.errTrunc)
+}
+
+// awaitExit waits up to ms for the process to exit: nil once it has, a
+// "timeout" error when ms pass first (the process keeps running), "task
+// cancelled" when task.cancel fires first. An exited process wins over a ready
+// timer or cancel, so ms 0 on a finished process always returns it.
+func awaitExit(ctx interpreter.BuiltinCtx, fnName string, state *processState, ms int64) error {
+	select {
+	case <-state.done:
+		return nil
+	default:
+	}
+	timer := time.NewTimer(time.Duration(ms) * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-state.done:
+		return nil
+	case <-timer.C:
+	case <-ctx.Cancel.CancelSignal():
+		select {
+		case <-state.done:
+			return nil
+		default:
+		}
+		return interpreter.ErrTaskCancelled()
+	}
+	select {
+	case <-state.done:
+		return nil
+	default:
+	}
+	return interpreter.KindedError("timeout", fmt.Sprintf("%s: the process did not exit within %d ms", fnName, ms))
 }
 
 // releaseFn implements `os.release(p) -> bool`. Drops the process handle from

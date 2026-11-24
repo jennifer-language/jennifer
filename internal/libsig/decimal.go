@@ -25,4 +25,5 @@ toString(decimal.Decimal|int|string) string
 toInt(decimal.Decimal|int|string) int
 toFloat(decimal.Decimal|int|string) float
 `)
+	deprecate("decimal", "toString", "`convert.toString` or `%v`", "0.29.0")
 }

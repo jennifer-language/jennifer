@@ -106,14 +106,14 @@ func (m *knnModel) nearest(x []float64) []neighbour {
 	return h
 }
 
-func (r *registry) kNNFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return r.fitKNN("kNN", args, false)
+func kNNFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return fitKNN("kNN", args, false)
 }
-func (r *registry) kNNRegressorFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return r.fitKNN("kNNRegressor", args, true)
+func kNNRegressorFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return fitKNN("kNNRegressor", args, true)
 }
 
-func (r *registry) fitKNN(name string, args []interpreter.Value, regress bool) (interpreter.Value, error) {
+func fitKNN(name string, args []interpreter.Value, regress bool) (interpreter.Value, error) {
 	if len(args) != 3 {
 		return interpreter.Null(), fmt.Errorf("ml.%s expects 3 arguments (X, y, k), got %d", name, len(args))
 	}
@@ -128,7 +128,7 @@ func (r *registry) fitKNN(name string, args []interpreter.Value, regress bool) (
 	if k > len(x) {
 		return interpreter.Null(), fmt.Errorf("ml.%s: k=%d exceeds the %d training rows", name, k, len(x))
 	}
-	return r.store(&knnModel{x: x, y: y, k: k, nf: len(x[0]), regress: regress}), nil
+	return storeModel(&knnModel{x: x, y: y, k: k, nf: len(x[0]), regress: regress}), nil
 }
 
 // --- Gaussian naive Bayes ---
@@ -159,7 +159,7 @@ func (m *naiveBayesModel) predictOne(x []float64) float64 {
 	return best
 }
 
-func (r *registry) naiveBayesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func naiveBayesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("ml.naiveBayes expects 2 arguments (X, y), got %d", len(args))
 	}
@@ -206,7 +206,7 @@ func (r *registry) naiveBayesFn(_ interpreter.BuiltinCtx, args []interpreter.Val
 			m.vars[ci][j] = popVar(col) + eps
 		}
 	}
-	return r.store(m), nil
+	return storeModel(m), nil
 }
 
 // --- logistic regression (binary + multiclass one-vs-rest) ---
@@ -304,7 +304,15 @@ func fitBinaryLogistic(x [][]float64, t []float64, lr float64, epochs int) ([]fl
 	return w, b, nil
 }
 
-func (r *registry) logisticRegressionFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+// Defaults of ml.LogisticOptions' zero fields.
+const (
+	defaultLearningRate = 0.1
+	defaultEpochs       = 1000
+)
+
+// logisticRegressionFn takes the deprecated chained optional arguments
+// (X, y [, lr [, epochs]]); logisticRegressionWithFn is the options form.
+func logisticRegressionFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) < 2 || len(args) > 4 {
 		return interpreter.Null(), fmt.Errorf("ml.logisticRegression expects 2 to 4 arguments (X, y [, lr [, epochs]]), got %d", len(args))
 	}
@@ -312,8 +320,8 @@ func (r *registry) logisticRegressionFn(_ interpreter.BuiltinCtx, args []interpr
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	lr := 0.1
-	epochs := 1000
+	lr := defaultLearningRate
+	epochs := defaultEpochs
 	if len(args) >= 3 {
 		if f, ok := args[2].AsFloat(); ok && f > 0 {
 			lr = f
@@ -327,14 +335,45 @@ func (r *registry) logisticRegressionFn(_ interpreter.BuiltinCtx, args []interpr
 		}
 		epochs = int(args[3].Int)
 	}
+	return fitLogistic("logisticRegression", x, y, lr, epochs)
+}
+
+// logisticRegressionWithFn implements
+// `ml.logisticRegressionWith(X, y, ml.LogisticOptions{learningRate, epochs})`.
+func logisticRegressionWithFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	const name = "logisticRegressionWith"
+	if len(args) != 3 {
+		return interpreter.Null(), fmt.Errorf("ml.%s expects 3 arguments (X, y, ml.LogisticOptions), got %d", name, len(args))
+	}
+	o, err := options(name, args[2], "LogisticOptions")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	lr, err := o.float("learningRate", defaultLearningRate)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	epochs, err := o.count("epochs", defaultEpochs, maxLogisticEpochs)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	x, y, err := fitData(name, args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return fitLogistic(name, x, y, lr, epochs)
+}
+
+// fitLogistic trains binary or one-vs-rest logistic regression.
+func fitLogistic(name string, x [][]float64, y []float64, lr float64, epochs int) (interpreter.Value, error) {
 	classes := uniqueSorted(y)
 	if len(classes) < 2 {
-		return interpreter.Null(), fmt.Errorf("ml.logisticRegression: need at least 2 classes, got %d", len(classes))
+		return interpreter.Null(), fmt.Errorf("ml.%s: need at least 2 classes, got %d", name, len(classes))
 	}
 	// One-vs-rest trains one classifier per class; an unbounded class count
 	// (e.g. continuous y mistaken for labels) would train that many models.
 	if len(classes) > maxClasses {
-		return interpreter.Null(), limits.Capf("ml.logisticRegression: %d distinct labels exceed the %d-class limit (is y continuous? use a regressor)", len(classes), maxClasses)
+		return interpreter.Null(), limits.Capf("ml.%s: %d distinct labels exceed the %d-class limit (is y continuous? use a regressor)", name, len(classes), maxClasses)
 	}
 	nf := len(x[0])
 	if len(classes) == 2 {
@@ -347,9 +386,9 @@ func (r *registry) logisticRegressionFn(_ interpreter.BuiltinCtx, args []interpr
 		}
 		w, b, err := fitBinaryLogistic(x, t, lr, epochs)
 		if err != nil {
-			return interpreter.Null(), fmt.Errorf("ml.logisticRegression: %v", err)
+			return interpreter.Null(), fmt.Errorf("ml.%s: %v", name, err)
 		}
-		return r.store(&logisticModel{classes: [2]float64{classes[0], classes[1]}, w: w, b: b, nf: nf}), nil
+		return storeModel(&logisticModel{classes: [2]float64{classes[0], classes[1]}, w: w, b: b, nf: nf}), nil
 	}
 	// Multiclass: one-vs-rest, one binary classifier per class.
 	ws := make([][]float64, len(classes))
@@ -363,11 +402,11 @@ func (r *registry) logisticRegressionFn(_ interpreter.BuiltinCtx, args []interpr
 		}
 		w, b, err := fitBinaryLogistic(x, t, lr, epochs)
 		if err != nil {
-			return interpreter.Null(), fmt.Errorf("ml.logisticRegression: %v", err)
+			return interpreter.Null(), fmt.Errorf("ml.%s: %v", name, err)
 		}
 		ws[c], bs[c] = w, b
 	}
-	return r.store(&logisticMultiModel{classes: classes, w: ws, b: bs, nf: nf}), nil
+	return storeModel(&logisticMultiModel{classes: classes, w: ws, b: bs, nf: nf}), nil
 }
 
 // --- shared helpers ---

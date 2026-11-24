@@ -29,6 +29,7 @@ io.printf("%d\n", $n);                      # 2
 | `task.cancelled()`              | `bool`          | Non-raising poll: true if the **current** spawn body has been cancelled (always false on main). |
 | `task.waitTimeout($t, ms)`      | `T`             | Like `task.wait`, but throws a catchable `Error{kind: "timeout"}` if `$t` doesn't finish in `ms` (`ms` up to ~9.2e12; a larger value is a catchable error, not a silent instant timeout). |
 | `task.waitAnyTimeout($ts, ms)`  | `int`           | Like `task.waitAny`, but throws a catchable `Error{kind: "timeout"}` if none finishes in `ms`. |
+| `task.waitAllTimeout($ts, ms)`  | `list of T`     | Like `task.waitAll`, but throws a catchable `Error{kind: "timeout"}` if not all finish in `ms`; the tasks keep running. |
 
 `task.wait` is the core call; the rest are conveniences or
 non-blocking variants. More complex patterns compose from these.
@@ -149,8 +150,9 @@ at a safe point. The tree-walker cannot preempt a goroutine; a non-loop
 computation is instead bounded by the call-depth guard.
 
 A non-terminating `spawn` can thus be cancelled. A body blocked in
-`time.sleep`, `channel.send` / `recv` / `select` or a `task` wait (`wait`,
-`waitAll`, `waitAny`, `waitTimeout`, `waitAnyTimeout`) or a socket read
+`time.sleep`, `channel.send` / `recv` / `select` (and their timeout forms), a
+`task` wait (`wait`, `waitAll`, `waitAny` and their timeout forms),
+`os.waitTimeout` / `waitBytesTimeout` or a socket read
 (`net.readBytes`, `readN`, `readAll`, UDP `recvFrom`, and so the `http`
 module's requests) wakes at once and the call raises the same "task
 cancelled"; a cancelled
@@ -211,8 +213,11 @@ completes within `ms`, and otherwise throws a **catchable**
 `Error{kind: "timeout"}` (message `task.waitTimeout: timed out after N ms`), the
 same kind `net` uses for its deadlines. `task.waitAnyTimeout($ts, ms)` is the
 multi-task form, returning the first
-finisher's index or throwing on timeout. On a timeout the task(s) stay live and
-unobserved, so follow up with a retry, or `task.cancel` + `task.discard`. A body
+finisher's index or throwing on timeout. `task.waitAllTimeout($ts, ms)` bounds
+`waitAll` by one deadline for the whole list. On a timeout the task(s) stay live
+and unobserved, so follow up with a retry, or `task.cancel` + `task.discard`.
+`ms` `0` polls: the result when the task (for `waitAllTimeout`: every task) has
+already finished, else the timeout at once. A body
 error re-raised by `waitTimeout` keeps its own kind, so check `kind` to tell the
 two apart:
 
@@ -235,9 +240,11 @@ The boundary checks are uniform across the library:
 | Wrong argument count | `task.wait expects 1 argument (task), got 2` |
 | Wrong type | `task.wait: argument must be a task, got int`, `task.waitAll: argument must be a list of task, got string`, `task.waitAll: element 2: argument must be a task, got int` |
 | Empty list to `waitAny` | `task.waitAny: list is empty (no tasks to wait on)` |
+| `ms` negative | `task.waitTimeout: timeout (ms) must be >= 0, got -1` |
 | `ms` too large | `task.waitTimeout: timeout (ms) 99999999999999999 is too large (max 9223372036854)` |
 
-All errors are positioned at the call site. Errors re-raised by
+These are kind `"runtime"`; a timeout is `"timeout"`, a cancelled wait
+`"cancelled"`. All errors are positioned at the call site. Errors re-raised by
 `task.wait` carry the position from the spawn body, so the report
 shows the actual fault location.
 

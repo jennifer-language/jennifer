@@ -87,6 +87,8 @@ func TestCancelInterruptsBlockedBuiltins(t *testing.T) {
 		{"waitAny", `def v as int init task.waitAny([$inner]);`},
 		{"waitTimeout", `def v as int init task.waitTimeout($inner, 3600000);`},
 		{"waitAnyTimeout", `def v as int init task.waitAnyTimeout([$inner], 3600000);`},
+		{"waitAllTimeout", `def v as list of int init task.waitAllTimeout([$inner], 3600000);`},
+		{"selectTimeout", `def v as int init channel.selectTimeout([$ch], 3600000);`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

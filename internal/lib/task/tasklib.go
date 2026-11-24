@@ -2,8 +2,9 @@
 // SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 // Package tasklib implements Jennifer's `task` library:
-// wait, poll, discard, waitAll, waitAny - the five user-facing
-// operations on `task of T` values produced by `spawn { ... }` blocks.
+// wait, poll, discard, waitAll, waitAny, cancel, cancelled and the bounded
+// waitTimeout / waitAnyTimeout / waitAllTimeout - the operations on
+// `task of T` values produced by `spawn { ... }` blocks.
 //
 // `task.wait` blocks on the underlying done channel and returns the
 // stored result (or re-raises the stored error so `try`/`catch` can
@@ -40,6 +41,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "cancelled", cancelledFn)
 	in.RegisterNamespaced(LibraryName, "waitTimeout", makeWaitTimeout(in))
 	in.RegisterNamespaced(LibraryName, "waitAnyTimeout", waitAnyTimeoutFn)
+	in.RegisterNamespaced(LibraryName, "waitAllTimeout", makeWaitAllTimeout(in))
 }
 
 // maxTimeoutMillis is the largest ms value that fits in a time.Duration (int64
@@ -192,34 +194,82 @@ func makeWaitAll(in *interpreter.Interpreter) interpreter.Builtin {
 		if err != nil {
 			return interpreter.Null(), err
 		}
-		results := make([]interpreter.Value, 0, len(states))
-		var firstErr error
 		cancel := ctx.Cancel.CancelSignal()
 		for _, state := range states {
 			if _, err := awaitDone(state, nil, cancel); err != nil {
 				return interpreter.Null(), err
 			}
-			in.MarkObserved(state)
-			if state.Err != nil && firstErr == nil {
-				firstErr = state.Err
+		}
+		return collectAll(in, states, innerT)
+	}
+}
+
+// collectAll marks every (finished) task observed and returns their results,
+// or re-raises the first error in list order once all are observed, so the
+// exit-time loud-fail doesn't fire on the survivors.
+func collectAll(in *interpreter.Interpreter, states []*interpreter.TaskState, innerT *parser.Type) (interpreter.Value, error) {
+	results := make([]interpreter.Value, 0, len(states))
+	var firstErr error
+	for _, state := range states {
+		in.MarkObserved(state)
+		if state.Err != nil && firstErr == nil {
+			firstErr = state.Err
+		}
+		if state.Err == nil {
+			results = append(results, state.Result)
+		}
+	}
+	if firstErr != nil {
+		return interpreter.Null(), firstErr
+	}
+	// When the task list carries a recorded element type (`list of
+	// task of T`), stamp the results as `list of T`. When it does not
+	// (a bare list-literal argument, whose ElemTyp is nil), return a
+	// GENERIC list - not `list of int` - so the binding site validates
+	// each result against the caller's declared type instead of
+	// relabeling strings (etc.) as ints via the recorded-type fast path.
+	if innerT != nil {
+		return interpreter.ListVal(*innerT, results), nil
+	}
+	return interpreter.Value{Kind: interpreter.KindList, List: results}, nil
+}
+
+// makeWaitAllTimeout is task.waitAll bounded by one millisecond deadline for
+// the whole list: the results when every task finishes in time (marking each
+// observed and re-raising the first body error, exactly like task.waitAll),
+// otherwise a catchable Error{kind: "timeout"}. On timeout no task is marked
+// observed and every task keeps running - the caller can wait again, or cancel
+// and discard. ms 0 polls: the results if all are already done.
+func makeWaitAllTimeout(in *interpreter.Interpreter) interpreter.Builtin {
+	return func(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+		if len(args) != 2 {
+			return interpreter.Null(), fmt.Errorf("task.waitAllTimeout expects 2 arguments (list of task, ms), got %d", len(args))
+		}
+		states, innerT, err := extractTaskList("task.waitAllTimeout", args[0])
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		d, err := requireMillis("task.waitAllTimeout", args[1])
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		// A closed channel, not timer.C: awaitDone may consume the one timer
+		// tick and still report done (the task finished as it fired), and the
+		// next task's wait must see the deadline as passed too.
+		expired := make(chan time.Time)
+		timer := time.AfterFunc(d, func() { close(expired) })
+		defer timer.Stop()
+		cancel := ctx.Cancel.CancelSignal()
+		for _, state := range states {
+			done, err := awaitDone(state, expired, cancel)
+			if err != nil {
+				return interpreter.Null(), err
 			}
-			if state.Err == nil {
-				results = append(results, state.Result)
+			if !done {
+				return interpreter.Null(), interpreter.KindedError("timeout", fmt.Sprintf("task.waitAllTimeout: timed out after %d ms", args[1].Int))
 			}
 		}
-		if firstErr != nil {
-			return interpreter.Null(), firstErr
-		}
-		// When the task list carries a recorded element type (`list of
-		// task of T`), stamp the results as `list of T`. When it does not
-		// (a bare list-literal argument, whose ElemTyp is nil), return a
-		// GENERIC list - not `list of int` - so the binding site validates
-		// each result against the caller's declared type instead of
-		// relabeling strings (etc.) as ints via the recorded-type fast path.
-		if innerT != nil {
-			return interpreter.ListVal(*innerT, results), nil
-		}
-		return interpreter.Value{Kind: interpreter.KindList, List: results}, nil
+		return collectAll(in, states, innerT)
 	}
 }
 

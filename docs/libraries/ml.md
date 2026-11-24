@@ -3,8 +3,8 @@
 Enable with `use ml;`. Classical / predictive machine learning on tabular data,
 a scikit-learn-lite companion to [`stats`](stats.md) and
 [`linalg`](linalg.md). Models follow a **fit / predict** shape: a fit function
-(`ml.kMeans`, `ml.linearRegression`, ...) trains and returns an opaque `ml.Model`
-handle, and `ml.predict` / `ml.transform` apply it. Pure Go stdlib, TinyGo-clean,
+(`ml.kMeans`, `ml.linearRegression`, ...) trains and returns an `ml.Model`
+value, and `ml.predict` / `ml.transform` apply it. Pure Go stdlib, TinyGo-clean,
 both binaries.
 
 It is **not** a deep-learning framework: tensors, autodiff and deep-net
@@ -32,8 +32,11 @@ model and a `list of float` for a regressor.
 
 ## Fitting models
 
-Each returns an opaque `ml.Model` handle. A fitted model is immutable, so a
-handle is safe to share across value-copies and `spawn`ed tasks (read-only).
+Each returns an `ml.Model`: an opaque, immutable value the garbage collector
+frees once no copy is left. Copies (assignments, struct fields, list elements,
+`spawn`ed tasks) share the fitted model; a model `==` itself and its copies, and
+two separate fits are never equal. The zero value (`def m as ml.Model;`) holds
+no model, and every call refuses it.
 
 | Fit call | Kind | Notes |
 | -------- | ---- | ----- |
@@ -43,15 +46,37 @@ handle is safe to share across value-copies and `spawn`ed tasks (read-only).
 | `ml.kNN(X, y, k)` | classifier | k-nearest-neighbours majority vote (Euclidean). |
 | `ml.kNNRegressor(X, y, k)` | regression | k-NN averaging the `k` nearest targets. |
 | `ml.naiveBayes(X, y)` | classifier | Gaussian naive Bayes (multiclass). |
-| `ml.logisticRegression(X, y [, lr [, epochs]])` | classifier | Binary or **multiclass** (one-vs-rest); gradient descent (`lr` default `0.1`, `epochs` `1000`). Only the binary case has `predictProba`. |
-| `ml.decisionTree(X, y [, maxDepth])` | classifier | CART with Gini impurity (`maxDepth` default `8`). |
-| `ml.decisionTreeRegressor(X, y [, maxDepth])` | regression | CART with variance-reduction splits, leaf = mean target. |
-| `ml.randomForest(X, y [, nTrees [, maxDepth]])` | classifier | Bagged trees; each split considers a fresh random `sqrt(features)` subset (`nTrees` default `10`, `maxDepth` `8`). |
-| `ml.randomForestRegressor(X, y [, nTrees [, maxDepth]])` | regression | Bagged regression trees with the same per-split feature subsets (mean of tree predictions). |
-| `ml.kMeans(X, k [, maxIter])` | clustering | Lloyd's algorithm, k-means++ seeding (`maxIter` default `100`). |
+| `ml.logisticRegression(X, y)` / `ml.logisticRegressionWith(X, y, ml.LogisticOptions)` | classifier | Binary or **multiclass** (one-vs-rest); gradient descent. Only the binary case has `predictProba`. |
+| `ml.decisionTree(X, y)` / `ml.decisionTreeWith(X, y, ml.TreeOptions)` | classifier | CART with Gini impurity. |
+| `ml.decisionTreeRegressor(X, y)` / `ml.decisionTreeRegressorWith(X, y, ml.TreeOptions)` | regression | CART with variance-reduction splits, leaf = mean target. |
+| `ml.randomForest(X, y)` / `ml.randomForestWith(X, y, ml.ForestOptions)` | classifier | Bagged trees; each split considers a fresh random `sqrt(features)` subset. |
+| `ml.randomForestRegressor(X, y)` / `ml.randomForestRegressorWith(X, y, ml.ForestOptions)` | regression | Bagged regression trees with the same per-split feature subsets (mean of tree predictions). |
+| `ml.kMeans(X, k)` / `ml.kMeansWith(X, k, ml.KMeansOptions)` | clustering | Lloyd's algorithm, k-means++ seeding. |
 | `ml.pca(X, nComponents)` | transform | Principal component analysis (covariance eigendecomposition). |
 | `ml.standardScaler(X)` | transform | Fit a z-score scaler (per-feature mean / stddev). |
 | `ml.minMaxScaler(X)` | transform | Fit a `[0, 1]` min-max scaler. |
+
+### Options
+
+The base form is the `With` form with zero options. A zero field is the
+default, a negative one throws (`"runtime"`), and a count past its ceiling
+throws `"limit"`.
+
+| Struct | Field | Type | Default | Ceiling |
+| --- | --- | --- | --- | --- |
+| `ml.LogisticOptions` | `learningRate` | `float` | `0.1` | - |
+| | `epochs` | `int` | `1000` | 1000000 |
+| `ml.TreeOptions` | `maxDepth` | `int` | `8` | 64 |
+| `ml.ForestOptions` | `nTrees` | `int` | `10` | 1000 |
+| | `maxDepth` | `int` | `8` | 64 |
+| `ml.KMeansOptions` | `maxIter` | `int` | `100` | 10000 |
+
+```jennifer
+use ml;
+def X as list of list of float init [[0.0], [1.0], [5.0], [6.0]];
+def y as list of int init [0, 0, 1, 1];
+def f as ml.Model init ml.randomForestWith($X, $y, ml.ForestOptions{nTrees: 50, maxDepth: 4});
+```
 
 ## Inspecting a fitted model
 
@@ -80,17 +105,11 @@ io.printf("y = %v . x + %v\n", ml.coefficients($m), ml.intercept($m));   # [2, 3
 | `ml.predict(model, X)` | `list of int` / `list of float` | Predicted labels (classifier / cluster) or values (regressor) for each row of `X`. |
 | `ml.transform(model, X)` | `list of list of float` | Transformed features (scalers, PCA). |
 | `ml.predictProba(model, X)` | `list of float` | Positive-class probability, for `logisticRegression`. |
-| `ml.free(model)` | `null` | Drop the model to free its memory early (a handle otherwise lives for the run). |
 
 The random models (`kMeans`, `randomForest`, `trainTestSplit`) draw from
 `math`'s shared random source, so `math.randSeed(n)` makes a run reproducible.
 Training needs reproducibility, not secrecy, so `ml` never uses `crypto`'s
 unseedable source.
-
-A fitted model lives in a per-run registry behind its handle until the program
-ends. When fitting **many** models in a loop (e.g. a large cross-validation),
-call `ml.free(model)` on the ones no longer needed so the registry does not grow
-unbounded.
 
 The cost-driving hyper-parameters are bounded; a value above the ceiling is a
 catchable error, as is a `polynomialFeatures` product that overflows to a
@@ -98,10 +117,7 @@ non-finite value.
 
 | Parameter | Ceiling | Kind |
 | --- | --- | --- |
-| tree `maxDepth` | 64 | `"runtime"` |
-| forest `nTrees` | 1000 | `"runtime"` |
-| `kMeans` `maxIter` | 10000 | `"runtime"` |
-| logistic `epochs` | 1000000 | `"runtime"` |
+| tree `maxDepth`, forest `nTrees`, `kMeans` `maxIter`, logistic `epochs` | see [Options](#options) | `"limit"` (`"runtime"` in the deprecated argument forms) |
 | multiclass logistic classes | 100 | `"limit"` |
 | `kFold` `nSamples * k` | 2097152 (524288 on `jennifer-tiny`) | `"limit"` |
 | `pca` features, `confusionMatrix` distinct labels | 1024 (256 on `jennifer-tiny`): the `linalg` element limit on the d x d result | `"limit"` |
@@ -130,6 +146,21 @@ io.printf("clusters: %v\n", ml.predict($km, $data));   # e.g. [0, 0, 1, 1]
 def scaler as ml.Model init ml.standardScaler($data);
 def scaled as list of list of float init ml.transform($scaler, $data);
 ```
+
+## Deprecated
+
+Each still works and is removed in 0.29.0; `jennifer lint` reports a call
+(L301).
+
+| Deprecated | Use instead |
+| --- | --- |
+| `ml.free(model)` | nothing: a model is a value the garbage collector frees (`ml.free` is a no-op) |
+| `ml.logisticRegression(X, y, lr[, epochs])` | `ml.logisticRegressionWith(X, y, ml.LogisticOptions{learningRate: ..., epochs: ...})` |
+| `ml.decisionTree(X, y, maxDepth)`, `ml.decisionTreeRegressor(...)` | `ml.decisionTreeWith(X, y, ml.TreeOptions{maxDepth: ...})`, `ml.decisionTreeRegressorWith(...)` |
+| `ml.randomForest(X, y, nTrees[, maxDepth])`, `ml.randomForestRegressor(...)` | `ml.randomForestWith(X, y, ml.ForestOptions{nTrees: ..., maxDepth: ...})`, `ml.randomForestRegressorWith(...)` |
+| `ml.kMeans(X, k, maxIter)` | `ml.kMeansWith(X, k, ml.KMeansOptions{maxIter: ...})` |
+
+In the deprecated forms an argument must be positive (`lr > 0`, counts `>= 1`).
 
 ## Model selection
 

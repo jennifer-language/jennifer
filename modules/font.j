@@ -1095,9 +1095,9 @@ func scaleAt(b as bytes, o as int) {
 }
 func round(v as float) {
     if ($v >= 0.0) {
-        return convert.toInt($v + 0.5);
+        return math.trunc($v + 0.5);
     }
-    return convert.toInt($v - 0.5);
+    return math.trunc($v - 0.5);
 }
 
 # ---- path ----

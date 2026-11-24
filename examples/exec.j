@@ -50,12 +50,29 @@ io.printf("stdout:    %s", $wr.stdout);
 def again as os.Result init os.wait($p);
 io.printf("idempotent wait: stdout matches = %t\n", $again.stdout == $wr.stdout);
 
+# os.spawnWith routes each stream: "" (capture, for os.wait), "inherit",
+# "discard", or a file path containing a separator.
+def quiet as os.Process init os.spawnWith(
+    ["sh", "-c", "echo dropped; echo kept 1>&2"],
+    os.SpawnOptions{stdout: "discard"});
+def qr as os.Result init os.wait($quiet);
+io.printf("=== os.spawnWith ===\n");
+io.printf("stdout empty: %t, stderr: %s", $qr.stdout == "", $qr.stderr);
+
 # ---- Kill ------------------------------------------------------------
 
 # os.kill sends SIGTERM to a spawned child. The exit code is < 0
 # when a process was terminated by a signal (the OS reports this
 # convention; Jennifer surfaces it verbatim).
 def long as os.Process init os.spawn(["sleep", "30"]);
+# os.waitTimeout bounds a wait: on "timeout" the child keeps running, and a
+# later wait (or os.kill) still works.
+try {
+    os.waitTimeout($long, 50);
+} catch (e) {
+    io.printf("=== os.waitTimeout ===\n");
+    io.printf("after 50 ms: %s\n", $e.kind);
+}
 os.kill($long);
 def killed as os.Result init os.wait($long);
 io.printf("=== os.kill ===\n");

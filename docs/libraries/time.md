@@ -137,7 +137,7 @@ at the requested unit.
 | `time.before($a, $b)`      | `bool`          | Strictly earlier (UTC instant compare).                |
 | `time.after($a, $b)`       | `bool`          | Strictly later.                                        |
 | `time.equal($a, $b)`       | `bool`          | Same UTC instant (the stored `offset` is ignored).     |
-| `time.sleep($d)`           | `null`          | Block the running task for the requested duration. Negative or zero `$d` returns immediately. |
+| `time.sleep($d)`           | `null`          | Block the running task for the requested duration. A zero `$d` returns at once; a negative one throws `"runtime"`. |
 
 Comparison is on the underlying UTC instant, so `13:00 CET` and
 `12:00 UTC` compare equal. The library has no operator overloading:
@@ -183,14 +183,17 @@ time.sleep(time.fromMilliseconds(250));   # 250 ms pause
 time.sleep(time.fromSeconds(2));          # 2 second pause
 ```
 
-Negative or zero durations return immediately, so a computed
-"remaining budget" needs no sign check:
+A zero duration returns at once; a negative one throws `"runtime"`, as a
+negative wait does everywhere, so a computed "remaining budget" checks its
+sign:
 
 ```jennifer
 def deadline as time.Time init time.add(time.now(), time.fromSeconds(5));
 # ... some work that may already overshoot ...
 def remaining as time.Duration init time.sub($deadline, time.now());
-time.sleep($remaining);   # no-op if work already took longer than 5s
+if (time.milliseconds($remaining) > 0) {
+    time.sleep($remaining);
+}
 ```
 
 `time.sleep` returns `null`; call `time.now()` afterwards for the
@@ -321,7 +324,7 @@ optional fractional seconds of up to 9 digits.
 |---|---|
 | `"time"` | an input string in `parse` / `fromIso` that does not match the layout or RFC 3339, names an impossible date, or lies outside the representable range |
 | `"limit"` | a `pad` above 4096 |
-| `"runtime"` | misuse: a wrong argument count or type, a malformed layout (unknown code, bad modifier), an offset past the 26 h cap, arithmetic or `fromUnix*` past the representable range |
+| `"runtime"` | misuse: a wrong argument count or type, a malformed layout (unknown code, bad modifier), an offset past the 26 h cap, arithmetic or `fromUnix*` past the representable range, a negative `sleep` |
 
 ### Messages
 

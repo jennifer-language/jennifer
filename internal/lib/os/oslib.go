@@ -23,7 +23,9 @@ import (
 	"runtime"
 	"strings"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -31,8 +33,8 @@ import (
 // and doubles as the namespace prefix.
 const LibraryName = "os"
 
-// dataKind is the kind of a child's captured output that is not valid UTF-8
-// (M29.21).
+// dataKind is the kind of outside text that is not valid UTF-8: a child's
+// captured output (M29.21), an environment variable, an argument (M29.50).
 const dataKind = "os"
 
 // userArgs holds the command-line arguments the user program sees. By
@@ -56,6 +58,8 @@ func SetUserArgs(args []string) {
 // take arguments.
 func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "getEnv", getEnvFn)
+	in.RegisterNamespaced(LibraryName, "getEnvBytes", getEnvBytesFn)
+	in.RegisterNamespaced(LibraryName, "argsBytes", argsBytesFn)
 	in.RegisterNamespaced(LibraryName, "setEnv", setEnvFn)
 	in.RegisterNamespaced(LibraryName, "unsetEnv", unsetEnvFn)
 	in.RegisterNamespaced(LibraryName, "hasEnv", hasEnvFn)
@@ -64,8 +68,11 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "run", runFn)
 	in.RegisterNamespaced(LibraryName, "runBytes", runBytesFn)
 	in.RegisterNamespaced(LibraryName, "spawn", spawnFn)
+	in.RegisterNamespaced(LibraryName, "spawnWith", spawnWithFn)
 	in.RegisterNamespaced(LibraryName, "wait", waitFn)
 	in.RegisterNamespaced(LibraryName, "waitBytes", waitBytesFn)
+	in.RegisterNamespaced(LibraryName, "waitTimeout", waitTimeoutFn)
+	in.RegisterNamespaced(LibraryName, "waitBytesTimeout", waitBytesTimeoutFn)
 	in.RegisterNamespaced(LibraryName, "poll", pollFn)
 	in.RegisterNamespaced(LibraryName, "kill", killFn)
 	in.RegisterNamespaced(LibraryName, "release", releaseFn)
@@ -82,7 +89,11 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespacedConst(LibraryName, "EOL", interpreter.StringVal(platformLineEnding()))
 	in.RegisterNamespacedConst(LibraryName, "DIRSEP", interpreter.StringVal(string(stdos.PathSeparator)))
 	in.RegisterNamespacedConst(LibraryName, "PATHSEP", interpreter.StringVal(string(stdos.PathListSeparator)))
-	in.RegisterNamespacedConst(LibraryName, "ARGS", argsConstant())
+	if args, err := argsConstant(); err != nil {
+		in.RegisterNamespacedConstError(LibraryName, "ARGS", err)
+	} else {
+		in.RegisterNamespacedConst(LibraryName, "ARGS", args)
+	}
 
 	// External-program execution result/handle types.
 	str := parser.PrimitiveType(parser.TypeString)
@@ -98,31 +109,53 @@ func Install(in *interpreter.Interpreter) {
 		{Name: "stderr", Type: byt},
 		{Name: "truncated", Type: parser.PrimitiveType(parser.TypeBool)},
 	})
+	// Options of spawnWith: where each child stream goes. "" (the zero
+	// value) or "capture" captures it for os.wait; "inherit", "discard", or
+	// a file path containing a separator.
+	in.RegisterNamespacedStruct(LibraryName, "SpawnOptions", []parser.StructField{
+		{Name: "stdout", Type: str},
+		{Name: "stderr", Type: str},
+	})
 	in.RegisterNamespacedStruct(LibraryName, "Process", []parser.StructField{
 		{Name: "handle", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "pid", Type: parser.PrimitiveType(parser.TypeInt)},
 	})
 }
 
-// argsConstant materialises a Jennifer `list of string` for `os.ARGS`.
-// Uses the user-args slice set by SetUserArgs when available; falls
-// back to the interpreter binary's own argv when nothing was set (so
-// library tests work without the CLI's hand-off).
-func argsConstant() interpreter.Value {
-	src := userArgs
-	if src == nil {
-		src = stdos.Args
-	}
+// argsConstant materialises a Jennifer `list of string` for `os.ARGS`
+// from argvSource. An argument that is not valid UTF-8 makes it an error
+// (kind "os", naming the argument index and byte offset), which every read of
+// `os.ARGS` throws; `os.argsBytes()` returns the raw arguments.
+func argsConstant() (interpreter.Value, error) {
+	src := argvSource()
 	data := make([]interpreter.Value, len(src))
 	for i, a := range src {
+		if off := limits.InvalidUTF8At(a); off >= 0 {
+			return interpreter.Null(), dataerr.New(dataKind, "os.ARGS: argument %d: invalid UTF-8 at byte %d; use os.argsBytes()", i, off)
+		}
 		data[i] = interpreter.StringVal(a)
 	}
-	return interpreter.ListVal(parser.PrimitiveType(parser.TypeString), data)
+	return interpreter.ListVal(parser.PrimitiveType(parser.TypeString), data), nil
+}
+
+// argsBytesFn implements `os.argsBytes() -> list of bytes`: the arguments of
+// os.ARGS as raw bytes, for a program that must take any argument.
+func argsBytesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 0 {
+		return interpreter.Null(), fmt.Errorf("os.argsBytes expects 0 arguments, got %d", len(args))
+	}
+	src := argvSource()
+	data := make([]interpreter.Value, len(src))
+	for i, a := range src {
+		data[i] = interpreter.BytesVal([]byte(a))
+	}
+	return interpreter.ListVal(parser.PrimitiveType(parser.TypeBytes), data), nil
 }
 
 // getEnvFn reads an environment variable. Unset variables produce the
 // empty string (no error) so callers can use `==`/`!=` against `""` to
-// branch. Mirrors Go's `os.Getenv`.
+// branch. A value that is not valid UTF-8 throws kind "os" naming the
+// variable and the byte offset; os.getEnvBytes returns it raw.
 func getEnvFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("os.getEnv expects 1 argument, got %d", len(args))
@@ -130,7 +163,24 @@ func getEnvFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("os.getEnv: variable name must be string, got %s", args[0].Kind)
 	}
-	return interpreter.StringVal(stdos.Getenv(args[0].Str)), nil
+	v := stdos.Getenv(args[0].Str)
+	if off := limits.InvalidUTF8At(v); off >= 0 {
+		return interpreter.Null(), dataerr.New(dataKind, "os.getEnv: %s: invalid UTF-8 at byte %d; use os.getEnvBytes", args[0].Str, off)
+	}
+	return interpreter.StringVal(v), nil
+}
+
+// getEnvBytesFn implements `os.getEnvBytes(name) -> bytes`: the variable's
+// raw value, empty when it is unset (like os.getEnv; os.hasEnv tells the two
+// apart).
+func getEnvBytesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("os.getEnvBytes expects 1 argument, got %d", len(args))
+	}
+	if args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("os.getEnvBytes: variable name must be string, got %s", args[0].Kind)
+	}
+	return interpreter.BytesVal([]byte(stdos.Getenv(args[0].Str))), nil
 }
 
 // setEnvFn sets an environment variable for the current process (and any
@@ -198,7 +248,7 @@ func hasEnvFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	return interpreter.BoolVal(ok), nil
 }
 
-// hasFlagFn returns true if `name` appears anywhere in `os.ARGS` as an
+// hasFlagFn (deprecated, M29.48: the args module) returns true if `name` appears anywhere in `os.ARGS` as an
 // exact-match element. Useful for the "did the user pass `--verbose`?"
 // pattern. Exact-match only: `--port=8080` does NOT satisfy
 // `os.hasFlag("--port")` - that form is deliberately not supported
@@ -290,7 +340,7 @@ func tempDirFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	return interpreter.StringVal(stdos.TempDir()), nil
 }
 
-// flagFn returns the argument that immediately follows `name` in
+// flagFn (deprecated, M29.48: the args module) returns the argument that immediately follows `name` in
 // `os.ARGS`, or `""` if `name` is absent or appears only at the end of
 // the argv. Like `os.getEnv`, missing values are an empty string
 // rather than an error so callers can compare against `""`. The
@@ -308,6 +358,9 @@ func flagFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	argv := argvSource()
 	for i, a := range argv {
 		if a == name && i+1 < len(argv) {
+			if off := limits.InvalidUTF8At(argv[i+1]); off >= 0 {
+				return interpreter.Null(), dataerr.New(dataKind, "os.flag: argument %d: invalid UTF-8 at byte %d", i+1, off)
+			}
 			return interpreter.StringVal(argv[i+1]), nil
 		}
 	}

@@ -21,7 +21,7 @@ io.printf("%s\n", convert.typeOf(5 // 2));     # "int"
 
 | Call                                       | Source kinds                | Behavior                                                              |
 | ------------------------------------------ | --------------------------- | --------------------------------------------------------------------- |
-| `convert.toInt(v)`                         | int / float / string / bool | identity / truncate / parse (base 10) / `true`=1, `false`=0            |
+| `convert.toInt(v)`                         | int / float / string / bool | identity / truncate (deprecated, see below) / parse (base 10) / `true`=1, `false`=0 |
 | `convert.toInt(s, radix)`                  | string                      | parse `s` in `radix` 2 / 8 / 10 / 16 (bare digits; strip any `0x` / `0o` / `0b` prefix first) |
 | `convert.toFloat(v)`                       | int / float / string / bool | convert / identity / parse decimal (sign, digits, point, exponent; no `_`, hex, `NaN` or `Inf`) / `true`=1.0, `false`=0.0 |
 | `convert.toString(v)`                      | any                         | always succeeds; uses the value's display form                        |
@@ -36,6 +36,20 @@ Text and bytes meet in one place, [`encoding`](encoding.md)`.encode` /
 UTF-8-only copy of them with the same arguments, and the radix form
 `convert.toString(n, radix)` (now `io.sprintf("%d|base=16", n)`) were removed
 in 0.28.0; lint L302 points at a leftover call.
+
+### `toInt` of a float
+
+`convert.toInt(f)` truncates toward zero until 0.29.0; `jennifer lint` reports
+(L301) a call whose argument's static type is `float`, other than an integral
+literal such as `3.0`. From 0.29.0 it accepts only an integral float (`3.0` ->
+`3`) and throws `"runtime"` for any other, so the caller states the rounding
+with a `math` function, which returns the `int`:
+
+| Wanted | Call |
+| --- | --- |
+| toward zero (today's result) | `math.trunc(f)` |
+| nearest, half away from zero | `math.round(f)` |
+| down / up | `math.floor(f)` / `math.ceil(f)` |
 
 ### `toCodepoint` / `fromCodepoint`: code point, not "character"
 

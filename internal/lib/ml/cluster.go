@@ -28,33 +28,71 @@ func (m *kMeansModel) predictOne(x []float64) float64 {
 	return float64(best)
 }
 
-func (r *registry) kMeansFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) < 2 || len(args) > 3 {
-		return interpreter.Null(), fmt.Errorf("ml.kMeans expects 2 or 3 arguments (X, k [, maxIter]), got %d", len(args))
-	}
-	x, err := matrix("kMeans", args, 0)
+// defaultMaxIter is ml.KMeansOptions' maxIter when zero.
+const defaultMaxIter = 100
+
+// kMeansArgs reads (X, k) of kMeans / kMeansWith.
+func kMeansArgs(name string, args []interpreter.Value) ([][]float64, int, error) {
+	x, err := matrix(name, args, 0)
 	if err != nil {
-		return interpreter.Null(), err
+		return nil, 0, err
 	}
 	if args[1].Kind != interpreter.KindInt {
-		return interpreter.Null(), fmt.Errorf("ml.kMeans: k must be an int")
+		return nil, 0, fmt.Errorf("ml.%s: k must be an int", name)
 	}
 	k := int(args[1].Int)
 	if k < 1 || k > len(x) {
-		return interpreter.Null(), fmt.Errorf("ml.kMeans: k must be in [1, rows] (got k=%d, rows=%d)", k, len(x))
+		return nil, 0, fmt.Errorf("ml.%s: k must be in [1, rows] (got k=%d, rows=%d)", name, k, len(x))
 	}
-	maxIter := 100
+	return x, k, nil
+}
+
+// kMeansWithFn implements `ml.kMeansWith(X, k, ml.KMeansOptions{maxIter})`.
+func kMeansWithFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	const name = "kMeansWith"
+	if len(args) != 3 {
+		return interpreter.Null(), fmt.Errorf("ml.%s expects 3 arguments (X, k, ml.KMeansOptions), got %d", name, len(args))
+	}
+	o, err := options(name, args[2], "KMeansOptions")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	maxIter, err := o.count("maxIter", defaultMaxIter, maxKMeansIter)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	x, k, err := kMeansArgs(name, args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return trainKMeans(name, x, k, maxIter)
+}
+
+// kMeansFn takes the deprecated chained optional argument (X, k [, maxIter]).
+func kMeansFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) < 2 || len(args) > 3 {
+		return interpreter.Null(), fmt.Errorf("ml.kMeans expects 2 or 3 arguments (X, k [, maxIter]), got %d", len(args))
+	}
+	x, k, err := kMeansArgs("kMeans", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	maxIter := defaultMaxIter
 	if len(args) == 3 {
 		if args[2].Kind != interpreter.KindInt || args[2].Int < 1 || args[2].Int > maxKMeansIter {
 			return interpreter.Null(), fmt.Errorf("ml.kMeans: maxIter must be in [1, %d]", maxKMeansIter)
 		}
 		maxIter = int(args[2].Int)
 	}
+	return trainKMeans("kMeans", x, k, maxIter)
+}
+
+func trainKMeans(name string, x [][]float64, k, maxIter int) (interpreter.Value, error) {
 	cen, err := kMeansFit(x, k, maxIter)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("ml.kMeans: %v", err)
+		return interpreter.Null(), fmt.Errorf("ml.%s: %v", name, err)
 	}
-	return r.store(&kMeansModel{centroids: cen, nf: len(x[0])}), nil
+	return storeModel(&kMeansModel{centroids: cen, nf: len(x[0])}), nil
 }
 
 // kMeansFit runs Lloyd's algorithm with k-means++ seeding, drawing from `math`'s

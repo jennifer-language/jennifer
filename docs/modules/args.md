@@ -3,8 +3,8 @@
 Import with `import "args.j" as args;`. A declarative CLI parser covering the
 common surface of Python's `argparse`: typed flags (long + short), defaults,
 `required`, `choices`, `count` / `append` actions, positionals with `nargs`,
-subcommands, and `--version`. It is the structured layer over `os.ARGS` (`os.hasFlag` / `os.flag`
-are primitive lookups). Pure Jennifer over `strings` + `convert` + `lists` +
+subcommands, and `--version`. It is the structured layer over `os.ARGS`,
+replacing the deprecated `os.hasFlag` / `os.flag`. Pure Jennifer over `strings` + `convert` + `lists` +
 `maps`, so it runs on **both binaries**.
 
 ```jennifer
@@ -192,8 +192,8 @@ prefix-abbreviation matching (`--verb` for `--verbose`), and `@argfile`.
 
 ## See also
 
-- [os.md](../libraries/os.md) - `os.ARGS` (the input) and the primitive
-  `os.hasFlag` / `os.flag`.
+- [os.md](../libraries/os.md) - `os.ARGS` (the input), `os.argsBytes`, and
+  the mapping from the deprecated `os.hasFlag` / `os.flag`.
 - [modules/index.md](index.md) - the module catalog and import rules.
 
 ## Academy talks

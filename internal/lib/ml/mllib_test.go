@@ -13,8 +13,6 @@ import (
 
 // --- test helpers ---
 
-func newReg() *registry { return &registry{models: map[int64]any{}} }
-
 func mat(rows ...[]float64) interpreter.Value {
 	out := make([]interpreter.Value, len(rows))
 	for i, r := range rows {
@@ -60,35 +58,33 @@ func near(a, b, tol float64) bool { return math.Abs(a-b) <= tol }
 
 // TestLinearRegression checks an exact linear fit and ridge shrinkage.
 func TestLinearRegression(t *testing.T) {
-	r := newReg()
 	// y = 2*x1 + 3*x2 + 1 exactly.
 	X := mat([]float64{1, 1}, []float64{2, 1}, []float64{1, 2}, []float64{3, 2}, []float64{2, 3}, []float64{4, 1})
 	y := vec(6, 8, 9, 13, 14, 12)
-	m := ok(t, r.linearRegressionFn, X, y)
-	pred := ok(t, r.predictFn, m, mat([]float64{5, 5}))
+	m := ok(t, linearRegressionFn, X, y)
+	pred := ok(t, predictFn, m, mat([]float64{5, 5}))
 	if !near(fvals(pred)[0], 26, 1e-6) {
 		t.Errorf("linreg predict [5,5] = %v, want 26", fvals(pred)[0])
 	}
-	r2 := ok(t, r2Fn, y, ok(t, r.predictFn, m, X))
+	r2 := ok(t, r2Fn, y, ok(t, predictFn, m, X))
 	if !near(r2.Float, 1.0, 1e-9) {
 		t.Errorf("r2 = %v, want 1", r2.Float)
 	}
 	// Ridge shrinks coefficients toward zero vs OLS.
-	ols := r.models[m.Fields[0].Value.Int].(*linearModel)
-	mr := ok(t, r.ridgeFn, X, y, interpreter.FloatVal(10))
-	ridge := r.models[mr.Fields[0].Value.Int].(*linearModel)
+	ols := modelOf(m).(*linearModel)
+	mr := ok(t, ridgeFn, X, y, interpreter.FloatVal(10))
+	ridge := modelOf(mr).(*linearModel)
 	if math.Abs(ridge.coef[0]) >= math.Abs(ols.coef[0]) {
 		t.Errorf("ridge coef %v not shrunk vs OLS %v", ridge.coef[0], ols.coef[0])
 	}
 	// Errors.
-	fails(t, r.linearRegressionFn, X, vec(1, 2)) // length mismatch
-	fails(t, r.ridgeFn, X, y, interpreter.FloatVal(-1))
+	fails(t, linearRegressionFn, X, vec(1, 2)) // length mismatch
+	fails(t, ridgeFn, X, y, interpreter.FloatVal(-1))
 }
 
 // TestClassifiers checks kNN / naiveBayes / decisionTree / randomForest /
 // logistic all separate a clean two-cluster problem.
 func TestClassifiers(t *testing.T) {
-	r := newReg()
 	X := mat([]float64{1, 1}, []float64{1.5, 2}, []float64{2, 1}, []float64{8, 8}, []float64{8.5, 9}, []float64{9, 8})
 	y := vec(0, 0, 0, 1, 1, 1)
 	test := mat([]float64{1.2, 1.2}, []float64{8.7, 8.5})
@@ -97,13 +93,13 @@ func TestClassifiers(t *testing.T) {
 		name  string
 		model interpreter.Value
 	}{
-		{"kNN", ok(t, r.kNNFn, X, y, iv(3))},
-		{"naiveBayes", ok(t, r.naiveBayesFn, X, y)},
-		{"decisionTree", ok(t, r.decisionTreeFn, X, y)},
-		{"randomForest", ok(t, r.randomForestFn, X, y, iv(15))},
-		{"logistic", ok(t, r.logisticRegressionFn, X, y)},
+		{"kNN", ok(t, kNNFn, X, y, iv(3))},
+		{"naiveBayes", ok(t, naiveBayesFn, X, y)},
+		{"decisionTree", ok(t, decisionTreeFn, X, y)},
+		{"randomForest", ok(t, randomForestFn, X, y, iv(15))},
+		{"logistic", ok(t, logisticRegressionFn, X, y)},
 	} {
-		got := fvals(ok(t, r.predictFn, tc.model, test))
+		got := fvals(ok(t, predictFn, tc.model, test))
 		for i := range want {
 			if got[i] != want[i] {
 				t.Errorf("%s predict[%d] = %v, want %v", tc.name, i, got[i], want[i])
@@ -111,56 +107,54 @@ func TestClassifiers(t *testing.T) {
 		}
 	}
 	// logistic proba is monotone with the class and in [0,1].
-	log := ok(t, r.logisticRegressionFn, X, y)
-	pr := fvals(ok(t, r.predictProbaFn, log, test))
+	log := ok(t, logisticRegressionFn, X, y)
+	pr := fvals(ok(t, predictProbaFn, log, test))
 	if !(pr[0] < 0.5 && pr[1] > 0.5) {
 		t.Errorf("logistic proba %v not separating", pr)
 	}
 	// predictProba must reject a feature-count mismatch (would otherwise panic
 	// with an out-of-range Go slice index) and refuse a non-prober model.
-	fails(t, r.predictProbaFn, log, mat([]float64{5})) // 1 feature vs 2 fit
-	fails(t, r.predictProbaFn, ok(t, r.linearRegressionFn, X, y), test)
+	fails(t, predictProbaFn, log, mat([]float64{5})) // 1 feature vs 2 fit
+	fails(t, predictProbaFn, ok(t, linearRegressionFn, X, y), test)
 	// Multiclass logistic (one-vs-rest) separates 3 well-separated groups; a
 	// multiclass model is not a prober (predictProba refuses it).
 	MX := mat([]float64{0, 0}, []float64{0.2, 0.1}, []float64{5, 0}, []float64{5.1, 0.2}, []float64{0, 5}, []float64{0.1, 5.1})
 	my := vec(0, 0, 1, 1, 2, 2)
-	multi := ok(t, r.logisticRegressionFn, MX, my)
-	got := fvals(ok(t, r.predictFn, multi, mat([]float64{5, 0.1}, []float64{0.1, 5})))
+	multi := ok(t, logisticRegressionFn, MX, my)
+	got := fvals(ok(t, predictFn, multi, mat([]float64{5, 0.1}, []float64{0.1, 5})))
 	if got[0] != 1 || got[1] != 2 {
 		t.Errorf("multiclass logistic predict = %v, want [1, 2]", got)
 	}
-	fails(t, r.predictProbaFn, multi, mat([]float64{5, 0.1}))
+	fails(t, predictProbaFn, multi, mat([]float64{5, 0.1}))
 	// A single class is rejected.
-	fails(t, r.logisticRegressionFn, X, vec(1, 1, 1, 1, 1, 1))
+	fails(t, logisticRegressionFn, X, vec(1, 1, 1, 1, 1, 1))
 }
 
 // TestKMeans checks the two well-separated groups land in different clusters.
 func TestKMeans(t *testing.T) {
-	r := newReg()
 	X := mat([]float64{0, 0}, []float64{0.1, 0.1}, []float64{0.2, 0}, []float64{5, 5}, []float64{5.1, 4.9}, []float64{4.9, 5})
-	m := ok(t, r.kMeansFn, X, iv(2))
-	lab := fvals(ok(t, r.predictFn, m, X))
+	m := ok(t, kMeansFn, X, iv(2))
+	lab := fvals(ok(t, predictFn, m, X))
 	if lab[0] == lab[3] || lab[0] != lab[1] || lab[1] != lab[2] || lab[3] != lab[4] || lab[4] != lab[5] {
 		t.Errorf("kMeans labels %v do not separate the two groups", lab)
 	}
-	fails(t, r.kMeansFn, X, iv(0))  // k < 1
-	fails(t, r.kMeansFn, X, iv(99)) // k > rows
+	fails(t, kMeansFn, X, iv(0))  // k < 1
+	fails(t, kMeansFn, X, iv(99)) // k > rows
 }
 
 // TestPcaAndScalers checks PCA reduces dimensionality and captures the dominant
 // axis, and the scalers center/scale correctly.
 func TestPcaAndScalers(t *testing.T) {
-	r := newReg()
 	// Data varying mostly along x (axis 0).
 	X := mat([]float64{-2, 0}, []float64{-1, 0.1}, []float64{0, -0.1}, []float64{1, 0}, []float64{2, 0.1})
-	pc := ok(t, r.pcaFn, X, iv(1))
-	tr := ok(t, r.transformFn, pc, X)
+	pc := ok(t, pcaFn, X, iv(1))
+	tr := ok(t, transformFn, pc, X)
 	if len(tr.List) != 5 || len(tr.List[0].List) != 1 {
 		t.Fatalf("pca transform shape wrong: %d x %d", len(tr.List), len(tr.List[0].List))
 	}
 	// Standard scaler: each feature becomes mean 0, unit variance.
-	sc := ok(t, r.standardScalerFn, X)
-	st := ok(t, r.transformFn, sc, X)
+	sc := ok(t, standardScalerFn, X)
+	st := ok(t, transformFn, sc, X)
 	col0 := 0.0
 	for _, row := range st.List {
 		col0 += row.List[0].Float
@@ -169,8 +163,8 @@ func TestPcaAndScalers(t *testing.T) {
 		t.Errorf("standardized feature 0 mean = %v, want 0", col0/5)
 	}
 	// Min-max scaler: values land in [0,1].
-	mm := ok(t, r.minMaxScalerFn, X)
-	mt := ok(t, r.transformFn, mm, X)
+	mm := ok(t, minMaxScalerFn, X)
+	mt := ok(t, transformFn, mm, X)
 	for _, row := range mt.List {
 		for _, e := range row.List {
 			if e.Float < -1e-12 || e.Float > 1+1e-12 {
@@ -178,7 +172,7 @@ func TestPcaAndScalers(t *testing.T) {
 			}
 		}
 	}
-	fails(t, r.pcaFn, X, iv(5)) // nComponents > features
+	fails(t, pcaFn, X, iv(5)) // nComponents > features
 }
 
 // TestMetrics pins the classification and regression metrics.
@@ -234,47 +228,46 @@ func TestMetrics(t *testing.T) {
 // TestIntrospectionAndExtras covers the introspection accessors, the regression
 // variants, lasso, polynomial features, and the new metrics.
 func TestIntrospectionAndExtras(t *testing.T) {
-	r := newReg()
 	// y = 2*x1 + 3*x2 + 1: coefficients / intercept read back exactly.
 	X := mat([]float64{1, 1}, []float64{2, 1}, []float64{1, 2}, []float64{3, 2}, []float64{2, 3}, []float64{4, 1})
 	y := vec(6, 8, 9, 13, 14, 12)
-	lr := ok(t, r.linearRegressionFn, X, y)
-	coef := fvals(ok(t, r.coefficientsFn, lr))
+	lr := ok(t, linearRegressionFn, X, y)
+	coef := fvals(ok(t, coefficientsFn, lr))
 	if !near(coef[0], 2, 1e-6) || !near(coef[1], 3, 1e-6) {
 		t.Errorf("coefficients = %v, want [2,3]", coef)
 	}
-	if !near(ok(t, r.interceptFn, lr).Float, 1, 1e-6) {
-		t.Errorf("intercept = %v, want 1", ok(t, r.interceptFn, lr).Float)
+	if !near(ok(t, interceptFn, lr).Float, 1, 1e-6) {
+		t.Errorf("intercept = %v, want 1", ok(t, interceptFn, lr).Float)
 	}
 	// Lasso shrinks coefficients vs OLS (L1 penalty).
-	las := ok(t, r.lassoFn, X, y, interpreter.FloatVal(2))
-	lc := fvals(ok(t, r.coefficientsFn, las))
+	las := ok(t, lassoFn, X, y, interpreter.FloatVal(2))
+	lc := fvals(ok(t, coefficientsFn, las))
 	if math.Abs(lc[0]) >= math.Abs(coef[0]) {
 		t.Errorf("lasso coef %v not shrunk vs OLS %v", lc[0], coef[0])
 	}
 	// PCA: components + explained-variance ratios (descending, sum <= 1).
-	pc := ok(t, r.pcaFn, X, iv(2))
-	ev := fvals(ok(t, r.explainedVarianceFn, pc))
+	pc := ok(t, pcaFn, X, iv(2))
+	ev := fvals(ok(t, explainedVarianceFn, pc))
 	if ev[0] < ev[1] || ev[0]+ev[1] > 1.0000001 {
 		t.Errorf("explainedVariance = %v (want descending, sum<=1)", ev)
 	}
-	if len(ok(t, r.componentsFn, pc).List) != 2 {
+	if len(ok(t, componentsFn, pc).List) != 2 {
 		t.Errorf("components should have 2 rows")
 	}
 	// Wrong-model accessor errors.
-	fails(t, r.centroidsFn, lr)
-	fails(t, r.componentsFn, lr)
+	fails(t, centroidsFn, lr)
+	fails(t, componentsFn, lr)
 
 	// Regression variants: kNN + tree regressors return floats near the target.
-	knnr := ok(t, r.kNNRegressorFn, X, y, iv(3))
-	if v := ok(t, r.predictFn, knnr, mat([]float64{2, 2})); v.List[0].Kind != interpreter.KindFloat {
+	knnr := ok(t, kNNRegressorFn, X, y, iv(3))
+	if v := ok(t, predictFn, knnr, mat([]float64{2, 2})); v.List[0].Kind != interpreter.KindFloat {
 		t.Errorf("kNNRegressor should return floats")
 	}
-	ok(t, r.decisionTreeRegressorFn, X, y)
+	ok(t, decisionTreeRegressorFn, X, y)
 
 	// Feature importances of a tree sum to 1 (or 0 for a trivial tree).
 	cy := vec(0, 0, 1, 1, 1, 0)
-	fi := fvals(ok(t, r.featureImportancesFn, ok(t, r.decisionTreeFn, X, cy)))
+	fi := fvals(ok(t, featureImportancesFn, ok(t, decisionTreeFn, X, cy)))
 	sum := 0.0
 	for _, v := range fi {
 		sum += v
@@ -309,18 +302,17 @@ func TestIntrospectionAndExtras(t *testing.T) {
 // bounded, so a runaway value is a catchable error rather than a stack overflow
 // / hang / OOM.
 func TestResourceCaps(t *testing.T) {
-	r := newReg()
 	X := mat([]float64{1}, []float64{2}, []float64{3}, []float64{4})
 	y := vec(0, 1, 0, 1)
-	fails(t, r.decisionTreeFn, X, y, iv(1000000))                                    // maxDepth > 64 (recursion depth)
-	fails(t, r.randomForestFn, X, y, iv(1000000))                                    // nTrees > 1000 (OOM)
-	fails(t, r.kMeansFn, X, iv(2), iv(100000000))                                    // maxIter > 10000 (hang)
-	fails(t, r.logisticRegressionFn, X, y, interpreter.FloatVal(0.1), iv(999999999)) // epochs (hang)
-	fails(t, kFoldFn, iv(1000000), iv(1000000))                                      // nSamples*k amplification (OOM)
+	fails(t, decisionTreeFn, X, y, iv(1000000))                                    // maxDepth > 64 (recursion depth)
+	fails(t, randomForestFn, X, y, iv(1000000))                                    // nTrees > 1000 (OOM)
+	fails(t, kMeansFn, X, iv(2), iv(100000000))                                    // maxIter > 10000 (hang)
+	fails(t, logisticRegressionFn, X, y, interpreter.FloatVal(0.1), iv(999999999)) // epochs (hang)
+	fails(t, kFoldFn, iv(1000000), iv(1000000))                                    // nSamples*k amplification (OOM)
 	// The generous ceilings still admit any realistic setting.
-	ok(t, r.decisionTreeFn, X, y, iv(64))
-	ok(t, r.randomForestFn, X, y, iv(1000))
-	ok(t, r.kMeansFn, X, iv(2), iv(10000))
+	ok(t, decisionTreeFn, X, y, iv(64))
+	ok(t, randomForestFn, X, y, iv(1000))
+	ok(t, kMeansFn, X, iv(2), iv(10000))
 	ok(t, kFoldFn, iv(10000), iv(10))
 
 	// polynomialFeatures must not leak a non-finite product (overflow guard).
@@ -345,16 +337,15 @@ func TestResourceCaps(t *testing.T) {
 	}
 	bigX := interpreter.ListVal(parser.ListType(parser.PrimitiveType(parser.TypeFloat)), manyRows)
 	bigY := interpreter.ListVal(parser.PrimitiveType(parser.TypeFloat), manyLabels)
-	fails(t, r.logisticRegressionFn, bigX, bigY)
+	fails(t, logisticRegressionFn, bigX, bigY)
 }
 
 // TestSplitAndFold checks the split sizes / disjointness and the k-fold
 // partition covers every index exactly once as a test index.
 func TestSplitAndFold(t *testing.T) {
-	r := newReg()
 	X := mat([]float64{1}, []float64{2}, []float64{3}, []float64{4}, []float64{5}, []float64{6}, []float64{7}, []float64{8}, []float64{9}, []float64{10})
 	y := vec(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-	sp := ok(t, r.trainTestSplitFn, X, y, interpreter.FloatVal(0.3))
+	sp := ok(t, trainTestSplitFn, X, y, interpreter.FloatVal(0.3))
 	trX := sp.Fields[0].Value
 	teX := sp.Fields[2].Value
 	if len(trX.List) != 7 || len(teX.List) != 3 {
@@ -389,7 +380,6 @@ func TestSplitAndFold(t *testing.T) {
 // incremental counts would mis-split on a dataset this size but still pass the
 // tiny cluster tests).
 func TestTreeSweepSplits(t *testing.T) {
-	r := newReg()
 	// 60 rows, label = (feature 0 >= 0.5); feature 1 is pure noise.
 	var rows [][]float64
 	var cls []float64
@@ -403,8 +393,8 @@ func TestTreeSweepSplits(t *testing.T) {
 		}
 	}
 	X := mat(rows...)
-	tree := ok(t, r.decisionTreeFn, X, vec(cls...))
-	pred := fvals(ok(t, r.predictFn, tree, X))
+	tree := ok(t, decisionTreeFn, X, vec(cls...))
+	pred := fvals(ok(t, predictFn, tree, X))
 	for i := range cls {
 		if pred[i] != cls[i] {
 			t.Fatalf("axis-aligned split not learned: row %d pred %v want %v", i, pred[i], cls[i])
@@ -421,8 +411,8 @@ func TestTreeSweepSplits(t *testing.T) {
 			reg = append(reg, 0)
 		}
 	}
-	rt := ok(t, r.decisionTreeRegressorFn, X, vec(reg...))
-	rp := fvals(ok(t, r.predictFn, rt, mat([]float64{0.1, 3}, []float64{0.9, 3})))
+	rt := ok(t, decisionTreeRegressorFn, X, vec(reg...))
+	rp := fvals(ok(t, predictFn, rt, mat([]float64{0.1, 3}, []float64{0.9, 3})))
 	if !near(rp[0], 0, 1e-9) || !near(rp[1], 10, 1e-9) {
 		t.Fatalf("regression step not recovered: got %v, want [0 10]", rp)
 	}

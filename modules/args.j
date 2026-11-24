@@ -7,7 +7,7 @@
  * `argparse` plus the features an argparse user misses immediately: typed flags
  * (long + short), defaults, required args, `choices`, `count` / `append` actions,
  * positionals with `nargs`, subcommands, and `--version`. It is the structured
- * layer over `os.ARGS` (`os.hasFlag` / `os.flag` are primitive lookups). Pure
+ * layer over `os.ARGS`, replacing the deprecated `os.hasFlag` / `os.flag`. Pure
  * Jennifer over `strings` + `convert` + `lists` + `maps`, so it runs on **both
  * binaries**.
  *

@@ -51,7 +51,6 @@ infinities.
 | `decimal.sign(d)` | `int` | `-1`, `0` or `1`. |
 | `decimal.scale(d)` | `int` | The number of digits after the point. |
 | `decimal.isInteger(d)` | `bool` | No fractional part (`3.000` is an integer). |
-| `decimal.toString(d)` | `string` | Plain notation, never an exponent: the same text `%v` prints. |
 | `decimal.toInt(d)` | `int` | Only an integral value that fits an `int`; anything else is an error (round first). |
 | `decimal.toFloat(d)` | `float` | The nearest `float`. A value too large for a float is an error. |
 
@@ -64,8 +63,9 @@ ordering use `decimal.compare(a, b) < 0`; `<` / `>` on a `Decimal` are a
 positioned error, like on any opaque value.
 
 `%v`, `convert.toString` and the REPL print plain notation with exactly the
-value's scale: `12.340`, `-0.05`, `1267650600228229401496703205376`. An
-uninitialised `def d as decimal.Decimal;` is `0`.
+value's scale, never an exponent: `12.340`, `-0.05`,
+`1267650600228229401496703205376`. An uninitialised `def d as decimal.Decimal;`
+is `0`.
 
 ## Division
 
@@ -122,9 +122,17 @@ All are catchable with `try` / `catch`.
 | `"runtime"` | An argument of the wrong kind: a `float` or `bool` operand, an unknown rounding mode, a negative scale (`decimal.mul: a float operand must go through decimal.from first`). |
 
 Parsing and arithmetic count digits the same way (leading zeros do not
-count), so `toString` of any Decimal parses back. 5^4^3^2
+count), so `convert.toString` of any Decimal parses back. 5^4^3^2
 (`decimal.pow(5, 262144)`, 183,231 digits) fits on the default build, where
 printing or parsing a value at the cap takes about 0.3 s.
+
+## Deprecated
+
+Still working; `jennifer lint` reports a call (L301).
+
+| Call | Use instead | Removed in |
+| --- | --- | --- |
+| `decimal.toString(d)` | `convert.toString(d)` or `%v` (identical text); for an `int` or `string` operand, `convert.toString(decimal.from(x))` | 0.29.0 |
 
 ## Not here
 

@@ -16,8 +16,8 @@ import (
 // coefficientsFn returns the learned coefficients: a `list of float` for a
 // linear / ridge / lasso / binary-logistic model, or a `list of list of float`
 // (one row per class) for multiclass logistic.
-func (r *registry) coefficientsFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	m, err := r.resolve1("coefficients", args)
+func coefficientsFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	m, err := resolveModel1("coefficients", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -34,8 +34,8 @@ func (r *registry) coefficientsFn(_ interpreter.BuiltinCtx, args []interpreter.V
 
 // interceptFn returns the model intercept / bias: a `float` for a linear or
 // binary-logistic model, a `list of float` (per class) for multiclass logistic.
-func (r *registry) interceptFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	m, err := r.resolve1("intercept", args)
+func interceptFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	m, err := resolveModel1("intercept", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -51,8 +51,8 @@ func (r *registry) interceptFn(_ interpreter.BuiltinCtx, args []interpreter.Valu
 }
 
 // centroidsFn returns a k-means model's cluster centres (`list of list of float`).
-func (r *registry) centroidsFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	m, err := r.resolve1("centroids", args)
+func centroidsFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	m, err := resolveModel1("centroids", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -64,8 +64,8 @@ func (r *registry) centroidsFn(_ interpreter.BuiltinCtx, args []interpreter.Valu
 
 // componentsFn returns a PCA model's principal axes (`list of list of float`,
 // one row per component).
-func (r *registry) componentsFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	m, err := r.resolve1("components", args)
+func componentsFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	m, err := resolveModel1("components", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -77,8 +77,8 @@ func (r *registry) componentsFn(_ interpreter.BuiltinCtx, args []interpreter.Val
 
 // explainedVarianceFn returns a PCA model's per-component explained-variance
 // ratios (`list of float`, summing to <= 1) - used to choose nComponents.
-func (r *registry) explainedVarianceFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	m, err := r.resolve1("explainedVariance", args)
+func explainedVarianceFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	m, err := resolveModel1("explainedVariance", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -90,8 +90,8 @@ func (r *registry) explainedVarianceFn(_ interpreter.BuiltinCtx, args []interpre
 
 // featureImportancesFn returns the Gini feature importances of a decision tree
 // or random forest (`list of float`, summing to 1).
-func (r *registry) featureImportancesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	m, err := r.resolve1("featureImportances", args)
+func featureImportancesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	m, err := resolveModel1("featureImportances", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -120,12 +120,12 @@ func (r *registry) featureImportancesFn(_ interpreter.BuiltinCtx, args []interpr
 	return finiteVec("featureImportances", imp)
 }
 
-// resolve1 resolves the single ml.Model argument of an accessor.
-func (r *registry) resolve1(name string, args []interpreter.Value) (any, error) {
+// resolveModel1 resolves the single ml.Model argument of an accessor.
+func resolveModel1(name string, args []interpreter.Value) (any, error) {
 	if len(args) != 1 {
 		return nil, fmt.Errorf("ml.%s expects 1 argument (model), got %d", name, len(args))
 	}
-	return r.resolve(name, args[0])
+	return resolveModel(name, args[0])
 }
 
 // finiteVec / finiteMat build a value from stored model parameters, but re-check

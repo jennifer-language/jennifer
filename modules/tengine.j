@@ -1255,7 +1255,7 @@ func intValueOf(v as json.Value) {
         return json.asInt($v);
     }
     if ($t == "float") {
-        return convert.toInt(json.asFloat($v));
+        return math.trunc(json.asFloat($v));
     }
     if ($t == "string" and isNumber(json.asString($v))) {
         return convert.toInt(json.asString($v));

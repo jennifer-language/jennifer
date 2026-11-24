@@ -130,7 +130,7 @@ func fitLinear(x [][]float64, y []float64, alpha float64) (*linearModel, error) 
 	return &linearModel{coef: beta[1:], intercept: beta[0], nf: k}, nil
 }
 
-func (r *registry) linearRegressionFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func linearRegressionFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("ml.linearRegression expects 2 arguments (X, y), got %d", len(args))
 	}
@@ -142,7 +142,7 @@ func (r *registry) linearRegressionFn(_ interpreter.BuiltinCtx, args []interpret
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("ml.linearRegression: %v", err)
 	}
-	return r.store(m), nil
+	return storeModel(m), nil
 }
 
 // softThreshold is the L1 proximal operator sign(x)*max(|x|-lambda, 0).
@@ -229,7 +229,7 @@ func fitLasso(x [][]float64, y []float64, alpha float64) (*linearModel, error) {
 	return &linearModel{coef: beta, intercept: intercept, nf: d}, nil
 }
 
-func (r *registry) lassoFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func lassoFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 3 {
 		return interpreter.Null(), fmt.Errorf("ml.lasso expects 3 arguments (X, y, alpha), got %d", len(args))
 	}
@@ -245,10 +245,10 @@ func (r *registry) lassoFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("ml.lasso: %v", err)
 	}
-	return r.store(m), nil
+	return storeModel(m), nil
 }
 
-func (r *registry) ridgeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func ridgeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 3 {
 		return interpreter.Null(), fmt.Errorf("ml.ridge expects 3 arguments (X, y, alpha), got %d", len(args))
 	}
@@ -267,5 +267,5 @@ func (r *registry) ridgeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("ml.ridge: %v", err)
 	}
-	return r.store(m), nil
+	return storeModel(m), nil
 }

@@ -105,7 +105,7 @@ io.printf("%s\n", $line);
 
 # --- convert library ---
 io.printf("=== convert ===\n");
-io.printf("convert.toInt(3.7)       = %d\n", convert.toInt(3.7));
+io.printf("convert.toInt(3.0)       = %d\n", convert.toInt(3.0));
 io.printf("convert.toInt(\"42\")      = %d\n", convert.toInt("42"));
 io.printf("convert.toFloat(5)       = %f\n", convert.toFloat(5));
 io.printf("convert.toString(42)     = %s\n", convert.toString(42));
@@ -290,16 +290,14 @@ io.printf("=== meta ===\n");
 io.printf("convert.typeOf(meta.VERSION) = %s\n", convert.typeOf(meta.VERSION));
 io.printf("convert.typeOf(meta.BUILD)   = %s\n", convert.typeOf(meta.BUILD));
 
-# --- os: ARGS + flag inspection. Type-check, don't print
+# --- os: ARGS and the raw forms. Type-check, don't print
 # actual values (vary by host / how the program was launched).
-io.printf("=== os ARGS + flags ===\n");
+io.printf("=== os ARGS ===\n");
 io.printf("convert.typeOf(os.ARGS)            = %s\n", convert.typeOf(os.ARGS));
+io.printf("convert.typeOf(os.argsBytes())     = %s\n", convert.typeOf(os.argsBytes()));
 io.printf(
-    "convert.typeOf(os.hasFlag(\"x\"))    = %s\n",
-    convert.typeOf(os.hasFlag("--definitely-not-a-real-flag"))); # lint-disable: L203
-io.printf(
-    "convert.typeOf(os.flag(\"x\"))       = %s\n",
-    convert.typeOf(os.flag("--definitely-not-a-real-flag"))); # lint-disable: L203
+    "convert.typeOf(os.getEnvBytes(\"x\")) = %s\n",
+    convert.typeOf(os.getEnvBytes("JENNIFER_SHOWCASE_UNSET")));
 
 # --- Constants in expressions ---
 io.printf("=== constants ===\n");

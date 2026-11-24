@@ -540,11 +540,11 @@ func equalFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 }
 
 // sleepFn implements `time.sleep($d)`. Blocks the current goroutine
-// for the requested duration; a negative or zero `Duration` returns
-// immediately (matches Go's `time.Sleep`, sparing callers a check on
-// every "computed delay might be <= 0" path). Returns null - callers
-// who want the wake-up instant call `time.now()` afterward. Inside a
-// spawn body, task.cancel ends the sleep with "task cancelled".
+// for the requested duration; a zero `Duration` returns at once and a
+// negative one throws (M29.45: a negative wait is an error everywhere;
+// a Duration cannot be oversized). Returns null - callers who want the
+// wake-up instant call `time.now()` afterward. Inside a spawn body,
+// task.cancel ends the sleep with "task cancelled".
 func sleepFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("time.sleep expects 1 argument (duration), got %d", len(args))
@@ -553,7 +553,10 @@ func sleepFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if ctx.Cancel == nil || nanos <= 0 {
+	if nanos < 0 {
+		return interpreter.Null(), fmt.Errorf("time.sleep: duration must be >= 0, got %d ns", nanos)
+	}
+	if ctx.Cancel == nil || nanos == 0 {
 		sleepFunc(stdtime.Duration(nanos))
 		return interpreter.Null(), nil
 	}

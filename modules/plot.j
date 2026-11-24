@@ -619,8 +619,8 @@ func datePattern(step as int) {
 }
 
 func dateAxis(dmin as float, dmax as float, count as int, fmt as string) {
-    def loSec as int init convert.toInt($dmin);
-    def hiSec as int init convert.toInt($dmax);
+    def loSec as int init math.trunc($dmin);
+    def hiSec as int init math.trunc($dmax);
     def span as int init $hiSec - $loSec;
     if ($span <= 0) {
         $span = 1;
@@ -873,7 +873,7 @@ func legendBox(g as Geom, data as list of Series, opts as Options) {
         }
     }
     def lw as int init 28 +
-        convert.toInt(convert.toFloat($maxLen) * convert.toFloat($opts.fontSize) * 0.6);
+        math.trunc(convert.toFloat($maxLen) * convert.toFloat($opts.fontSize) * 0.6);
     def lh as int init len($data) * ($opts.fontSize + 7) + 8;
     def bx as int init $g.x1 - $lw - 6;
     def by as int init $g.y0 + 8;

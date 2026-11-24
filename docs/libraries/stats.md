@@ -192,7 +192,6 @@ and the `pValue`.
 | Call | Returns | Meaning |
 | ---- | ------- | ------- |
 | `stats.linearRegression(xs, ys)` | `Regression` | Simple OLS: `slope`, `intercept`, `r`, `r2`, `stdErr` (of the slope), `pValue`, `n`. |
-| `stats.multipleRegression(X, ys)` | `list of float` | Coefficients `[intercept, b1, b2, ...]` for the design rows `X` (normal-equations solve). |
 | `stats.confidenceInterval(data, level)` | `Interval` | t-based CI for the mean at confidence `level` in `(0, 1)`. |
 | `stats.proportionCi(method, successes, n, level)` | `Interval` | Binomial-proportion interval; `method` is `"wald"`, `"wilson"`, or `"clopper-pearson"` (exact). |
 | `stats.tTest(data, mu)` | `Test` | One-sample t-test of the mean against `mu`. |
@@ -213,15 +212,6 @@ Boundary and numerical notes:
   degenerate point interval (`[0, 0]` / `[1, 1]`), a known defect of those
   methods. Use `"clopper-pearson"` (exact) when a boundary count matters; it
   yields a proper one-sided bound there.
-- **Regression conditioning.** `multipleRegression` solves the normal equations
-  by Gauss-Jordan elimination (`linearRegression` uses the closed form). The
-  system is scaled to unit diagonal first, and a design whose predictors are
-  collinear up to rounding (a pivot below about `64 * k * 2.2e-16` of the scaled
-  system) is flagged singular. Near-collinear predictors that pass still lose
-  precision: the normal equations square the condition number.
-- **Cost.** `multipleRegression` is `O(n*k²)` to form the system and `O(k³)` to
-  solve it, for `k` predictors: fine for modest tabular data, not a
-  many-thousand-column design.
 
 ```jennifer
 use stats;
@@ -236,6 +226,14 @@ io.printf("95%% CI: [%.3f, %.3f]\n", $ci.lower, $ci.upper);
 def t as stats.Test init stats.tTest([5.1, 4.9, 5.2, 4.8, 5.0], 4.5);
 io.printf("t = %.3f, p = %.4f\n", $t.statistic, $t.pValue);
 ```
+
+## Deprecated
+
+Still working; `jennifer lint` reports a call (L301).
+
+| Call | Use instead | Removed in |
+| --- | --- | --- |
+| `stats.multipleRegression(X, ys)` -> `[intercept, b1, ...]` | `ml.linearRegression(X, ys)`, then `ml.intercept` and `ml.coefficients` (same numbers) | 0.29.0 |
 
 ## Strictness
 

@@ -39,13 +39,12 @@ func TestTreeSplitAdjacentAndHugeValues(t *testing.T) {
 		X := mat([]float64{a}, []float64{b})
 		for _, fit := range []string{"decisionTree", "decisionTreeRegressor"} {
 			noPanic(t, func() {
-				r := newReg()
-				fn := r.decisionTreeFn
+				fn := decisionTreeFn
 				if fit == "decisionTreeRegressor" {
-					fn = r.decisionTreeRegressorFn
+					fn = decisionTreeRegressorFn
 				}
 				m := ok(t, fn, X, vec(0, 1))
-				got := fvals(ok(t, r.predictFn, m, X))
+				got := fvals(ok(t, predictFn, m, X))
 				if got[0] != 0 || got[1] != 1 {
 					t.Errorf("%s on [%v, %v]: predict = %v, want [0 1]", fit, a, b, got)
 				}
@@ -70,9 +69,8 @@ func TestTreeRegressorTargetOffset(t *testing.T) {
 			}
 			ys[i] += off
 		}
-		r := newReg()
-		m := ok(t, r.decisionTreeRegressorFn, mat(rows...), vec(ys...), iv(1))
-		got := fvals(ok(t, r.predictFn, m, mat([]float64{0}, []float64{39})))
+		m := ok(t, decisionTreeRegressorFn, mat(rows...), vec(ys...), iv(1))
+		got := fvals(ok(t, predictFn, m, mat([]float64{0}, []float64{39})))
 		if got[0] != off || got[1] != off+1 {
 			t.Errorf("offset %g: predict = %v, want [%v %v]", off, got, off, off+1)
 		}
@@ -90,10 +88,9 @@ func TestRandomForestPerSplitFeatures(t *testing.T) {
 		rows[i] = []float64{rng.Float64(), rng.Float64(), rng.Float64(), rng.Float64()}
 		ys[i] = float64(rng.Intn(2))
 	}
-	r := newReg()
-	m := ok(t, r.randomForestFn, mat(rows...), vec(ys...), iv(1), iv(12))
+	m := ok(t, randomForestFn, mat(rows...), vec(ys...), iv(1), iv(12))
 	used := 0
-	for _, f := range fvals(ok(t, r.featureImportancesFn, m)) {
+	for _, f := range fvals(ok(t, featureImportancesFn, m)) {
 		if f > 0 {
 			used++
 		}
@@ -113,9 +110,8 @@ func TestPCAScaleInvariantComponents(t *testing.T) {
 		for i, r := range base {
 			rows[i] = []float64{r[0] * scale, r[1] * scale}
 		}
-		r := newReg()
-		m := ok(t, r.pcaFn, mat(rows...), iv(1))
-		c := fvals(ok(t, r.componentsFn, m).List[0])
+		m := ok(t, pcaFn, mat(rows...), iv(1))
+		c := fvals(ok(t, componentsFn, m).List[0])
 		if c[0] < 0 {
 			c[0], c[1] = -c[0], -c[1]
 		}
@@ -137,11 +133,10 @@ func TestPCAScaleInvariantComponents(t *testing.T) {
 // (the absolute 1e-300 pivot test fitted an arbitrary split), while a design
 // with columns of very different units still fits.
 func TestLinearRegressionFloatCollinear(t *testing.T) {
-	r := newReg()
 	X := mat([]float64{0.1, 0.3}, []float64{0.2, 0.6}, []float64{0.3, 0.9}, []float64{0.7, 2.1}, []float64{0.5, 1.5})
 	y := vec(1, 2, 3, 7, 5.5)
-	for _, fn := range []interpreter.Builtin{r.linearRegressionFn, func(c interpreter.BuiltinCtx, a []interpreter.Value) (interpreter.Value, error) {
-		return r.ridgeFn(c, append(a, interpreter.FloatVal(0)))
+	for _, fn := range []interpreter.Builtin{linearRegressionFn, func(c interpreter.BuiltinCtx, a []interpreter.Value) (interpreter.Value, error) {
+		return ridgeFn(c, append(a, interpreter.FloatVal(0)))
 	}} {
 		_, err := fn(interpreter.BuiltinCtx{}, []interpreter.Value{X, y})
 		if err == nil || !strings.Contains(err.Error(), "singular") {
@@ -151,8 +146,8 @@ func TestLinearRegressionFloatCollinear(t *testing.T) {
 	// y = 2e-8*x1 + 3e8*x2 + 1 with x1 ~ 1e8 and x2 ~ 1e-8.
 	Xs := mat([]float64{1e8, 1e-8}, []float64{2e8, 1e-8}, []float64{1e8, 2e-8}, []float64{3e8, 2e-8}, []float64{2e8, 3e-8}, []float64{4e8, 1e-8})
 	ys := vec(6, 8, 9, 13, 14, 12)
-	m := ok(t, r.linearRegressionFn, Xs, ys)
-	got := fvals(ok(t, r.predictFn, m, mat([]float64{5e8, 5e-8})))[0]
+	m := ok(t, linearRegressionFn, Xs, ys)
+	got := fvals(ok(t, predictFn, m, mat([]float64{5e8, 5e-8})))[0]
 	if !near(got, 26, 1e-6) {
 		t.Errorf("scaled design predict = %v, want 26", got)
 	}

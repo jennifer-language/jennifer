@@ -28,17 +28,17 @@ func (m *scalerModel) transformOne(x []float64) []float64 {
 	return out
 }
 
-func (r *registry) standardScalerFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return r.fitScaler("standardScaler", args, true)
+func standardScalerFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return fitScaler("standardScaler", args, true)
 }
-func (r *registry) minMaxScalerFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return r.fitScaler("minMaxScaler", args, false)
+func minMaxScalerFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return fitScaler("minMaxScaler", args, false)
 }
 
 // fitScaler computes per-feature center/scale. standard: (mean, stddev);
 // minmax: (min, max-min). A zero scale (a constant feature) is stored as 1 so
 // the transform maps it to 0 rather than dividing by zero.
-func (r *registry) fitScaler(name string, args []interpreter.Value, standard bool) (interpreter.Value, error) {
+func fitScaler(name string, args []interpreter.Value, standard bool) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("ml.%s expects 1 argument (X), got %d", name, len(args))
 	}
@@ -69,7 +69,7 @@ func (r *registry) fitScaler(name string, args []interpreter.Value, standard boo
 			scale[j] = 1
 		}
 	}
-	return r.store(&scalerModel{center: center, scale: scale, nf: d}), nil
+	return storeModel(&scalerModel{center: center, scale: scale, nf: d}), nil
 }
 
 // --- polynomial feature expansion ---
@@ -158,7 +158,7 @@ func polynomialFeaturesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 
 // --- train/test split ---
 
-func (r *registry) trainTestSplitFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func trainTestSplitFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 3 {
 		return interpreter.Null(), fmt.Errorf("ml.trainTestSplit expects 3 arguments (X, y, testFraction), got %d", len(args))
 	}

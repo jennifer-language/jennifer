@@ -58,4 +58,5 @@ fTest(list of any, list of any) stats.Test
 anova(list of any) stats.Test
 histogram(list of any, list of any) list of int
 `)
+	deprecate("stats", "multipleRegression", "`ml.linearRegression` with `ml.intercept` / `ml.coefficients`", "0.29.0")
 }

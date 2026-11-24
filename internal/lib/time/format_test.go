@@ -423,25 +423,23 @@ func TestSleepReturnsNull(t *testing.T) {
 	}
 }
 
-// TestSleepNegativeIsNoOp: negative durations forward through to the
-// hook (which would no-op anyway under Go's time.Sleep), no error.
-func TestSleepNegativeIsNoOp(t *testing.T) {
+// TestSleepNegativeThrows: a negative duration (a computed delay that ran
+// past its deadline) throws before reaching the hook (M29.45).
+func TestSleepNegativeThrows(t *testing.T) {
 	called := false
 	prev := sleepFunc
-	sleepFunc = func(d stdtime.Duration) {
-		called = true
-		if d >= 0 {
-			t.Errorf("expected negative duration, got %v", d)
-		}
-	}
+	sleepFunc = func(stdtime.Duration) { called = true }
 	t.Cleanup(func() { sleepFunc = prev })
 
-	runProg(t, `
+	err := expectErr(t, `
 		use time;
 		time.sleep(time.sub(time.fromUnix(0), time.fromUnix(1)));
 	`)
-	if !called {
-		t.Error("sleepFunc should have been called even with negative duration")
+	if !strings.Contains(err, "time.sleep: duration must be >= 0") {
+		t.Errorf("error = %v", err)
+	}
+	if called {
+		t.Error("sleepFunc called for a negative duration")
 	}
 }
 

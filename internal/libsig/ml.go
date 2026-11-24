@@ -13,12 +13,18 @@ kNN(list of list of any, list of any, int) ml.Model
 kNNRegressor(list of list of any, list of any, int) ml.Model
 naiveBayes(list of list of any, list of any) ml.Model
 logisticRegression(list of list of any, list of any, int|float?, int?) ml.Model
+logisticRegressionWith(list of list of any, list of any, ml.LogisticOptions) ml.Model
 kMeans(list of list of any, int, int?) ml.Model
+kMeansWith(list of list of any, int, ml.KMeansOptions) ml.Model
 pca(list of list of any, int) ml.Model
 decisionTree(list of list of any, list of any, int?) ml.Model
 decisionTreeRegressor(list of list of any, list of any, int?) ml.Model
 randomForest(list of list of any, list of any, int?, int?) ml.Model
 randomForestRegressor(list of list of any, list of any, int?, int?) ml.Model
+decisionTreeWith(list of list of any, list of any, ml.TreeOptions) ml.Model
+decisionTreeRegressorWith(list of list of any, list of any, ml.TreeOptions) ml.Model
+randomForestWith(list of list of any, list of any, ml.ForestOptions) ml.Model
+randomForestRegressorWith(list of list of any, list of any, ml.ForestOptions) ml.Model
 standardScaler(list of list of any) ml.Model
 minMaxScaler(list of list of any) ml.Model
 predict(ml.Model, list of list of any) list of int|list of float
@@ -46,4 +52,5 @@ mae(list of any, list of any) float
 r2(list of any, list of any) float
 logLoss(list of any, list of any) float
 `)
+	deprecate("ml", "free", "nothing (drop the call; a model is a value the garbage collector frees)", "0.29.0")
 }

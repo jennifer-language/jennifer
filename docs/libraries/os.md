@@ -24,17 +24,20 @@ function; see [rejected.md > `os.exit(n)`](../technical/rejected.md#osexitn).
 
 | Call               | Returns      | Notes                                                                               |
 | ------------------ | ------------ | ----------------------------------------------------------------------------------- |
-| `os.getEnv(name)`  | string       | Reads an environment variable. Unset variables return `""`, no error.               |
+| `os.getEnv(name)`  | string       | Reads an environment variable. Unset variables return `""`, no error. A value that is not valid UTF-8 throws `"os"`, naming the variable and the byte offset (`os.getEnv: LANG: invalid UTF-8 at byte 3; use os.getEnvBytes`). |
+| `os.getEnvBytes(name)` | bytes    | The variable's raw value; unset is empty `bytes`, as for `getEnv` (`hasEnv` tells unset from empty). |
+| `os.argsBytes()`   | list of bytes | The arguments of `os.ARGS` as raw `bytes`, for a program that must take any argument. |
 | `os.setEnv(name, value)` | null   | Sets an environment variable for this process (and any child it later spawns). An invalid name (empty, or containing `=` / NUL) is a positioned error. |
 | `os.unsetEnv(name)` | null | Removes an environment variable from this process and any child it later spawns; a no-op when it is not set. Not the same as `setEnv(name, "")`, which leaves it set to the empty string (`GIT_DIR=` still changes what `git` does). Same name rule as `setEnv`. |
 | `os.hasEnv(name)` | bool | Whether the variable is set, even to `""` - the case `getEnv` cannot tell from unset. Save `hasEnv` + `getEnv` before changing a variable, then restore with `setEnv` or `unsetEnv`. |
-| `os.hasFlag(name)` | bool         | True if `name` is an exact-match element of `os.ARGS`. See "Flag inspection" below. |
-| `os.flag(name)`    | string       | The element immediately after `name` in `os.ARGS`, or `""` if absent or at end.     |
 | `os.run(argv[, stdin])` | `os.Result` | **Blocking.** Run `argv` to completion; capture stdout/stderr (must be valid UTF-8, else a catchable error; see "External programs"). An optional `stdin` (`string` or `bytes`) is fed to the child then closed. A non-zero exit is a value in `exitCode`; a program that cannot be started (not found, not executable) **throws** a catchable `Error{kind: "runtime"}`. See "External programs" below. |
 | `os.runBytes(argv[, stdin])` | `os.BytesResult` | As `os.run`, with both streams returned as unchecked `bytes`. See "Binary output" below. |
-| `os.spawn(argv[, options])` | `os.Process` | **Non-blocking.** Start `argv`, return a handle. `options` is a `map of string to string` with optional `"stdout"` / `"stderr"` keys (other keys are an error). See "Spawned child stdio" below. |
+| `os.spawn(argv)` | `os.Process` | **Non-blocking.** Start `argv`, return a handle; both streams captured. |
+| `os.spawnWith(argv, os.SpawnOptions)` | `os.Process` | As `os.spawn`, with each stream routed by `SpawnOptions{stdout, stderr}`. See "Spawned child stdio" below. |
 | `os.wait(p)`       | `os.Result`  | Block until `$p` terminates; return captured streams + exit code. Idempotent. Non-UTF-8 output errors, like `os.run`. |
 | `os.waitBytes(p)`  | `os.BytesResult` | As `os.wait`, with both streams as `bytes`. |
+| `os.waitTimeout(p, ms)` | `os.Result` | As `os.wait`, waiting at most `ms` milliseconds; throws `"timeout"` and leaves `$p` running. `0` polls. |
+| `os.waitBytesTimeout(p, ms)` | `os.BytesResult` | As `os.waitBytes`, bounded like `os.waitTimeout`. |
 | `os.poll(p)`       | bool         | Non-blocking: true once `$p` has exited (a following `os.wait` returns immediately). |
 | `os.kill(p)`       | null         | Send SIGTERM to `$p`.                                                               |
 | `os.release(p)`    | bool         | Drop a **finished** handle from the registry (frees its captured output); errors if `$p` is still running. Returns whether the handle existed. |
@@ -142,31 +145,31 @@ character-device mode bit - correct for a pty, but a `/dev/null` redirect reads
 
 ### Flag inspection
 
-`os.hasFlag` and `os.flag` cover "did the user pass `--verbose`?" and
-"what value follows `--port`?". They are **exact-match only**:
+`os.hasFlag` and `os.flag` are deprecated (see [Deprecated](#deprecated)): parse
+`os.ARGS` with the [`args`](../modules/args.md) module.
 
-- `os.hasFlag("--port")` is true if `"--port"` appears as a standalone
-  element of `os.ARGS`. It is **false** if `"--port=8080"` appears
-  (different element value).
-- `os.flag("--port")` returns the element immediately after `"--port"`
-  if there is one, else `""`. The `--foo=bar` form is not parsed.
+| Deprecated | With `args` |
+| --- | --- |
+| `os.hasFlag("--verbose")` | `$p = args.boolFlag($p, "verbose", "v", "...");`, then `args.asBool($r, "verbose")` |
+| `os.flag("--port")` (`""` when absent) | `$p = args.flag($p, "port", "p", "8080", "...");`, then `args.asString($r, "port")` |
 
-For combined short flags (`-rf`), `--foo=bar`, repeated flags or
-subcommands, walk `os.ARGS` directly.
+`args` also reads `--port=8080` (which `os.flag` returned as `""`), combined
+short flags, repeated flags and subcommands, and throws `"args"` for an
+unknown flag, where `os.hasFlag` ignored it.
 
 ```jennifer
 use io;
 use os;
+import "args.j" as args;
 
-if (os.hasFlag("--help")) {
-    io.printf("Usage: %s [options]\n", os.ARGS[0]);
+def p as args.Parser init args.parser("serve", "Serve files");
+$p = args.flag($p, "port", "p", "8080", "port to listen on");
+def r as args.Result init args.parse($p, os.ARGS);
+if ($r.done) {
+    io.printf("%s\n", $r.helpText);
     exit 0;
 }
-def port as string init os.flag("--port");
-if ($port == "") {
-    $port = "8080";
-}
-io.printf("listening on %s\n", $port);
+io.printf("listening on %s\n", args.asString($r, "port"));
 ```
 
 ### External programs
@@ -242,6 +245,24 @@ def r as os.Result init os.wait($p);
 io.printf("done: exit=%d\n", $r.exitCode);
 ```
 
+`os.waitTimeout($p, ms)` (and `os.waitBytesTimeout`) bounds the wait: when
+`$p` has not exited within `ms` milliseconds it throws `"timeout"` and the
+child keeps running, so the caller can `os.kill` it or wait again. `ms` `0`
+polls; a negative `ms`, or one above 9,223,372,036,854, is a `"runtime"`
+error. `task.cancel` wakes a task blocked in it with `"cancelled"`.
+
+```jennifer
+try {
+    def r as os.Result init os.waitTimeout($p, 5000);
+} catch (e) {
+    if ($e.kind != "timeout") {
+        throw $e;
+    }
+    os.kill($p);
+    def killed as os.Result init os.wait($p);
+}
+```
+
 `os.wait` is **idempotent** - calling it again on the same handle
 returns the same `os.Result` immediately. If the child did not
 terminate cleanly (an I/O failure draining its streams, not a non-zero
@@ -277,26 +298,28 @@ if ($png.exitCode == 0 and not $png.truncated) {
 **Spawned child stdio.** By default `os.spawn` **captures** both streams (so
 `os.wait` returns them, like `os.run`). A child never `os.wait`ed then
 produces no visible output, and a child that fails at startup leaves its
-diagnostics only in the capture buffer. The optional
-`options` map redirects each stream independently; each value is one of:
+diagnostics only in the capture buffer. `os.spawnWith(argv,
+os.SpawnOptions{stdout, stderr})` routes each stream independently; each field
+is one of:
 
-| `"stdout"` / `"stderr"` value | Effect |
+| `stdout` / `stderr` value     | Effect |
 | ----------------------------- | ------ |
-| `"capture"` (default)         | Buffered and returned by `os.wait` (`os.Result`) or `os.waitBytes` (`os.BytesResult`). |
+| `""` (the zero value) or `"capture"` | Buffered and returned by `os.wait` (`os.Result`) or `os.waitBytes` (`os.BytesResult`). |
 | `"inherit"`                   | Connected to the parent's own stdout / stderr, so the child's output appears **live** (on the terminal, or wherever the parent's stream is redirected). `os.wait`'s field for that stream is then empty. |
 | `"discard"`                   | Dropped. |
 | a path containing `/`         | A **file**; the stream is written to it (created, truncated). Write `./out.log` for a file in the working directory. If `"stdout"` and `"stderr"` name the same file, both streams share one descriptor and interleave in write order. |
 
-Any other value, an option key other than `"stdout"` / `"stderr"`, or a
-non-string value is an error, so a typo such as `"inhert"` does not create a
-file.
+Any other value is an error, so a typo such as `"inhert"` does not create a
+file. `os.spawnWith(argv, os.SpawnOptions{})` is `os.spawn(argv)`.
 
 ```jennifer
 # See a child's diagnostics as it runs (e.g. a browser that may fail at startup):
-def p as os.Process init os.spawn(["chromium", "--headless", $url], {"stderr": "inherit"});
+def p as os.Process init os.spawnWith(["chromium", "--headless", $url],
+    os.SpawnOptions{stderr: "inherit"});
 
 # Or send them to a log file without building a shell line:
-def q as os.Process init os.spawn(["worker", "--job", $id], {"stderr": "/var/log/worker.err"});
+def q as os.Process init os.spawnWith(["worker", "--job", $id],
+    os.SpawnOptions{stderr: "/var/log/worker.err"});
 ```
 
 **The handle vs the pid.** `os.wait` / `os.poll` / `os.kill` / `os.release` take
@@ -343,10 +366,11 @@ func hasGit() {
 
 **Stream buffering.** A captured stream is held in memory up to the
 16 MiB cap. For more output, redirect it to a file:
-`os.spawn(argv, {"stdout": "/tmp/out"})`.
+`os.spawnWith(argv, os.SpawnOptions{stdout: "/tmp/out"})`.
 
 **TinyGo limitation.** `jennifer-tiny` does not support `os.run`,
-`os.runBytes`, `os.spawn`, `os.wait`, `os.waitBytes`, `os.poll`, or `os.kill`:
+`os.runBytes`, `os.spawn`, `os.spawnWith`, `os.wait`, `os.waitBytes`, their
+timeout forms, `os.poll`, or `os.kill`:
 TinyGo's runtime does not implement the underlying `os/exec` syscalls. On
 `jennifer-tiny` these raise a runtime error pointing at the default `jennifer`
 binary (`make build` produces both, `make build-go` only the default). `net`
@@ -356,9 +380,11 @@ follows the same pattern.
 
 | Kind | Raised for |
 |---|---|
-| `"os"` | a child's captured stdout or stderr that is not valid UTF-8 in `os.run` / `os.wait` |
-| `"limit"` | too many live child processes from `os.spawn` |
-| `"runtime"` | a program that cannot be started, any other operating-system failure, and misuse: a wrong argument, an unknown option, signal or stream name, an unknown process handle |
+| `"os"` | text that is not valid UTF-8: a child's captured stdout or stderr in `os.run` / `os.wait`, an environment variable in `os.getEnv`, an argument when `os.ARGS` is read (and the value `os.flag` returns) |
+| `"limit"` | too many live child processes from `os.spawn` / `spawnWith` |
+| `"timeout"` | `os.waitTimeout` / `waitBytesTimeout`: the process did not exit within `ms` (it keeps running) |
+| `"cancelled"` | `task.cancel` of a task blocked in `os.waitTimeout` / `waitBytesTimeout` |
+| `"runtime"` | a program that cannot be started, any other operating-system failure, and misuse: a wrong argument, an unknown option, signal or stream name, an unknown process handle, `ms` negative or above 9,223,372,036,854 |
 
 ## Constants
 
@@ -379,7 +405,24 @@ follows the same pattern.
 | --------- | -------------- | -------------------------------------------------------------------------------------------------- |
 | `os.ARGS` | list of string | Command-line arguments passed to the running program. Index 0 is the script path, the rest follow. |
 
+When an argument is not valid UTF-8, every read of `os.ARGS` throws `"os"`,
+naming the argument index and the byte offset
+(`os.ARGS: argument 2: invalid UTF-8 at byte 1; use os.argsBytes()`); a
+program that never reads it is unaffected. `os.argsBytes()` returns the raw
+arguments.
+
 Interpreter identity constants (`VERSION`, `BUILD`) live in
 [`meta`](meta.md).
+
+## Deprecated
+
+Each still works and is removed in 0.29.0; `jennifer lint` reports a call
+(L301).
+
+| Deprecated | Use instead |
+| --- | --- |
+| `os.hasFlag(name)` | the [`args`](../modules/args.md) module: `args.boolFlag`, then `args.asBool` (see [Flag inspection](#flag-inspection)) |
+| `os.flag(name)` | the `args` module: `args.flag`, then `args.asString` |
+| `os.spawn(argv, options)` (the options map) | `os.spawnWith(argv, os.SpawnOptions{stdout: ..., stderr: ...})`; the map's `"stdout"` / `"stderr"` values are the fields' |
 
 See also: [meta.md](meta.md), [../user-guide/index.md](../user-guide/index.md), [../user-guide/imports.md](../user-guide/imports.md), [../user-guide/style-guide.md](../user-guide/style-guide.md), [index.md](index.md).

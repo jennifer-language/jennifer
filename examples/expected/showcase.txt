@@ -34,7 +34,7 @@ Hi, Jennifer!
 === sprintf ===
 [42:hi]
 === convert ===
-convert.toInt(3.7)       = 3
+convert.toInt(3.0)       = 3
 convert.toInt("42")      = 42
 convert.toFloat(5)       = 5.0
 convert.toString(42)     = 42
@@ -129,10 +129,10 @@ src[0]=1 dst[0]=99
 === meta ===
 convert.typeOf(meta.VERSION) = string
 convert.typeOf(meta.BUILD)   = string
-=== os ARGS + flags ===
+=== os ARGS ===
 convert.typeOf(os.ARGS)            = list
-convert.typeOf(os.hasFlag("x"))    = bool
-convert.typeOf(os.flag("x"))       = string
+convert.typeOf(os.argsBytes())     = list
+convert.typeOf(os.getEnvBytes("x")) = bytes
 === constants ===
 MAX=5 MAX_RETRIES=3 HTTP_OK=200 PI_APPROX=3.14
 === printf modifiers ===

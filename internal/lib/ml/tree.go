@@ -280,14 +280,28 @@ func accumulateImportance(root *treeNode, imp []float64) {
 	accumulateImportance(root.right, imp)
 }
 
-func (r *registry) decisionTreeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return r.fitTree("decisionTree", args, false)
+func decisionTreeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return fitTree("decisionTree", args, false)
 }
-func (r *registry) decisionTreeRegressorFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return r.fitTree("decisionTreeRegressor", args, true)
+func decisionTreeRegressorFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return fitTree("decisionTreeRegressor", args, true)
 }
 
-func (r *registry) fitTree(name string, args []interpreter.Value, regress bool) (interpreter.Value, error) {
+func decisionTreeWithFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return fitTreeWith("decisionTreeWith", args, false)
+}
+func decisionTreeRegressorWithFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return fitTreeWith("decisionTreeRegressorWith", args, true)
+}
+
+// Defaults of ml.TreeOptions' and ml.ForestOptions' zero fields.
+const (
+	defaultMaxDepth = 8
+	defaultNTrees   = 10
+)
+
+// fitTree takes the deprecated chained optional argument (X, y [, maxDepth]).
+func fitTree(name string, args []interpreter.Value, regress bool) (interpreter.Value, error) {
 	if len(args) < 2 || len(args) > 3 {
 		return interpreter.Null(), fmt.Errorf("ml.%s expects 2 or 3 arguments (X, y [, maxDepth]), got %d", name, len(args))
 	}
@@ -295,15 +309,39 @@ func (r *registry) fitTree(name string, args []interpreter.Value, regress bool) 
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	maxDepth := 8
+	maxDepth := defaultMaxDepth
 	if len(args) == 3 {
 		if args[2].Kind != interpreter.KindInt || args[2].Int < 1 || args[2].Int > maxTreeDepth {
 			return interpreter.Null(), fmt.Errorf("ml.%s: maxDepth must be in [1, %d]", name, maxTreeDepth)
 		}
 		maxDepth = int(args[2].Int)
 	}
+	return trainTree(x, y, maxDepth, regress), nil
+}
+
+// fitTreeWith implements `ml.decisionTree[Regressor]With(X, y, ml.TreeOptions)`.
+func fitTreeWith(name string, args []interpreter.Value, regress bool) (interpreter.Value, error) {
+	if len(args) != 3 {
+		return interpreter.Null(), fmt.Errorf("ml.%s expects 3 arguments (X, y, ml.TreeOptions), got %d", name, len(args))
+	}
+	o, err := options(name, args[2], "TreeOptions")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	maxDepth, err := o.count("maxDepth", defaultMaxDepth, maxTreeDepth)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	x, y, err := fitData(name, args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return trainTree(x, y, maxDepth, regress), nil
+}
+
+func trainTree(x [][]float64, y []float64, maxDepth int, regress bool) interpreter.Value {
 	imp, leaf := treeCriteria(regress)
-	return r.store(&treeModel{root: buildTree(x, y, 0, maxDepth, 0, imp, leaf, regress), nf: len(x[0]), regress: regress}), nil
+	return storeModel(&treeModel{root: buildTree(x, y, 0, maxDepth, 0, imp, leaf, regress), nf: len(x[0]), regress: regress})
 }
 
 // --- random forest ---
@@ -327,14 +365,16 @@ func (m *forestModel) predictOne(x []float64) float64 {
 	return majority(votes)
 }
 
-func (r *registry) randomForestFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return r.fitForest("randomForest", args, false)
+func randomForestFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return fitForest("randomForest", args, false)
 }
-func (r *registry) randomForestRegressorFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return r.fitForest("randomForestRegressor", args, true)
+func randomForestRegressorFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return fitForest("randomForestRegressor", args, true)
 }
 
-func (r *registry) fitForest(name string, args []interpreter.Value, regress bool) (interpreter.Value, error) {
+// fitForest takes the deprecated chained optional arguments
+// (X, y [, nTrees [, maxDepth]]).
+func fitForest(name string, args []interpreter.Value, regress bool) (interpreter.Value, error) {
 	if len(args) < 2 || len(args) > 4 {
 		return interpreter.Null(), fmt.Errorf("ml.%s expects 2 to 4 arguments (X, y [, nTrees [, maxDepth]]), got %d", name, len(args))
 	}
@@ -342,7 +382,7 @@ func (r *registry) fitForest(name string, args []interpreter.Value, regress bool
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	nTrees, maxDepth := 10, 8
+	nTrees, maxDepth := defaultNTrees, defaultMaxDepth
 	if len(args) >= 3 {
 		if args[2].Kind != interpreter.KindInt || args[2].Int < 1 || args[2].Int > maxForestTrees {
 			return interpreter.Null(), fmt.Errorf("ml.%s: nTrees must be in [1, %d]", name, maxForestTrees)
@@ -355,6 +395,41 @@ func (r *registry) fitForest(name string, args []interpreter.Value, regress bool
 		}
 		maxDepth = int(args[3].Int)
 	}
+	return trainForest(x, y, nTrees, maxDepth, regress), nil
+}
+
+func randomForestWithFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return fitForestWith("randomForestWith", args, false)
+}
+func randomForestRegressorWithFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return fitForestWith("randomForestRegressorWith", args, true)
+}
+
+// fitForestWith implements `ml.randomForest[Regressor]With(X, y, ml.ForestOptions)`.
+func fitForestWith(name string, args []interpreter.Value, regress bool) (interpreter.Value, error) {
+	if len(args) != 3 {
+		return interpreter.Null(), fmt.Errorf("ml.%s expects 3 arguments (X, y, ml.ForestOptions), got %d", name, len(args))
+	}
+	o, err := options(name, args[2], "ForestOptions")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	nTrees, err := o.count("nTrees", defaultNTrees, maxForestTrees)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	maxDepth, err := o.count("maxDepth", defaultMaxDepth, maxTreeDepth)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	x, y, err := fitData(name, args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return trainForest(x, y, nTrees, maxDepth, regress), nil
+}
+
+func trainForest(x [][]float64, y []float64, nTrees, maxDepth int, regress bool) interpreter.Value {
 	n, d := len(x), len(x[0])
 	mtry := int(sqrtInt(d))
 	if mtry < 1 {
@@ -371,7 +446,7 @@ func (r *registry) fitForest(name string, args []interpreter.Value, regress bool
 		}
 		trees[t] = buildTree(bx, by, 0, maxDepth, mtry, imp, leaf, regress)
 	}
-	return r.store(&forestModel{trees: trees, nf: d, regress: regress}), nil
+	return storeModel(&forestModel{trees: trees, nf: d, regress: regress})
 }
 
 // sqrtInt returns sqrt(n) as a float (local Newton iteration).

@@ -1182,7 +1182,7 @@ func stdioCall(argv as list of string, method as string, params as json.Value, t
     }
     def p as os.Process;
     try {
-        $p = os.spawn($cmd, {"stdout": $outPath, "stderr": "discard"});
+        $p = os.spawnWith($cmd, os.SpawnOptions{stdout: $outPath, stderr: "discard"});
     } catch (e) {
         if ($e.kind == "cancelled" or $e.kind == "limit") {
             throw $e;

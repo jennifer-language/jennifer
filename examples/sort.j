@@ -30,7 +30,7 @@ use lists;
 use strings;
 use task;
 
-def VERBOSE as bool init os.hasFlag("--verbose") or os.hasFlag("-v");
+def VERBOSE as bool init lists.contains(os.ARGS, "--verbose") or lists.contains(os.ARGS, "-v");
 
 # --- shared helpers ---
 

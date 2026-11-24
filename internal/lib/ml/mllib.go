@@ -5,9 +5,9 @@
 // machine learning on tabular data - the scikit-learn-lite core companion to
 // `stats` / `linalg`. Models follow a fit / predict shape: a `fit` function
 // (`ml.kMeans`, `ml.linearRegression`, ...) trains and returns an opaque
-// `ml.Model` handle, and `ml.predict` / `ml.transform` apply it. A fitted model
-// is immutable, so sharing a handle across value-copies and `spawn`ed tasks is
-// safe (read-only). Data is a `list of list of float/int` (rows of features) and
+// `ml.Model` value, and `ml.predict` / `ml.transform` apply it. A fitted model
+// is an immutable native value the garbage collector owns, so copies (in
+// structs, lists, `spawn`ed tasks) share it safely. Data is a `list of list of float/int` (rows of features) and
 // labels a `list of float/int`.
 //
 // Pure Go stdlib (native loops over modest tabular data; large datasets stay a
@@ -18,7 +18,6 @@ package mllib
 import (
 	"fmt"
 	"math"
-	"sync"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	mathlib "jennifer-lang.dev/jennifer/internal/lib/math"
@@ -75,85 +74,124 @@ type transformer interface {
 	numFeatures() int
 }
 
-// registry holds the live fitted models keyed by integer handle, per interpreter
-// (a fresh registry is closed over in Install, so nothing leaks across runs).
-type registry struct {
-	mu     sync.Mutex
-	models map[int64]any
-	nextID int64
+// modelValue is the native payload of an ml.Model: the fitted model itself.
+// A fitted model never changes after its fit function returns, so every copy
+// of the value shares the payload safely (across tasks too) and the garbage
+// collector frees it once no copy is left.
+type modelValue struct{ m any }
+
+// EqualNative: a model equals itself and its copies. Two separate fits are
+// different models even on the same data (a forest or k-means fit draws from
+// the random source), so equality is identity of the fitted model.
+func (v *modelValue) EqualNative(other interpreter.NativeObject) bool {
+	o, ok := other.(*modelValue)
+	return ok && o.m == v.m
 }
 
-// store registers a fitted model and returns its `ml.Model{id}` handle.
-func (r *registry) store(m any) interpreter.Value {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	id := r.nextID
-	r.nextID++
-	r.models[id] = m
-	return interpreter.NamespacedStructVal(LibraryName, "Model", []interpreter.StructField{
-		{Name: "id", Value: interpreter.IntVal(id)},
-	})
+func (v *modelValue) DisplayNative() string {
+	if v.m == nil {
+		return "<ml.Model unfitted>"
+	}
+	return "<ml.Model " + modelKind(v.m) + ">"
 }
 
-// resolve pulls the fitted model out of an `ml.Model` argument.
-func (r *registry) resolve(fnName string, v interpreter.Value) (any, error) {
-	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "Model" {
+// modelKind names a fitted model's type for display and messages.
+func modelKind(m any) string {
+	switch v := m.(type) {
+	case *linearModel:
+		return "linear"
+	case *knnModel:
+		if v.regress {
+			return "kNNRegressor"
+		}
+		return "kNN"
+	case *naiveBayesModel:
+		return "naiveBayes"
+	case *logisticModel, *logisticMultiModel:
+		return "logisticRegression"
+	case *kMeansModel:
+		return "kMeans"
+	case *pcaModel:
+		return "pca"
+	case *treeModel:
+		if v.regress {
+			return "decisionTreeRegressor"
+		}
+		return "decisionTree"
+	case *forestModel:
+		if v.regress {
+			return "randomForestRegressor"
+		}
+		return "randomForest"
+	case *scalerModel:
+		return "scaler"
+	}
+	return "model"
+}
+
+// storeModel wraps a fitted model as an `ml.Model` value.
+func storeModel(m any) interpreter.Value {
+	return interpreter.NativeObjectVal(LibraryName, "Model", &modelValue{m: m})
+}
+
+// resolveModel pulls the fitted model out of an `ml.Model` argument. The zero
+// value (`def m as ml.Model;`) holds no model and is refused.
+func resolveModel(fnName string, v interpreter.Value) (any, error) {
+	nv, ok := v.AsNativeObject(LibraryName, "Model")
+	if !ok {
 		return nil, fmt.Errorf("ml.%s: argument must be an ml.Model, got %s", fnName, v.Kind)
 	}
-	for _, f := range v.Fields {
-		if f.Name == "id" && f.Value.Kind == interpreter.KindInt {
-			r.mu.Lock()
-			m, ok := r.models[f.Value.Int]
-			r.mu.Unlock()
-			if !ok {
-				return nil, fmt.Errorf("ml.%s: unknown or freed ml.Model", fnName)
-			}
-			return m, nil
-		}
+	m := nv.(*modelValue).m
+	if m == nil {
+		return nil, fmt.Errorf("ml.%s: the ml.Model is not fitted (a zero value); fit one with ml.linearRegression, ml.kMeans, ...", fnName)
 	}
-	return nil, fmt.Errorf("ml.%s: malformed ml.Model handle", fnName)
+	return m, nil
 }
 
-// Install registers the ml library with a fresh per-interpreter registry.
+// Install registers the ml library.
 func Install(in *interpreter.Interpreter) {
-	r := &registry{models: map[int64]any{}}
-	in.RegisterNamespacedStruct(LibraryName, "Model", []parser.StructField{
-		{Name: "id", Type: parser.PrimitiveType(parser.TypeInt)},
-	})
+	in.RegisterNamespacedObject(LibraryName, "Model", nil)
+	in.SetNativeObjectZero(LibraryName, "Model", &modelValue{})
 
 	// Fit functions - each trains and returns an ml.Model handle.
-	in.RegisterNamespaced(LibraryName, "linearRegression", r.linearRegressionFn)
-	in.RegisterNamespaced(LibraryName, "ridge", r.ridgeFn)
-	in.RegisterNamespaced(LibraryName, "lasso", r.lassoFn)
-	in.RegisterNamespaced(LibraryName, "kNN", r.kNNFn)
-	in.RegisterNamespaced(LibraryName, "kNNRegressor", r.kNNRegressorFn)
-	in.RegisterNamespaced(LibraryName, "naiveBayes", r.naiveBayesFn)
-	in.RegisterNamespaced(LibraryName, "logisticRegression", r.logisticRegressionFn)
-	in.RegisterNamespaced(LibraryName, "kMeans", r.kMeansFn)
-	in.RegisterNamespaced(LibraryName, "pca", r.pcaFn)
-	in.RegisterNamespaced(LibraryName, "decisionTree", r.decisionTreeFn)
-	in.RegisterNamespaced(LibraryName, "decisionTreeRegressor", r.decisionTreeRegressorFn)
-	in.RegisterNamespaced(LibraryName, "randomForest", r.randomForestFn)
-	in.RegisterNamespaced(LibraryName, "randomForestRegressor", r.randomForestRegressorFn)
-	in.RegisterNamespaced(LibraryName, "standardScaler", r.standardScalerFn)
-	in.RegisterNamespaced(LibraryName, "minMaxScaler", r.minMaxScalerFn)
+	in.RegisterNamespaced(LibraryName, "linearRegression", linearRegressionFn)
+	in.RegisterNamespaced(LibraryName, "ridge", ridgeFn)
+	in.RegisterNamespaced(LibraryName, "lasso", lassoFn)
+	in.RegisterNamespaced(LibraryName, "kNN", kNNFn)
+	in.RegisterNamespaced(LibraryName, "kNNRegressor", kNNRegressorFn)
+	in.RegisterNamespaced(LibraryName, "naiveBayes", naiveBayesFn)
+	in.RegisterNamespaced(LibraryName, "logisticRegression", logisticRegressionFn)
+	in.RegisterNamespaced(LibraryName, "logisticRegressionWith", logisticRegressionWithFn)
+	in.RegisterNamespaced(LibraryName, "kMeans", kMeansFn)
+	in.RegisterNamespaced(LibraryName, "kMeansWith", kMeansWithFn)
+	in.RegisterNamespaced(LibraryName, "pca", pcaFn)
+	in.RegisterNamespaced(LibraryName, "decisionTree", decisionTreeFn)
+	in.RegisterNamespaced(LibraryName, "decisionTreeRegressor", decisionTreeRegressorFn)
+	in.RegisterNamespaced(LibraryName, "decisionTreeWith", decisionTreeWithFn)
+	in.RegisterNamespaced(LibraryName, "decisionTreeRegressorWith", decisionTreeRegressorWithFn)
+	in.RegisterNamespaced(LibraryName, "randomForest", randomForestFn)
+	in.RegisterNamespaced(LibraryName, "randomForestRegressor", randomForestRegressorFn)
+	in.RegisterNamespaced(LibraryName, "randomForestWith", randomForestWithFn)
+	in.RegisterNamespaced(LibraryName, "randomForestRegressorWith", randomForestRegressorWithFn)
+	in.RegisterNamespaced(LibraryName, "standardScaler", standardScalerFn)
+	in.RegisterNamespaced(LibraryName, "minMaxScaler", minMaxScalerFn)
 
 	// Apply a fitted model.
-	in.RegisterNamespaced(LibraryName, "predict", r.predictFn)
-	in.RegisterNamespaced(LibraryName, "transform", r.transformFn)
-	in.RegisterNamespaced(LibraryName, "predictProba", r.predictProbaFn)
-	in.RegisterNamespaced(LibraryName, "free", r.freeFn)
+	in.RegisterNamespaced(LibraryName, "predict", predictFn)
+	in.RegisterNamespaced(LibraryName, "transform", transformFn)
+	in.RegisterNamespaced(LibraryName, "predictProba", predictProbaFn)
+	in.RegisterNamespaced(LibraryName, "free", freeFn)
 
 	// Introspection - read the learned parameters.
-	in.RegisterNamespaced(LibraryName, "coefficients", r.coefficientsFn)
-	in.RegisterNamespaced(LibraryName, "intercept", r.interceptFn)
-	in.RegisterNamespaced(LibraryName, "centroids", r.centroidsFn)
-	in.RegisterNamespaced(LibraryName, "components", r.componentsFn)
-	in.RegisterNamespaced(LibraryName, "explainedVariance", r.explainedVarianceFn)
-	in.RegisterNamespaced(LibraryName, "featureImportances", r.featureImportancesFn)
+	in.RegisterNamespaced(LibraryName, "coefficients", coefficientsFn)
+	in.RegisterNamespaced(LibraryName, "intercept", interceptFn)
+	in.RegisterNamespaced(LibraryName, "centroids", centroidsFn)
+	in.RegisterNamespaced(LibraryName, "components", componentsFn)
+	in.RegisterNamespaced(LibraryName, "explainedVariance", explainedVarianceFn)
+	in.RegisterNamespaced(LibraryName, "featureImportances", featureImportancesFn)
 
 	// Model selection / preprocessing.
-	in.RegisterNamespaced(LibraryName, "trainTestSplit", r.trainTestSplitFn)
+	in.RegisterNamespaced(LibraryName, "trainTestSplit", trainTestSplitFn)
 	in.RegisterNamespaced(LibraryName, "kFold", kFoldFn)
 	in.RegisterNamespaced(LibraryName, "polynomialFeatures", polynomialFeaturesFn)
 
@@ -173,8 +211,24 @@ func Install(in *interpreter.Interpreter) {
 	registerStructs(in)
 }
 
-// registerStructs registers the plain-data result structs (split, confusion).
+// registerStructs registers the plain-data result structs (split, confusion)
+// and the fit options.
 func registerStructs(in *interpreter.Interpreter) {
+	intT := parser.PrimitiveType(parser.TypeInt)
+	in.RegisterNamespacedStruct(LibraryName, "LogisticOptions", []parser.StructField{
+		{Name: "learningRate", Type: parser.PrimitiveType(parser.TypeFloat)},
+		{Name: "epochs", Type: intT},
+	})
+	in.RegisterNamespacedStruct(LibraryName, "TreeOptions", []parser.StructField{
+		{Name: "maxDepth", Type: intT},
+	})
+	in.RegisterNamespacedStruct(LibraryName, "ForestOptions", []parser.StructField{
+		{Name: "nTrees", Type: intT},
+		{Name: "maxDepth", Type: intT},
+	})
+	in.RegisterNamespacedStruct(LibraryName, "KMeansOptions", []parser.StructField{
+		{Name: "maxIter", Type: intT},
+	})
 	fl := parser.PrimitiveType(parser.TypeFloat)
 	matF := parser.ListType(parser.ListType(fl))
 	vecF := parser.ListType(fl)
@@ -270,6 +324,64 @@ func fitData(name string, args []interpreter.Value) ([][]float64, []float64, err
 	return x, y, nil
 }
 
+// --- options structs ---
+
+// fitOptions is a fit function's options struct (ml.LogisticOptions, ...):
+// a zero field means the default, a negative one throws, and a count past its
+// cap throws "limit".
+type fitOptions struct {
+	fn     string
+	fields []interpreter.StructField
+}
+
+// options checks that v is an ml.<typ> and returns its fields.
+func options(fn string, v interpreter.Value, typ string) (fitOptions, error) {
+	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != typ {
+		return fitOptions{}, fmt.Errorf("ml.%s: argument 3 must be an ml.%s, got %s", fn, typ, v.Kind)
+	}
+	return fitOptions{fn: fn, fields: v.Fields}, nil
+}
+
+func (o fitOptions) field(name string) interpreter.Value {
+	for _, f := range o.fields {
+		if f.Name == name {
+			return f.Value
+		}
+	}
+	return interpreter.IntVal(0)
+}
+
+// count reads an int field: 0 -> def, negative -> error, past max -> "limit".
+func (o fitOptions) count(name string, def, max int) (int, error) {
+	v := o.field(name)
+	if v.Kind != interpreter.KindInt {
+		return 0, fmt.Errorf("ml.%s: %s must be int, got %s", o.fn, name, v.Kind)
+	}
+	switch {
+	case v.Int == 0:
+		return def, nil
+	case v.Int < 0:
+		return 0, fmt.Errorf("ml.%s: %s must not be negative, got %d", o.fn, name, v.Int)
+	case v.Int > int64(max):
+		return 0, limits.Capf("ml.%s: %s %d exceeds the limit of %d", o.fn, name, v.Int, max)
+	}
+	return int(v.Int), nil
+}
+
+// float reads a float field: 0 -> def, negative or not finite -> error.
+func (o fitOptions) float(name string, def float64) (float64, error) {
+	f, ok := o.field(name).AsFloat()
+	switch {
+	case !ok:
+		return 0, fmt.Errorf("ml.%s: %s must be float", o.fn, name)
+	case f == 0:
+		return def, nil
+	case f < 0 || !isFinite(f):
+		return 0, fmt.Errorf("ml.%s: %s must be a positive finite number, got %g", o.fn, name, f)
+	}
+	return f, nil
+}
+
 // --- Value builders ---
 
 func floatVec(fs []float64) interpreter.Value {
@@ -306,11 +418,11 @@ func intMat(m [][]int64) interpreter.Value {
 
 // --- predict / transform dispatch ---
 
-func (r *registry) predictFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func predictFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("ml.predict expects 2 arguments (model, X), got %d", len(args))
 	}
-	m, err := r.resolve("predict", args[0])
+	m, err := resolveModel("predict", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -351,11 +463,11 @@ func (r *registry) predictFn(_ interpreter.BuiltinCtx, args []interpreter.Value)
 	return floatVec(out), nil
 }
 
-func (r *registry) transformFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func transformFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("ml.transform expects 2 arguments (model, X), got %d", len(args))
 	}
-	m, err := r.resolve("transform", args[0])
+	m, err := resolveModel("transform", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -383,11 +495,11 @@ func (r *registry) transformFn(_ interpreter.BuiltinCtx, args []interpreter.Valu
 	return floatMat(out), nil
 }
 
-func (r *registry) predictProbaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func predictProbaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("ml.predictProba expects 2 arguments (model, X), got %d", len(args))
 	}
-	m, err := r.resolve("predictProba", args[0])
+	m, err := resolveModel("predictProba", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -413,20 +525,15 @@ func (r *registry) predictProbaFn(_ interpreter.BuiltinCtx, args []interpreter.V
 	return floatVec(out), nil
 }
 
-// freeFn drops a model from the registry, freeing its memory early.
-func (r *registry) freeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+// freeFn is deprecated (M29.39, removed in 0.29.0): a model is a value the
+// garbage collector frees, so there is nothing to release. It checks its
+// argument and returns null.
+func freeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("ml.free expects 1 argument (model), got %d", len(args))
 	}
-	if _, err := r.resolve("free", args[0]); err != nil {
-		return interpreter.Null(), err
-	}
-	for _, f := range args[0].Fields {
-		if f.Name == "id" && f.Value.Kind == interpreter.KindInt {
-			r.mu.Lock()
-			delete(r.models, f.Value.Int)
-			r.mu.Unlock()
-		}
+	if _, ok := args[0].AsNativeObject(LibraryName, "Model"); !ok {
+		return interpreter.Null(), fmt.Errorf("ml.free: argument must be an ml.Model, got %s", args[0].Kind)
 	}
 	return interpreter.Null(), nil
 }

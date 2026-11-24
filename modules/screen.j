@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 
 /**
  * Terminal user interfaces: an explicit `screen`, not a GUI framework. Two
@@ -708,18 +708,18 @@ export func decodeKey(seq as list of int) {
  * @return {Key} the next key event
  */
 export func nextKey() {
-    def b as int init term.readByte();
-    if ($b == -1) {
+    def b as int init readRaw(-1);
+    if ($b == END_OF_INPUT) {
         return Key{name: "eof", char: ""};
     }
     def seq as list of int init [];
     $seq[] = $b;
     if ($b == 27) {
-        def c as int init term.readByteTimeout(ESCAPE_WAIT_MS);
-        if ($c == -2) {
+        def c as int init readRaw(ESCAPE_WAIT_MS);
+        if ($c == NO_BYTE_YET) {
             return Key{name: "escape", char: ""};
         }
-        if ($c == -1) {
+        if ($c == END_OF_INPUT) {
             return decodeKey($seq);
         }
         $seq[] = $c;
@@ -741,8 +741,8 @@ export func nextKey() {
             $extra = 3;
         }
         for (def i in 0..$extra) {
-            def c as int init term.readByte();
-            if ($c == -1) {
+            def c as int init readRaw(-1);
+            if ($c == END_OF_INPUT) {
                 break;
             }
             $seq[] = $c;
@@ -751,14 +751,39 @@ export func nextKey() {
     return decodeKey($seq);
 }
 
+# END_OF_INPUT and NO_BYTE_YET are what readRaw returns for the end of input
+# ("closed") and a wait that ran out ("timeout"); no byte is negative.
+def const END_OF_INPUT as int init -1;
+def const NO_BYTE_YET as int init -2;
+
+# readRaw reads the next raw byte through `term`: term.readByte when waitMs is
+# negative, else term.readByteTimeout(waitMs). It returns END_OF_INPUT at the
+# end of input and NO_BYTE_YET when waitMs pass first; other errors propagate.
+func readRaw(waitMs as int) {
+    try {
+        if ($waitMs < 0) {
+            return term.readByte();
+        }
+        return term.readByteTimeout($waitMs);
+    } catch (e) {
+        if ($e.kind == "closed") {
+            return END_OF_INPUT;
+        }
+        if ($e.kind == "timeout") {
+            return NO_BYTE_YET;
+        }
+        throw $e;
+    }
+}
+
 # readSequenceTail reads the rest of a CSI / SS3 sequence after its `ESC [` or
 # `ESC O` opener: bytes up to and including the final byte (a letter, or `~` for
 # the numeric-parameter forms), or up to end of input.
 func readSequenceTail() {
     def tail as list of int init [];
     repeat {
-        def d as int init term.readByte();
-        if ($d == -1) {
+        def d as int init readRaw(-1);
+        if ($d == END_OF_INPUT) {
             return $tail;
         }
         $tail[] = $d;

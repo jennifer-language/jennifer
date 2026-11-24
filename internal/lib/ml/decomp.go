@@ -33,7 +33,7 @@ func (m *pcaModel) transformOne(x []float64) []float64 {
 	return out
 }
 
-func (r *registry) pcaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func pcaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("ml.pca expects 2 arguments (X, nComponents), got %d", len(args))
 	}
@@ -117,7 +117,7 @@ func (r *registry) pcaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (in
 		}
 		explained[c] = ev / totalVar
 	}
-	return r.store(&pcaModel{mean: mu, components: comps, explained: explained, nf: d}), nil
+	return storeModel(&pcaModel{mean: mu, components: comps, explained: explained, nf: d}), nil
 }
 
 // jacobiEigen returns the eigenvalues and eigenvectors of a symmetric matrix by

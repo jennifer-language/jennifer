@@ -151,7 +151,8 @@ arithmetic.
   macros (including `@reboot`) above. No seconds field and no non-standard
   extensions (`L`, `W`, `#`, `?`).
 - **A calculator, not a runner.** It never touches the clock. Drive it yourself:
-  `time.sleep(time.sub(cron.next($s, time.now()), time.now()))`, then run the job.
+  take `$now` from `time.now()` once, `time.sleep(time.sub(cron.next($s, $now), $now))`,
+  then run the job.
 
 ## See also
 
