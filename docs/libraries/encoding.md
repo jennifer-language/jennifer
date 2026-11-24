@@ -180,6 +180,7 @@ error on decode; runes with no byte are a positioned error on encode.
 | `"windows-1256"` | Arabic.                                             |
 | `"windows-1257"` | Baltic.                                             |
 | `"windows-1258"` | Vietnamese.                                         |
+| `"macintosh"`    | Mac OS Roman (IANA `macintosh`), as classic Mac OS text, PDF's `MacRomanEncoding` and TrueType platform-1 names use it. `0xDB` is the euro sign (Apple's mapping since Mac OS 8.5, as WHATWG has it), `0xF0` the Apple logo `U+F8FF`; all 256 bytes are defined. |
 
 ### Codec names are exact
 
@@ -195,7 +196,9 @@ form yourself before calling.
 Only `ascii` (7-bit, with its own out-of-range errors) and `ebcdic`
 (IBM-1047, not in the standard Unicode mapping path) are hand-written.
 Every ISO-8859 and Windows single-byte codec, including `iso-8859-1` and
-`windows-1252`, is **generated from the Unicode Consortium mapping files**:
+`windows-1252`, and `macintosh` (Apple's `ROMAN.TXT`, whose unlisted control
+characters map to themselves) are **generated from the Unicode Consortium
+mapping files**:
 
 ```sh
 go generate ./internal/lib/encoding/   # writes codecs_gen.go

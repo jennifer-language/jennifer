@@ -62,7 +62,13 @@ var gen = []struct{ name, url string }{
 	{"windows-1256", base + "VENDORS/MICSFT/WINDOWS/CP1256.TXT"},
 	{"windows-1257", base + "VENDORS/MICSFT/WINDOWS/CP1257.TXT"},
 	{"windows-1258", base + "VENDORS/MICSFT/WINDOWS/CP1258.TXT"},
+	{"macintosh", base + "VENDORS/APPLE/ROMAN.TXT"},
 }
+
+// controlsUnlisted names the codecs whose mapping file leaves out the C0
+// controls and DEL because the character set uses them unchanged (Apple's
+// files say so in their header); they are filled in as identity.
+var controlsUnlisted = map[string]bool{"macintosh": true}
 
 // tableVar turns a codec name into its Go var identifier:
 // "iso-8859-2" -> "iso88592Table", "windows-1250" -> "windows1250Table".
@@ -135,6 +141,12 @@ func main() {
 		t, err := fetchTable(g.url)
 		if err != nil {
 			log.Fatalf("%s (%s): %v", g.name, g.url, err)
+		}
+		if controlsUnlisted[g.name] {
+			for i := 0; i < 0x20; i++ {
+				t[i] = rune(i)
+			}
+			t[0x7F] = 0x7F
 		}
 		fmt.Fprintf(&buf, "var %s = [256]rune{\n", tableVar(g.name))
 		for i := 0; i < 256; i += 8 {
