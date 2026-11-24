@@ -55,11 +55,18 @@ must chain to a system CA and name the host.
 | DSN names | MySQL (`tls=`) | Postgres (`sslmode=`) |
 | --- | --- | --- |
 | nothing | `tls=true` is added | `sslmode=verify-full` is added |
-| a verifying mode | `true` | `verify-full`, `verify-ca` |
-| a weaker mode | `false`, `skip-verify`, `preferred`: refused unless `allowInsecure` | `disable`, `allow`, `prefer`, `require`: refused unless `allowInsecure` |
+| a verifying mode | `true` | `verify-full`; `verify-ca` with `sslrootcert` (a CA file, or `system`) |
+| any other mode | `false`, `skip-verify`, `preferred`: refused unless `allowInsecure` | `disable`, `allow`, `prefer`, `require`, an empty `sslmode=`, `verify-ca` without `sslrootcert`: refused unless `allowInsecure` |
+| a plaintext fallback | `allowFallbackToPlaintext=true`: refused unless `allowInsecure` | (part of `allow` / `prefer`) |
+
+`verify-ca` checks the certificate chain but not the host name, so it is
+accepted only against a pinned CA: without `sslrootcert` (or
+`PGSSLROOTCERT`) any certificate a public CA issued would pass.
 
 Exempt, with the DSN used as written: a Unix socket and a loopback host
 (`localhost`, 127.0.0.0/8, `::1`), where the traffic never leaves the host.
+`localhost` is not resolved: it dials 127.0.0.1, then `::1`, so neither a
+missing hosts entry nor a DNS answer can send the exempt login elsewhere.
 A container's service name (`db:5432`) is another host. Where the DSN names
 no host the driver's default applies (MySQL `127.0.0.1:3306`, Postgres
 `PGHOST` or the local socket). A refusal is `"runtime"` and names the fix:

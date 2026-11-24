@@ -23,7 +23,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-sql-driver/mysql"
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/lib/devio"
@@ -484,13 +485,24 @@ func openDB(fn, driver, dsn string, allowInsecure bool) (*sql.DB, error) {
 		if err != nil {
 			return nil, err
 		}
-		db, err := sql.Open("pgx", final)
+		cfg, err := postgresConnConfig(final)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s", fn, redactDSN(err.Error()))
 		}
-		return db, nil
+		return stdlib.OpenDB(*cfg), nil
 	}
 	return nil, fmt.Errorf(`%s: unknown driver %q; use "mysql" or "postgres"`, fn, driver)
+}
+
+// postgresConnConfig parses a Postgres DSN the TLS policy has passed;
+// `localhost` dials the loopback addresses, never what the resolver says.
+func postgresConnConfig(dsn string) (*pgx.ConnConfig, error) {
+	cfg, err := pgx.ParseConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	cfg.LookupFunc = loopbackLookup(cfg.LookupFunc)
+	return cfg, nil
 }
 
 // openConn opens a pool and pings it, so a bad DSN / unreachable server

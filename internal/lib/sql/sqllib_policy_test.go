@@ -7,14 +7,22 @@ package sqllib
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	stdnet "net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -70,6 +78,8 @@ func options(allowInsecure bool, ms int64) Value {
 func TestPostgresTLSPolicy(t *testing.T) {
 	t.Setenv("PGHOST", "")
 	t.Setenv("PGSSLMODE", "")
+	t.Setenv("PGSSLROOTCERT", "")
+	caFile := writeTestCA(t)
 	const added = "\x00added"
 	cases := []struct {
 		dsn      string
@@ -80,7 +90,18 @@ func TestPostgresTLSPolicy(t *testing.T) {
 		{"postgres://u:secret@db.example.com/app", false, "postgres://u:secret@db.example.com/app?sslmode=verify-full"},
 		{"postgresql://u:secret@db.example.com:5432/app?application_name=x", false, "postgresql://u:secret@db.example.com:5432/app?application_name=x&sslmode=verify-full"},
 		{"postgres://u:secret@db.example.com/app?sslmode=verify-full", false, added[:0]},
-		{"postgres://u:secret@db.example.com/app?sslmode=verify-ca", false, added[:0]},
+		// verify-ca checks the chain only: it needs a pinned CA.
+		{"postgres://u:secret@db.example.com/app?sslmode=verify-ca", false, "refused"},
+		{"postgres://u:secret@db.example.com/app?sslmode=verify-ca&sslrootcert=" + caFile, false, added[:0]},
+		{"postgres://u:secret@db.example.com/app?sslmode=verify-ca&sslrootcert=system", false, added[:0]},
+		{"host=db.example.com user=u sslmode=verify-ca", false, "refused"},
+		{"host=db.example.com user=u sslmode=verify-ca sslrootcert=" + caFile, false, added[:0]},
+		{"host=db.example.com user=u sslmode=verify-ca", true, added[:0]},
+		// An empty or unknown mode is not a verifying one (pgx reads "" as prefer).
+		{"postgres://u:secret@db.example.com/app?sslmode=", false, "refused"},
+		{"host=db.example.com user=u password=secret sslmode=", false, "refused"},
+		{"host=db.example.com user=u password=secret sslmode=''", false, "refused"},
+		{"postgres://u:secret@db.example.com/app?sslmode=", true, added[:0]},
 		{"postgres://u:secret@db.example.com/app?sslmode=disable", false, "refused"},
 		{"postgres://u:secret@db.example.com/app?sslmode=allow", false, "refused"},
 		{"postgres://u:secret@db.example.com/app?sslmode=prefer", false, "refused"},
@@ -137,6 +158,26 @@ func TestPostgresTLSPolicy(t *testing.T) {
 	}
 }
 
+// writeTestCA writes a self-signed CA certificate (PEM) for sslrootcert.
+func writeTestCA(t *testing.T) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "test CA"},
+		NotBefore: time.Now(), NotAfter: time.Now().Add(time.Hour), IsCA: true, BasicConstraintsValid: true}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(p, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 // TestMySQLTLSPolicy: the TCP form with each tls value, the missing
 // parameter, a Unix socket and loopback hosts.
 func TestMySQLTLSPolicy(t *testing.T) {
@@ -156,6 +197,13 @@ func TestMySQLTLSPolicy(t *testing.T) {
 		{"u:secret@tcp(db.example.com:3306)/app?tls=false", true, "false"},
 		{"u:secret@tcp(db.example.com:3306)/app?tls=skip-verify", true, "skip-verify"},
 		{"u:secret@tcp([2001:db8::1]:3306)/app?tls=false", false, "refused"},
+		// A plaintext fallback undoes the verified TLS.
+		{"u:secret@tcp(db.example.com:3306)/app?allowFallbackToPlaintext=true", false, "refused"},
+		{"u:secret@tcp(db.example.com:3306)/app?tls=true&allowFallbackToPlaintext=true", false, "refused"},
+		{"u:secret@tcp(db.example.com:3306)/app?allowFallbackToPlaintext=true&allowCleartextPasswords=true", false, "refused"},
+		{"u:secret@tcp(db.example.com:3306)/app?allowFallbackToPlaintext=true", true, "true"},
+		{"u:secret@tcp(db.example.com:3306)/app?allowCleartextPasswords=true", false, "true"},
+		{"u:secret@tcp(localhost:3306)/app?allowFallbackToPlaintext=true", false, ""},
 		// Exempt: used as written.
 		{"u:secret@tcp(localhost:3306)/app", false, ""},
 		{"u:secret@tcp(127.0.0.1:3306)/app?tls=false", false, "false"},
@@ -172,7 +220,7 @@ func TestMySQLTLSPolicy(t *testing.T) {
 				continue
 			}
 			msg := err.Error()
-			if !strings.Contains(msg, "allowInsecure: true") || !strings.Contains(msg, "tls=true") {
+			if !strings.Contains(msg, "allowInsecure: true") || (!strings.Contains(msg, "tls=true") && !strings.Contains(msg, "allowFallbackToPlaintext")) {
 				t.Errorf("%q: refusal names no fix: %s", c.dsn, msg)
 			}
 			if strings.Contains(msg, "secret") {
@@ -184,12 +232,72 @@ func TestMySQLTLSPolicy(t *testing.T) {
 			t.Errorf("%q: got %v, %v; want tls=%q", c.dsn, cfg, err, c.want)
 			continue
 		}
+		if _, ok := cfg.Logger.(*mysql.NopLogger); !ok {
+			t.Errorf("%q: the driver logs to %T, want the silent logger", c.dsn, cfg.Logger)
+		}
 		// The connector builds a verifying TLS config naming the host.
 		if c.want == "true" {
 			if _, err := mysql.NewConnector(cfg); err != nil {
 				t.Errorf("%q: connector: %v", c.dsn, err)
 			}
 		}
+	}
+}
+
+// TestLocalhostIsNeverResolved: the exempt name `localhost` dials the
+// loopback addresses without asking the resolver, so a DNS answer (or a
+// search-domain wildcard) cannot receive the plaintext login.
+func TestLocalhostIsNeverResolved(t *testing.T) {
+	t.Setenv("PGHOST", "")
+	resolved := []string{}
+	next := func(_ context.Context, host string) ([]string, error) {
+		resolved = append(resolved, host)
+		return []string{"192.0.2.1"}, nil
+	}
+	look := loopbackLookup(next)
+	for _, h := range []string{"localhost", "LocalHost.", "localhost."} {
+		got, err := look(context.Background(), h)
+		if err != nil || strings.Join(got, ",") != "127.0.0.1,::1" {
+			t.Errorf("%q -> %v, %v; want the loopback addresses", h, got, err)
+		}
+	}
+	if got, _ := look(context.Background(), "db.example.com"); strings.Join(got, ",") != "192.0.2.1" {
+		t.Errorf("another name is not passed on: %v", got)
+	}
+	if strings.Join(resolved, ",") != "db.example.com" {
+		t.Errorf("resolver asked for %v", resolved)
+	}
+
+	// Postgres: the connection config carries the wrapped lookup.
+	pc, err := postgresConnConfig("postgres://u:secret@localhost/app?sslmode=disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := pc.LookupFunc(context.Background(), "localhost"); err != nil || strings.Join(got, ",") != "127.0.0.1,::1" {
+		t.Errorf("postgres lookup of localhost -> %v, %v", got, err)
+	}
+
+	// MySQL: a localhost address dials the loopback listener directly.
+	ln, err := stdnet.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("listen: %v", err)
+	}
+	defer ln.Close()
+	_, port, _ := stdnet.SplitHostPort(ln.Addr().String())
+	mc, err := secureMySQLConfig("sql.open", "u:secret@tcp(localhost:"+port+")/app", false)
+	if err != nil || mc.DialFunc == nil {
+		t.Fatalf("mysql localhost config: %v, dial func set %v", err, mc != nil && mc.DialFunc != nil)
+	}
+	c, err := mc.DialFunc(context.Background(), "tcp", mc.Addr)
+	if err != nil {
+		t.Fatalf("dial localhost: %v", err)
+	}
+	if ra := c.RemoteAddr().String(); ra != ln.Addr().String() {
+		t.Errorf("dialled %s, want %s", ra, ln.Addr())
+	}
+	c.Close()
+	if mc, _ := secureMySQLConfig("sql.open", "u:secret@tcp(127.0.0.1:3306)/app", false); mc.DialFunc != nil {
+		t.Error("an IP literal needs no dial override")
 	}
 }
 
