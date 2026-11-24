@@ -115,6 +115,10 @@ func bindToDeviceFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 func lookupFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("net.lookup")
 }
+
+// setupDNS does nothing: jennifer-tiny has no network stack, and keeps the
+// system resolver behaviour.
+func setupDNS() {}
 func reverseLookupFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("net.reverseLookup")
 }

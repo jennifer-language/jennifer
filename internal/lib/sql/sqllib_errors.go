@@ -26,6 +26,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"jennifer-lang.dev/jennifer/internal/dnsconf"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 )
 
@@ -159,6 +160,10 @@ func dbFailure(ctx interpreter.BuiltinCtx, fn, defaultOp string, err error, limi
 		return interpreter.RaiseError("timeout", msg, ctx.File, ctx.Line, ctx.Col)
 	}
 	if op, reason, ok := transportFailure(err, defaultOp); ok {
+		if reason == "dns" {
+			// Name the resolver files when none is configured (M29.5).
+			msg = dnsconf.Setup().Explain(msg)
+		}
 		return newNetError(ctx, op, reason, msg)
 	}
 	return errors.New(msg)
