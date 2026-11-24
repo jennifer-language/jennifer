@@ -115,11 +115,17 @@ clean:
 # finds its modules there without JENNIFER_SYSMODDIR. An absolute path; the
 # packaging passes its own (Debian, Arch, OpenWrt, Docker: /usr).
 PREFIX ?= /usr
+# make exports a command-line variable to every recipe's environment, which
+# expands it (a $(shell ...) in it would run); gen-version passes it instead.
+unexport PREFIX
 
 # Regenerate the version-init file from git state and PREFIX. Always runs; the
-# .PHONY declaration above ensures make doesn't skip it on rebuild.
+# .PHONY declaration above ensures make doesn't skip it on rebuild. PREFIX goes
+# through the environment unexpanded ($(value ...)), so no character in it
+# reaches the recipe's shell; gen-version.sh validates it.
+gen-version: export JENNIFER_PREFIX = $(value PREFIX)
 gen-version:
-	@JENNIFER_PREFIX='$(PREFIX)' sh scripts/gen-version.sh
+	@sh scripts/gen-version.sh
 
 # Print the version string that the next build would embed.
 version:

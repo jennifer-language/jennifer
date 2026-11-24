@@ -44,12 +44,23 @@ opkg install --force-architecture ./jennifer_<version>_aarch64_generic.ipk
 ```
 
 This is safe *here specifically* because the binary carries no subtarget-specific
-code, within the family's floor: the armv7 build needs an ARMv7 with VFP (the
-cortex-a7 / a9 / a15 targets), the armv6 build an ARMv6 with VFP
-(`arm_arm1176jzf-s_vfp`, bcm27xx/bcm2708; it also runs on the ARMv7 targets),
-neither an ARMv5 one such as kirkwood, the 386 build SSE2 (not `x86/legacy` or `x86/geode`). (To stamp an exact subtarget instead, pass it to `scripts/build-ipk.sh` as
-the optional fourth argument, or build through the feed `Makefile` on that
-target, which stamps the target's real arch.)
+code, within the family's floor. (To stamp an exact subtarget instead, pass it
+to `scripts/build-ipk.sh` as the optional fourth argument, or build through the
+feed `Makefile` on that target, which stamps the target's real arch.)
+
+| Build | Needs | OpenWrt package arches | Not supported |
+| --- | --- | --- | --- |
+| `arm64` | ARMv8 | every `aarch64_*` | |
+| `armv7` (GOARM=7) | ARMv7 with a hard-float VFP | `arm_cortex-a5_vfpv4`, `arm_cortex-a7_neon-vfpv4`, `arm_cortex-a7_vfpv4`, `arm_cortex-a8_vfpv3`, `arm_cortex-a9_neon`, `arm_cortex-a9_vfpv3-d16`, `arm_cortex-a15_neon-vfpv4` | `arm_cortex-a7` (mt7629), `arm_cortex-a9` (bcm53xx): no FPU |
+| `armv6` (GOARM=6) | ARMv6 with VFP | `arm_arm1176jzf-s_vfp` (bcm2708); also runs on the `armv7` arches | ARMv5 and older: `arm_arm926ej-s` (kirkwood), `arm_fa526`, `arm_xscale` |
+| `386` | SSE2 | `i386_pentium4` | `i386_pentium-mmx` (x86/legacy, x86/geode) |
+| `amd64` | x86-64 | `x86_64` | |
+| `riscv64` | RV64GC | `riscv64_riscv64` | |
+
+The feed `Makefile` picks the build from `ARCH_PACKAGES` by this table: an
+`arm_cortex-a*` arch needs a `_vfp*` or `_neon*` subtype, and i386 only
+`i386_pentium4`. Any other arch stops the build with an "unsupported target
+arch" error instead of installing a binary that cannot start.
 
 ## Sizing - read before deploying
 

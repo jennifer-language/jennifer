@@ -25,9 +25,10 @@ case "$prefix" in
     *) echo "gen-version.sh: PREFIX must be an absolute path, got '$prefix'" >&2; exit 2 ;;
 esac
 # The value lands in a Go string literal: refuse anything that would need
-# escaping (quotes, backslashes, control characters such as a newline).
-if printf '%s' "$prefix" | LC_ALL=C grep -q '["\\[:cntrl:]]'; then
-    echo "gen-version.sh: PREFIX must not contain quotes, backslashes or control characters" >&2
+# escaping (quotes, backslashes, control characters such as a newline), and
+# the shell and make metacharacters ' and $, which no install path needs.
+if printf '%s' "$prefix" | LC_ALL=C grep -q '["'\''$\\[:cntrl:]]'; then
+    echo "gen-version.sh: PREFIX must not contain quotes, \$, backslashes or control characters" >&2
     exit 2
 fi
 if [ "$(printf '%s' "$prefix" | wc -l)" -ne 0 ]; then

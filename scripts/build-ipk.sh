@@ -64,7 +64,8 @@ OWRT_ARCH="${4:-}"
 # lowest-common-denominator ARMv8 string (a generic ARMv8 static binary runs
 # on every aarch64 subtarget - see the README on --force-architecture). The
 # 32-bit strings name the most common subtarget of each family: the GOARM=7
-# build needs an ARMv7 with VFP (cortex-a7 / a9 / a15 targets), the GOARM=6
+# build needs an ARMv7 with a VFP or NEON unit (a cortex-a package arch with
+# a `_vfp*` or `_neon*` subtype; not arm_cortex-a7 / a9 without one), the GOARM=6
 # build an ARMv6 with VFP (arm1176jzf-s: bcm27xx/bcm2708, the Raspberry Pi
 # Zero / 1; not the ARMv5 targets), the 386 build SSE2 (pentium4, not
 # x86/legacy or geode).
