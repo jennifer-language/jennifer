@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"jennifer-lang.dev/jennifer/internal/dnsconf"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/lexer"
 	metalib "jennifer-lang.dev/jennifer/internal/lib/meta"
@@ -29,11 +30,12 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
-	// Baseline system module directory (env / compile-time default),
+	// Baseline system module directory (env / build default),
 	// unvalidated, so meta.SYSMODDIR has a value for every subcommand. The
 	// program-running paths (run / repl) re-resolve with any --sysmoddir
 	// flag and validate.
 	metalib.SetSysmoddir(module.ResolveSysmoddir("", os.Getenv).Dir)
+	setMemoryLimit()
 
 	switch os.Args[1] {
 	case "run":
@@ -246,18 +248,40 @@ func setupSysmoddir(cliFlag string) (module.Sysmoddir, error) {
 	return sm, nil
 }
 
-// printVersionVerbose backs `jennifer version -v`: the build version plus every
-// system directory the resolver uses (the system module dir and the vendor
-// root for `@scope/package` decks), each with the layers behind it.
+// printVersionVerbose backs `jennifer version -v`: the build version, the
+// install prefix the build was made for, and every path the interpreter uses
+// (the system module dir, the docs dir, the resolver's resolv.conf and hosts,
+// the temp dir and the vendor root for `@scope/package` decks), each with
+// where it came from: a flag, the environment, the build (PREFIX), or the
+// system.
 func printVersionVerbose() {
 	fmt.Println("jennifer " + version.Version)
+	fmt.Printf("prefix: %s (build)\n", version.Prefix)
 
 	sm := module.ResolveSysmoddir("", os.Getenv)
-	fmt.Printf("system module dir: %s (%s)\n", sm.Dir, sm.Source)
-	fmt.Printf("  compile default: %s\n", module.CompileDefaultSysmoddir())
+	fmt.Printf("system module dir: %s (%s)\n", sm.Dir, sysmoddirSource(sm.Source))
+	fmt.Printf("  build default: %s\n", module.CompileDefaultSysmoddir())
 	if env := os.Getenv(module.SysmoddirEnv); env != "" {
-		fmt.Printf("  env %s: %s\n", module.SysmoddirEnv, env)
+		fmt.Printf("  environment %s: %s\n", module.SysmoddirEnv, env)
 	}
+	fmt.Printf("docs dir: %s (build)\n", version.DocDir())
+
+	dc := dnsconf.Load()
+	for _, line := range dc.Resolv.Describe("resolv.conf") {
+		fmt.Println(line)
+	}
+	for _, line := range dc.Hosts.Describe("hosts") {
+		fmt.Println(line)
+	}
+	if !dnsconf.CustomResolver {
+		fmt.Println("  (jennifer-tiny has no network library; the files are not read)")
+	}
+
+	tmpSrc := "system default"
+	if os.Getenv("TMPDIR") != "" {
+		tmpSrc = "environment TMPDIR"
+	}
+	fmt.Printf("temp dir: %s (%s)\n", os.TempDir(), tmpSrc)
 
 	// Vendor root for `@scope/package` deck imports. Resolved relative to the
 	// current directory (the upward `vendor/` walk), since there is no program
@@ -266,15 +290,26 @@ func printVersionVerbose() {
 	if vr := module.FindVendorRoot("", cwd); vr != "" {
 		src := "nearest vendor/ above cwd"
 		if os.Getenv(module.VendorEnv) != "" {
-			src = "env " + module.VendorEnv
+			src = "environment " + module.VendorEnv
 		}
 		fmt.Printf("vendor root: %s (%s)\n", vr, src)
 	} else {
 		fmt.Printf("vendor root: (none; no %s and no vendor/ above cwd)\n", module.VendorEnv)
 	}
 	if env := os.Getenv(module.VendorEnv); env != "" {
-		fmt.Printf("  env %s: %s\n", module.VendorEnv, env)
+		fmt.Printf("  environment %s: %s\n", module.VendorEnv, env)
 	}
+}
+
+// sysmoddirSource names a sysmoddir layer for `version -v`.
+func sysmoddirSource(s module.Source) string {
+	switch s {
+	case module.SourceCLI:
+		return "flag --sysmoddir"
+	case module.SourceEnv:
+		return "environment " + module.SysmoddirEnv
+	}
+	return "build"
 }
 
 // isVerboseFlag reports whether a `version` argument requests verbose output:
