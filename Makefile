@@ -86,7 +86,8 @@ build-go: gen-version
 # probe build, so a real TinyGo-cleanliness regression in Jennifer still fails.
 # The scheduler/stack flags stay here as the single source (TINYGO_FLAGS, shared
 # with build-tinygo-dev); the script forwards them to both the probe and the
-# real build.
+# real build, and applies the same two values itself when a caller names
+# neither (scripts/build-tinygo.sh keeps its defaults equal to these).
 TINYGO_FLAGS = -scheduler=tasks -stack-size=4mb
 build-tinygo: gen-version
 	sh scripts/build-tinygo.sh jennifer-tiny ./cmd/jennifer $(TINYGO_FLAGS)

@@ -21,6 +21,12 @@
 # Usage:
 #   scripts/build-tinygo.sh <output> <target-pkg> [tinygo build flags...]
 #
+# A call that names no `-scheduler=` or no `-stack-size=` gets the Makefile's
+# TINYGO_FLAGS value for it (-scheduler=tasks, -stack-size=4mb): without them
+# TinyGo picks its own scheduler and a small stack, and the binary builds but
+# crashes on the first `spawn`. Keep the two defaults below equal to
+# TINYGO_FLAGS.
+#
 # Exit status:
 #   0   built <output>, OR skipped because the toolchain cannot build it
 #   !=0 the toolchain is capable but the real build failed (a real regression)
@@ -37,6 +43,20 @@ shift
 PKG="$1"
 shift
 # Anything left in "$@" is tinygo build flags, e.g. -scheduler=tasks -stack-size=4mb.
+has_scheduler=0
+has_stack=0
+for flag in "$@"; do
+    case "$flag" in
+        -scheduler=*) has_scheduler=1 ;;
+        -stack-size=*) has_stack=1 ;;
+    esac
+done
+if [ "$has_stack" -eq 0 ]; then
+    set -- -stack-size=4mb "$@"
+fi
+if [ "$has_scheduler" -eq 0 ]; then
+    set -- -scheduler=tasks "$@"
+fi
 
 if ! command -v tinygo >/dev/null 2>&1; then
     echo "build-tinygo: tinygo not found on PATH; skipping $OUT (the standard 'jennifer' is unaffected)." >&2
