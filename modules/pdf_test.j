@@ -1388,3 +1388,20 @@ func testTextGlyphsRecordsAGlyphOnce() {
     def b as Document init addPage(addFont(document(), $lf), $viaFont);
     testing.assertEqual(render($a), render($b));
 }
+
+# The page keeps the set of the glyphs it records, so a Glyphs op neither
+# rebuilds it from every record nor records a glyph a textUnicode drew already.
+func testPageKeepsItsGlyphSet() {
+    def lf as LoadedFont init loadFont("Body", ttfBytes());
+    def pg as Page init textUnicode(page(400, 200), 40, 150, $lf, 24, "AB");
+    testing.assertEqual(lists.sort(maps.keys($pg.glyphSeen)), ["Body 1", "Body 2"]);
+    for (def y in [100, 80, 60]) {
+        $pg = draw(
+            $pg,
+            [DrawOp.Glyphs{x: 40, y: $y, font: "Body", size: 24, gids: [2, 3], cps: [66, 67]}]);
+    }
+    $pg = textGlyphs($pg, 40, 40, "Body", 24, [3, 1], [67, 65]);
+    testing.assertEqual(len($pg.glyphUses), 3);
+    testing.assertEqual($pg.glyphUses[2].gid, 3);
+    testing.assertEqual(len($pg.glyphSeen), 3);
+}

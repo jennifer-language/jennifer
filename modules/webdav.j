@@ -40,7 +40,6 @@
 use convert;
 use lists;
 use maps;
-use math;
 use regex;
 use strings;
 use time;
@@ -1190,22 +1189,23 @@ export func walk(c as Client, path as string) {
  * @param c {Client} the client
  * @param path {string} e.g. `/Documents/a.txt`
  * @param maxBytes {int} the largest file accepted; 0 for 64 MiB, `math.MAX_INT`
- *   (or a negative value) for no limit
+ *   for no limit
  * @return {bytes} its content
  * @throws {WebdavError} kind `"webdav"` when it does not exist or the server
- *   refuses
+ *   refuses, or for a negative `maxBytes`
  * @throws {Error} kind `"limit"` when it is larger than `maxBytes`
  */
 export func get(c as Client, path as string, maxBytes as int) {
+    if ($maxBytes < 0) {
+        fail("get: maxBytes must be >= 0 (math.MAX_INT for no limit), got " +
+            convert.toString($maxBytes));
+    }
     def p as string init cleanPath($path);
     checkTransport($c, "GET", $p);
     def headers as map of string to string init $c.headers;
     $headers["Accept"] = "*/*";
     def o as http.Options init optionsOf($c);
     $o.maxBytes = $maxBytes;
-    if ($maxBytes < 0) {
-        $o.maxBytes = math.MAX_INT;
-    }
     def none as bytes;
     def r as http.BytesResponse;
     try {

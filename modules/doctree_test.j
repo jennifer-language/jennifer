@@ -1098,6 +1098,27 @@ func testStandard14LossIsReported() {
     testing.assertEqual(len(layoutPdf(tDoc([tPara("plain")]), pdfDefaults()).missing), 0);
 }
 
+# With the substitute "" a word made only of undrawable characters is dropped
+# but still reported: with the next word drawn, else the last one, else on a
+# line of its own.
+func testDroppedWordIsReported() {
+    def o as PdfOptions init pdfDefaults();
+    $o.unencodable = "";
+    def res as PdfResult init layoutPdf(tDoc([tPara("→ x λ y ←"), tPara("→ λ")]), $o);
+    testing.assertEqual(len($res.missing), 5);
+    testing.assertEqual($res.missing[0].char, "→");
+    testing.assertEqual($res.missing[0].context, "→");
+    testing.assertEqual($res.missing[1].context, "λ ←");
+    testing.assertEqual($res.missing[2].char, "←");
+    testing.assertEqual($res.missing[2].context, "λ ←");
+    testing.assertEqual($res.missing[3].char, "→");
+    testing.assertEqual($res.missing[3].context, "→ λ");
+    testing.assertEqual($res.missing[4].char, "λ");
+    def c as string init $res.doc.pages[0].content;
+    testing.assertContains($c, "(x) Tj");
+    testing.assertFalse(strings.contains($c, "() Tj"));
+}
+
 # A role with only fallbacks keeps its standard-14 font for WinAnsi text and
 # draws the rest in the first fallback that has it; a fallback nothing needed is
 # not embedded.

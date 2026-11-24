@@ -88,6 +88,8 @@ export def struct Route {
  * @field cors {CorsOptions} the CORS policy applied by the serve loop (zero-value = off)
  * @field onError {func} the error-handler (only when hasOnError); see web.onError
  * @field hasOnError {bool} whether an error handler is set (stderr always logs regardless)
+ * @field onErrorClient {bool} whether the error handler also sees client faults
+ *   (answered 4xx): true for web.onError, false for web.onServerError
  * @field allocBudget {int} the per-request allocation budget in bytes (0 = none); see web.allocBudget
  */
 export def struct App {
@@ -98,6 +100,7 @@ export def struct App {
     cors as CorsOptions,
     onError as func,
     hasOnError as bool,
+    onErrorClient as bool,
     allocBudget as int
 };
 
@@ -133,10 +136,12 @@ export def struct Context {
 
 /**
  * The error `web` throws, for every error of kind `"web"`: a request body that
- * cannot be read (status 400) or a misconfiguration (status 500). One that
- * escapes a handler or middleware is answered with its `status`; a 4xx is
- * answered without the 500 error dump.
- * @field kind {string} always "web"
+ * cannot be read (status 400) or a misconfiguration (status 500). A body parser
+ * (`bodyJson`, `form`, `multipartForm`) also throws it, with kind `"limit"` and
+ * status 413, for a request body past one of its caps. One that escapes a
+ * handler or middleware is answered with its `status`; a 4xx is answered
+ * without the 500 error dump.
+ * @field kind {string} "web", or "limit" for a request body past a parser cap
  * @field message {string} what went wrong
  * @field status {int} the HTTP status the safety net answers it with
  */
@@ -173,6 +178,7 @@ export func new() {
         cors: $noCors,
         onError: $noHandler,
         hasOnError: false,
+        onErrorClient: false,
         allocBudget: 0
     };
 }
@@ -339,8 +345,10 @@ export func notFound(app as App, handler as func) {
  * Register an error handler, returning a new App. When a handler or
  * middleware throws, `web` catches it (so one failing request never stops the
  * server) and answers it: a `WebError` with its 4xx status (400 for a body that
- * cannot be read), a `"limit"` with 413, anything else with 500, written to
- * stderr. It *then also* invokes this handler with the thrown value - the
+ * cannot be read, 413 for one past a body parser's cap), anything else with
+ * 500, written to stderr. Any other `"limit"` is a cap the server hit on its
+ * own work (an outbound response, a query result, the allocation budget), so it
+ * is a 500 too. It *then also* invokes this handler with the thrown value - the
  * `Error` struct `{kind, message, file, line, col}` for a runtime failure or a
  * thrown `Error` (which crosses the module boundary intact, so the handler may
  * declare its parameter `as Error`; a module's error struct such as
@@ -349,7 +357,9 @@ export func notFound(app as App, handler as func) {
  * 500's error, so registering a handler adds alerting / structured logging
  * without ever losing the default diagnostic. The handler cannot change the
  * response; it is for observability. An error *from* the error handler is
- * itself caught and logged, never re-raised.
+ * itself caught and logged, never re-raised. The handler sees client faults
+ * (4xx) too, so a client can call it once per malformed request; for a hook
+ * that pages or sends mail, register it with `web.onServerError` instead.
  * @param app {App} the router to extend
  * @param handler {func} the error-handler func value
  * @return {App} a new App with the error handler set
@@ -358,6 +368,25 @@ export func onError(app as App, handler as func) {
     def out as App init $app;
     $out.onError = $handler;
     $out.hasOnError = true;
+    $out.onErrorClient = true;
+    return $out;
+}
+
+/**
+ * Register an error handler for server faults only, returning a new App: as
+ * `web.onError`, but the handler is not called for an error answered with a
+ * 4xx (a body that cannot be read, a request body past a cap, a `WebError`
+ * with a 4xx status), so clients cannot drive it. It replaces a handler set
+ * with `web.onError`, and the other way round.
+ * @param app {App} the router to extend
+ * @param handler {func} the error-handler func value
+ * @return {App} a new App with the error handler set
+ */
+export func onServerError(app as App, handler as func) {
+    def out as App init $app;
+    $out.onError = $handler;
+    $out.hasOnError = true;
+    $out.onErrorClient = false;
     return $out;
 }
 
@@ -367,7 +396,8 @@ export func onError(app as App, handler as func) {
  * middleware, the handler and every task they spawn count what they allocate
  * against it. A request that passes it raises a catchable `"limit"` in its
  * handler; one that escapes is answered `500` and written to stderr (the server
- * refusing to spend more on the request, not a client sending too much), and
+ * refusing to spend more on the request, not a client sending too much, even
+ * when a body parser hit it), and
  * the other requests are unaffected. The count is cumulative (bytes allocated,
  * not live), see `task.setAllocBudget`. `math.MAX_INT` removes the budget.
  * @param app {App} the router to extend
@@ -394,7 +424,7 @@ export func allocBudget(app as App, limit as int) {
 
 # overBudget reports whether the calling request worker's allocation budget
 # (web.allocBudget) has been passed, which tells a "limit" the budget raised
-# from a "limit" of a cap (413).
+# while a body parser ran from a request body past the parser's cap (413).
 func overBudget(app as App) {
     return $app.allocBudget > 0 and task.allocated() > $app.allocBudget;
 }
@@ -508,7 +538,7 @@ func hostOnly(addr as string) {
  * @param ctx {Context} the request context
  * @return {json.Value} the decoded request body
  * @throws {WebError} kind "web", status 400, for a malformed body; kind
- *   "limit" (answered 413) past the decoder's caps
+ *   "limit", status 413, past the decoder's caps
  */
 export func bodyJson(ctx as Context) {
     try {
@@ -516,6 +546,9 @@ export func bodyJson(ctx as Context) {
     } catch (e) {
         if ($e.kind == "json" or $e.kind == "encoding") {
             throw badBody("web.bodyJson", $e.message);
+        }
+        if ($e.kind == "limit") {
+            throw bodyTooLarge("web.bodyJson", $e.message);
         }
         throw $e;
     }
@@ -528,6 +561,18 @@ func badBody(fn as string, message as string) {
         kind: "web",
         message: $fn + ": malformed request body: " + $message,
         status: 400
+    };
+}
+
+# bodyTooLarge is the WebError for a request body past a body parser's cap: the
+# client's fault, answered 413. It keeps the generic kind "limit"; the struct
+# and its status are what tell it from a cap the server hit on its own work,
+# which escapes as a plain "limit" and is a 500.
+func bodyTooLarge(fn as string, message as string) {
+    return WebError{
+        kind: "limit",
+        message: $fn + ": request body too large: " + $message,
+        status: 413
     };
 }
 
@@ -548,7 +593,7 @@ func parseForm(bodytext as string) {
  * @param ctx {Context} the request context
  * @return {map of string to string} the form fields
  * @throws {WebError} kind "web", status 400, for a malformed body; kind
- *   "limit" (answered 413) past 10000 fields
+ *   "limit", status 413, past 10000 fields
  */
 export func form(ctx as Context) {
     try {
@@ -556,6 +601,9 @@ export func form(ctx as Context) {
     } catch (e) {
         if ($e.kind == "encoding") {
             throw badBody("web.form", $e.message);
+        }
+        if ($e.kind == "limit") {
+            throw bodyTooLarge("web.form", $e.message);
         }
         throw $e;
     }
@@ -587,7 +635,7 @@ export func formValue(ctx as Context, name as string) {
  * @param ctx {Context} the request context
  * @return {list of multipart.Part} the form parts (fields and files)
  * @throws {WebError} kind "web", status 400, for a malformed body; kind
- *   "limit" (answered 413) past the part caps
+ *   "limit", status 413, past the part caps
  */
 export func multipartForm(ctx as Context) {
     try {
@@ -595,6 +643,9 @@ export func multipartForm(ctx as Context) {
     } catch (e) {
         if ($e.kind == "multipart") {
             throw badBody("web.multipartForm", $e.message);
+        }
+        if ($e.kind == "limit") {
+            throw bodyTooLarge("web.multipartForm", $e.message);
         }
         throw $e;
     }
@@ -1098,10 +1149,11 @@ func dispatch(app as App, handler as func, ctx as Context, req as httpd.Request)
             return;
         }
         # Middleware or handler failed. A client fault is answered with its
-        # status: a WebError (400 for a body that cannot be read) or a "limit"
-        # (413: the request was too large for a cap). Anything else is a 500,
-        # including a "limit" from the request's allocation budget
-        # (web.allocBudget): the server declined to spend more on it.
+        # status: a WebError with a 4xx status (400 for a body that cannot be
+        # read, 413 for one past a body parser's cap). Anything else is a 500:
+        # a plain "limit" is a cap the server hit on its own work, and a 413
+        # raised while the request's allocation budget (web.allocBudget) is
+        # spent is the server declining to spend more on it.
         # A typed def throws for a value of another type, which tells them apart.
         def status as int init 500;
         def reason as string init "500 internal server error\n";
@@ -1113,23 +1165,18 @@ func dispatch(app as App, handler as func, ctx as Context, req as httpd.Request)
         } catch (notWeb) {
             $isWeb = false;
         }
-        def ge as Error;
-        def isError as bool init false;
-        try {
-            $ge = $err;
-            $isError = true;
-        } catch (notError) {
-            $isError = false;
-        }
-        if ($isWeb and $we.status >= 400 and $we.status < 500) {
+        if ($isWeb and $we.status == 413 and $we.kind == "limit") {
+            if (not overBudget($app)) {
+                $status = 413;
+                $reason = "413 content too large\n";
+            }
+        } elseif ($isWeb and $we.status >= 400 and $we.status < 500) {
             $status = $we.status;
             $reason = convert.toString($status) + " " + $we.message + "\n";
-        } elseif ($isError and $ge.kind == "limit" and not overBudget($app)) {
-            $status = 413;
-            $reason = "413 content too large\n";
         }
         # A 500 is written to stderr, *then* (if set) the onError hook is also
-        # invoked; a client fault (4xx) only reaches the hook. The hook is
+        # invoked; a client fault (4xx) only reaches a hook registered with
+        # web.onError, not one from web.onServerError. The hook is
         # additive, never a replacement: registering it must not make a
         # deployment lose the diagnostic it would get without one.
         # `err` is the thrown value - the canonical Error struct for a runtime
@@ -1144,7 +1191,7 @@ func dispatch(app as App, handler as func, ctx as Context, req as httpd.Request)
         if ($status >= 500) {
             io.eprintf("web: unhandled handler error: %s\n", convert.toString($err));
         }
-        if ($app.hasOnError) {
+        if ($app.hasOnError and ($status >= 500 or $app.onErrorClient)) {
             def report as Error;
             def asError as bool init false;
             try {

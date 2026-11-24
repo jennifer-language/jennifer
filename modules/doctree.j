@@ -2975,6 +2975,9 @@ func inlineWordsAs(nodes as list of Node, kit as FontKit, forceRole as string) {
     # continues it.
     def joined as bool init false;
     def bodyKey as string init fontKey($kit, "body");
+    # Source words dropped whole (every character undrawable, substitute ""):
+    # reported with the next word drawn, else the last one.
+    def pending as string init "";
     for (def n in $nodes) {
         # A hard line break is a sentinel word packLines turns into a line end.
         if (typeOf($n) == "line_break") {
@@ -3008,9 +3011,6 @@ func inlineWordsAs(nodes as list of Node, kit as FontKit, forceRole as string) {
             $whole = len($rawParts) != len($parts);
         }
         for (def k in 0..len($parts)) {
-            if (len($parts[$k]) == 0) {
-                continue;
-            }
             def lost as string init "";
             if ($whole) {
                 $lost = $raw;
@@ -3018,6 +3018,14 @@ func inlineWordsAs(nodes as list of Node, kit as FontKit, forceRole as string) {
                 $rawParts = [];
             } elseif (len($rawParts) > 0 and $rawParts[$k] != $parts[$k]) {
                 $lost = $rawParts[$k];
+            }
+            if (len($parts[$k]) == 0) {
+                $pending = joinLost($pending, $lost);
+                continue;
+            }
+            if ($pending != "") {
+                $lost = joinLost($pending, $lost);
+                $pending = "";
             }
             def pieces as list of string init cjkPieces($f, $parts[$k]);
             for (def q in 0..len($pieces)) {
@@ -3038,7 +3046,38 @@ func inlineWordsAs(nodes as list of Node, kit as FontKit, forceRole as string) {
             $joined = not strings.endsWith($t, " ");
         }
     }
+    if ($pending != "") {
+        def last as int init len($out) - 1;
+        while ($last >= 0 and $out[$last].text == "\n") {
+            $last = $last - 1;
+        }
+        if ($last >= 0) {
+            $out[$last].lost = joinLost($out[$last].lost, $pending);
+        } else {
+            # Nothing of the run is drawn: an empty word carries the report.
+            $out[] = IWord{
+                text: "",
+                font: $bodyKey,
+                width: 0.0,
+                glue: false,
+                tight: false,
+                role: "body",
+                lost: $pending
+            };
+        }
+    }
     return $out;
+}
+
+# joinLost joins two source words (either may be "") for a lost-character report.
+func joinLost(a as string, b as string) {
+    if ($a == "") {
+        return $b;
+    }
+    if ($b == "") {
+        return $a;
+    }
+    return $a + " " + $b;
 }
 
 # cjkPieces splits a word in an embedded face at every East-Asian wide character,
@@ -3148,7 +3187,9 @@ func placeInlineLines(state as Layout, lines as Packed, size as int) {
                 $cx = $cx + $sp;
             }
             $first = false;
-            $ops = addTextOps($ops, $state.kit, $w.font, $cx, $baseline, $size, $w.text);
+            if ($w.text != "") {
+                $ops = addTextOps($ops, $state.kit, $w.font, $cx, $baseline, $size, $w.text);
+            }
             if ($w.lost != "") {
                 $state = noteLost($state, $w.font, $w.role, $w.lost, $baseline);
             }

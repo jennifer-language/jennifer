@@ -452,6 +452,20 @@ func testGetOverMaxBytesIsLimit() {
     finish($f);
 }
 
+# A negative maxBytes is refused before any request, not taken as no limit.
+func testGetNegativeMaxBytesThrows() {
+    def f as Fake init fake([]);
+    try {
+        get(connect($f.url), "/a.txt", -1);
+        missed();
+    } catch (e) {
+        def we as WebdavError init $e;
+        testing.assertEqual($we.kind, "webdav");
+        testing.assertContains($we.message, "maxBytes must be >= 0");
+    }
+    testing.assertEqual(len(finish($f)), 0);
+}
+
 # A refused connection is http's net.NetError (kind "net"), passed on as it
 # is on every request path, not a WebdavError.
 func testARefusedConnectionIsANetError() {

@@ -711,17 +711,41 @@ func notMatched() {
 
 # --- request data extraction ------------------------------------------------
 
+# mediaType is the request's Content-Type without its parameters, lowercased
+# ("application/json; charset=utf-8" -> "application/json").
+func mediaType(ctx as web.Context) {
+    def ct as string init strings.lower(web.header($ctx, "Content-Type"));
+    def semi as int init strings.indexOf($ct, ";");
+    if ($semi >= 0) {
+        $ct = $ct[..$semi];
+    }
+    return strings.trim($ct);
+}
+
+# isJsonBody reports whether the request declares a JSON body
+# (`application/json` or a `+json` type such as `application/merge-patch+json`).
+func isJsonBody(ctx as web.Context) {
+    def mt as string init mediaType($ctx);
+    return $mt == "application/json" or
+        (strings.startsWith($mt, "application/") and strings.endsWith($mt, "+json"));
+}
+
+# isFormBody reports whether the request declares an
+# `application/x-www-form-urlencoded` body (the only form web.form parses).
+func isFormBody(ctx as web.Context) {
+    return mediaType($ctx) == "application/x-www-form-urlencoded";
+}
+
 # jsonScalars flattens a JSON body's top-level scalar fields into a string map;
-# a nested / array field is skipped (read it with web.bodyJson). A non-JSON body
-# yields an empty map.
+# a nested / array field is skipped (read it with web.bodyJson). Only a body
+# declared JSON is read, and an empty one yields an empty map; any other body
+# too. A malformed JSON body throws web's WebError (400), past a cap its 413.
 func jsonScalars(ctx as web.Context) {
     def out as map of string to string init {};
-    def doc as json.Value init emptyJson();
-    try {
-        $doc = web.bodyJson($ctx);
-    } catch (e) { # lint-disable: L103
+    if (not isJsonBody($ctx) or len(web.body($ctx)) == 0) {
         return $out;
     }
+    def doc as json.Value init web.bodyJson($ctx);
     if (not (json.typeOf($doc, "") == "map")) {
         return $out;
     }
@@ -741,21 +765,21 @@ func jsonScalars(ctx as web.Context) {
     return $out;
 }
 
-func emptyJson() {
-    return json.map();
-}
-
 # requestData collects the named `fields` from the request into one string map -
 # the surface `validate` and the handler's `webapi.validated` see. A field is
-# taken from the query first, then the JSON body's top-level scalars, then the
-# form body. Only the named fields are read, so a body parsed both ways never
-# leaks a spurious key.
+# taken from the query first, then the body: its top-level scalars for a JSON
+# body, its fields for an `application/x-www-form-urlencoded` one, nothing for
+# any other (a multipart upload is the handler's to read). A malformed body
+# throws web's WebError (400), which web answers.
 func requestData(ctx as web.Context, fields as list of string) {
     def out as map of string to string init {};
     if (len($fields) == 0) {
         return $out;
     }
-    def form as map of string to string init web.form($ctx);
+    def form as map of string to string init {};
+    if (isFormBody($ctx)) {
+        $form = web.form($ctx);
+    }
     def jsonB as map of string to string init jsonScalars($ctx);
     for (def f in $fields) {
         def q as string init web.query($ctx, $f);
@@ -798,7 +822,10 @@ export func formData(ctx as web.Context) {
 
 /**
  * The named top-level JSON body fields, flattened to strings (a nested or
- * array-valued field is omitted; read those with `web.bodyJson`).
+ * array-valued field is omitted; read those with `web.bodyJson`). Only a body
+ * whose Content-Type is `application/json` (or a `+json` type) is read; for any
+ * other, or an empty body, the map is empty. A malformed JSON body throws
+ * `web.WebError` (status 400; kind "limit", status 413, past a cap).
  * @param ctx {web.Context} the request context
  * @param fields {list of string} the JSON keys to read
  * @return {map of string to string} the present scalar fields
@@ -816,7 +843,8 @@ export func jsonData(ctx as web.Context, fields as list of string) {
 
 /**
  * Inside a handler: the request data the route's rules were checked against
- * (query + body scalars). The guard already validated it, so a handler that got
+ * (query, then the body's top-level scalars for a JSON body or its fields for
+ * an `application/x-www-form-urlencoded` one; no other body is read). The guard already validated it, so a handler that got
  * this far can trust it. Takes the `Api` because Jennifer has no per-request
  * state to stash it in.
  * @param a {Api} the built API
@@ -952,7 +980,10 @@ export func evaluate(spec as Spec, identity as Identity, data as map of string t
  * route's handler; a throw from the handler, or from the authenticator,
  * limiter or key function, is answered `500` `{"error": "internal server
  * error"}` (nothing of the error is sent, nor when the handler had already
- * answered) and rethrown, so `web` logs it and calls its `onError` hook.
+ * answered) and rethrown, so `web` logs it and calls its `onError` hook. A
+ * `web.WebError` with a 4xx status (a body that cannot be read: 400, past a
+ * body parser's cap: 413) is not answered here but rethrown as it is, so
+ * `web` answers it with its status, as a client fault.
  *
  * Wired by hand as a `web.before` middleware instead (without `install`), it
  * only checks: it returns true for a request that may proceed (or matches no
@@ -976,6 +1007,19 @@ export func guard(a as Api, ctx as web.Context) {
         }
         return true;
     } catch (err) {
+        # A client fault (a WebError with a 4xx status) goes to web as it is:
+        # web answers it with its status (or 500 when the request's allocation
+        # budget is spent, which only web knows) and does not log it.
+        def clientFault as bool init false;
+        try {
+            def we as web.WebError init $err;
+            $clientFault = $we.status >= 400 and $we.status < 500;
+        } catch (notWeb) {
+            $clientFault = false;
+        }
+        if ($clientFault) {
+            throw $err;
+        }
         # Answer in the envelope while the request is still open (not when the
         # handler had already answered, or the server answered 503 after the
         # respond timeout), then hand the error on to web for its log and

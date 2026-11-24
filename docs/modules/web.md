@@ -224,6 +224,7 @@ threading it through:
 | `web.before($app, handler)` | Add a middleware (runs before each route handler). |
 | `web.notFound($app, handler)` | A custom handler for unmatched requests (default: a plain 404). |
 | `web.onError($app, handler)` | An error handler for a throwing route / middleware (default: log to stderr). |
+| `web.onServerError($app, handler)` | The same, but not called for a client fault (an error answered 4xx). |
 | `web.allocBudget($app, limit)` | A per-request allocation budget in bytes (see [Memory per request](#memory-per-request)); `math.MAX_INT` removes it, 0 or negative throws a `WebError` (500). |
 
 A `HEAD` request is served by the matching **`GET`** route automatically (HTTP
@@ -287,14 +288,17 @@ never stops the accept loop) and answers it:
 | Escaped error | Answer | stderr |
 |---|---|---|
 | `web.WebError` with a 4xx `status` (400: a request body that cannot be read) | that status, `400 <message>` | no |
-| kind `"limit"` (a body past a parser cap, such as 10000 form fields) | `413 content too large` | no |
-| kind `"limit"` from the request's allocation budget (`web.allocBudget`) | `500 internal server error` | kind / message / position |
+| `web.WebError` of kind `"limit"`, status 413 (a body past a parser cap, such as 10000 form fields) | `413 content too large` | no |
+| the same while the request's allocation budget (`web.allocBudget`) is spent | `500 internal server error` | kind / message |
+| any other kind `"limit"` (a cap the server hit on its own work: an outbound response, a query result, the allocation budget) | `500 internal server error` | kind / message / position |
 | anything else | `500 internal server error` | kind / message / position |
 
 `web.WebError{kind: "web", message, status}` is every error of kind `"web"`:
 400 from the body readers below, 500 for a misconfiguration (an empty CSRF
-secret, a bad cookie option, CORS credentials with a wildcard origin). A
-handler that wants its own answer catches it as usual. Register an error
+secret, a bad cookie option, CORS credentials with a wildcard origin). The body
+readers also throw it with kind `"limit"` and status 413 for a body past their
+caps, so a catch matching the generic kind still sees `"limit"`. A handler
+that wants its own answer catches it as usual. Register an error
 handler to route errors somewhere else (a log file, an alerting service):
 
 ```jennifer
@@ -308,7 +312,10 @@ $app = web.onError($app, logError);
 
 The handler receives the thrown value (the `Error` struct by convention), every
 answered status included; it is for observability and cannot change the
-response. A module's own error struct (`web.WebError` too, that escapes a route
+response. A client can therefore call it once per malformed request; a hook
+that pages or sends mail is registered with `web.onServerError($app, handler)`
+instead, which skips every error answered 4xx (one registration replaces the
+other). A module's own error struct (`web.WebError` too, that escapes a route
 `rest.HttpError`, `smtp.SmtpError`, ... - any struct with string `kind` and
 `message` fields) arrives as an `Error` with that kind and message, so a handler
 typed `as Error` sees it too; its extra fields are in the stderr line, and its
@@ -326,7 +333,8 @@ them send it, so serve forms with `charset=utf-8` (`web.html` does).
 `web.bodyJson` (a body that is not UTF-8 or not JSON) and `web.multipartForm`
 (a missing boundary, a malformed part) throw the same 400. The split runs in
 Go (`encoding.parseForm`), so a hostile `&&&...` body costs no more than its
-size; more than 10000 fields throw `Error{kind: "limit"}`, answered `413`
+size; more than 10000 fields throw a `web.WebError` of kind `"limit"`, status
+413, answered `413`
 (this runs before any route or login check once `csrfCheck` is middleware,
 which answers a malformed form body `400`). `web.cookie` reads
 the `Cookie` header the same way (`encoding.parseCookies`). `web.csrfCheck`

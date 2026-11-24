@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -168,5 +169,115 @@ task.wait($server2);
 	}
 	if _, code := loadForTest(progPath); code != testExitPass {
 		t.Fatalf("web malformed-body program failed with code %d", code)
+	}
+}
+
+// TestWebLimitOrigin: only a request body past a body parser's cap is the
+// client's 413 (a WebError of kind "limit", not logged); a "limit" the server
+// hit on its own work is a 500 and logged. A hook registered with
+// web.onServerError is not called for a client fault (4xx), only for a 500.
+func TestWebLimitOrigin(t *testing.T) {
+	webMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "web.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "http.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	prog := fmt.Sprintf(`use testing;
+use httpd;
+use task;
+use json;
+use strings;
+use convert;
+import %q as web;
+import %q as http;
+
+def observed as string init "";
+
+func recordError(e as Error) {
+    $observed = $observed + "|" + $e.kind;
+}
+
+func showObserved(ctx as web.Context) {
+    web.text($ctx, 200, $observed);
+}
+
+func echoJson(ctx as web.Context) {
+    web.text($ctx, 200, json.encode(web.bodyJson($ctx)));
+}
+
+func echoForm(ctx as web.Context) {
+    web.text($ctx, 200, web.formValue($ctx, "a"));
+}
+
+# A handler that catches a body cap sees the generic kind and the status.
+func ownLimit(ctx as web.Context) {
+    try {
+        web.form($ctx);
+        web.text($ctx, 200, "ok");
+    } catch (e) {
+        def we as web.WebError init $e;
+        web.text($ctx, 200, $we.kind + " " + convert.toString($we.status));
+    }
+}
+
+func upstreamCap(ctx as web.Context) {
+    throw Error{kind: "limit", message: "upstream cap reached"};
+}
+
+def app as web.App init web.new();
+$app = web.onServerError($app, recordError);
+$app = web.post($app, "/json", echoJson);
+$app = web.post($app, "/form", echoForm);
+$app = web.post($app, "/own", ownLimit);
+$app = web.get($app, "/upstream", upstreamCap);
+$app = web.get($app, "/observed", showObserved);
+
+def srv as httpd.Server init httpd.listen("127.0.0.1:0");
+def base as string init "http://" + httpd.address($srv);
+def server as task of null init spawn { web.serveOn($app, $srv); };
+def h as map of string to string init {};
+def formCT as string init "application/x-www-form-urlencoded";
+def r as http.Response;
+
+def many as string init "";
+for (def i in 0..10001) {
+    $many = $many + "a=1&";
+}
+$r = http.post($base + "/form", $formCT, $many, $h);
+testing.assertEqual($r.status, 413);
+testing.assertEqual($r.body, "413 content too large\n");
+$r = http.post($base + "/own", $formCT, $many, $h);
+testing.assertEqual($r.body, "limit 413");
+$r = http.post($base + "/json", "application/json", "[1,", $h);
+testing.assertEqual($r.status, 400);
+
+# Client faults do not reach a web.onServerError hook.
+$r = http.get($base + "/observed", $h);
+testing.assertEqual($r.body, "");
+
+# A cap the server hit on its own work is a 500, and reaches the hook.
+$r = http.get($base + "/upstream", $h);
+testing.assertEqual($r.status, 500);
+$r = http.get($base + "/observed", $h);
+testing.assertEqual($r.body, "|limit");
+
+httpd.shutdown($srv);
+task.wait($server);
+`, webMod, httpMod)
+
+	progPath := filepath.Join(dir, "app.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stderr := runCapturingStderr(t, progPath)
+	if code != 0 {
+		t.Fatalf("web limit program failed with code %d; stderr:\n%s", code, stderr)
+	}
+	if n := strings.Count(stderr, "web: unhandled handler error:"); n != 1 || !strings.Contains(stderr, "upstream cap reached") {
+		t.Fatalf("want exactly the upstream cap logged, got:\n%s", stderr)
 	}
 }

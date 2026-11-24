@@ -215,6 +215,9 @@ export def struct LinkAnnot {
  * @field content {string} the content-stream operators built so far
  * @field fonts {list of string} the distinct standard-14 fonts referenced on this page
  * @field glyphUses {list of GlyphUse} embedded-font glyphs drawn on this page
+ * @field glyphSeen {map of string to bool} the font and glyph id pairs in
+ *   `glyphUses`, kept by the drawing functions so a `Glyphs` op records each
+ *   glyph once without rebuilding the set
  * @field annots {list of LinkAnnot} the page's link annotations
  */
 export def struct Page {
@@ -223,6 +226,7 @@ export def struct Page {
     content as string,
     fonts as list of string,
     glyphUses as list of GlyphUse,
+    glyphSeen as map of string to bool,
     annots as list of LinkAnnot
 };
 
@@ -556,6 +560,7 @@ export func page(width as int, height as int) {
         content: "",
         fonts: [],
         glyphUses: $noGlyphs,
+        glyphSeen: {},
         annots: $noAnnots
     };
 }
@@ -598,17 +603,10 @@ export func link(pg as Page, x as int, y as int, width as int, height as int, ur
  * @throws {Error} kind "pdf" for a character outside WinAnsi
  */
 export func draw(pg as Page, ops as list of DrawOp) {
-    def out as Page init $pg;
     # Accumulate every op's content fragment in a list joined once, and append
-    # font / glyph / annotation records to local lists, so the whole batch costs
-    # one page copy instead of one per op.
-    def parts as list of string init [$out.content];
-    def fonts as list of string init $out.fonts;
-    def glyphUses as list of GlyphUse init $out.glyphUses;
-    def annots as list of LinkAnnot init $out.annots;
-    # The glyphs a Glyphs op records once per page, made on the first one.
-    def seen as UseSet init UseSet{uses: [], seen: {}};
-    def seenReady as bool init false;
+    # font / glyph / annotation records to the page in place, so the whole batch
+    # costs at most one page copy instead of one per op.
+    def parts as list of string init [$pg.content];
     for (def op in $ops) {
         def o as DrawOp init $op;
         match ($o) {
@@ -616,25 +614,28 @@ export func draw(pg as Page, ops as list of DrawOp) {
                 if (not isStandardFont($t.font)) {
                     fail("unknown font '" + $t.font + "' (use a standard-14 base font)");
                 }
-                if (not lists.contains($fonts, $t.font)) {
-                    $fonts[] = $t.font;
+                if (not lists.contains($pg.fonts, $t.font)) {
+                    $pg.fonts[] = $t.font;
                 }
                 $parts[] = textChunk($t.x, $t.y, $t.font, $t.size, $t.str);
             }
             when TextUnicode(u) {
                 def gr as GlyphRun init glyphRun($u.lf, $u.str);
                 for (def gu in $gr.uses) {
-                    $glyphUses[] = $gu;
+                    $pg.glyphUses[] = $gu;
+                    $pg.glyphSeen[glyphKey($gu)] = true;
                 }
                 $parts[] = textUnicodeChunk($u.x, $u.y, $u.lf.name, $u.size, $gr.hex);
             }
             when Glyphs(g) {
-                if (not $seenReady) {
-                    $seen = useSet($glyphUses);
-                    $seenReady = true;
-                }
                 def gr as GlyphRun init glyphRunOf($g.font, $g.gids, $g.cps);
-                $seen = addUses($seen, $gr.uses);
+                for (def gu in $gr.uses) {
+                    def k as string init glyphKey($gu);
+                    if (not maps.has($pg.glyphSeen, $k)) {
+                        $pg.glyphSeen[$k] = true;
+                        $pg.glyphUses[] = $gu;
+                    }
+                }
                 $parts[] = textUnicodeChunk($g.x, $g.y, $g.font, $g.size, $gr.hex);
             }
             when Line(l) { $parts[] = lineChunk($l.fromX, $l.fromY, $l.toX, $l.toY); }
@@ -642,7 +643,7 @@ export func draw(pg as Page, ops as list of DrawOp) {
             when Color(c) { $parts[] = colorChunk($c.red, $c.green, $c.blue); }
             when Image(im) { $parts[] = imageChunk($im.img, $im.x, $im.y, $im.width, $im.height); }
             when Link(lk) {
-                $annots[] = LinkAnnot{
+                $pg.annots[] = LinkAnnot{
                     x: $lk.x,
                     y: $lk.y,
                     width: $lk.width,
@@ -652,43 +653,17 @@ export func draw(pg as Page, ops as list of DrawOp) {
             }
         }
     }
-    $out.content = strings.join($parts, "");
-    $out.fonts = $fonts;
-    $out.glyphUses = $glyphUses;
-    if ($seenReady) {
-        $out.glyphUses = $seen.uses;
-    }
-    $out.annots = $annots;
-    return $out;
+    $pg.content = strings.join($parts, "");
+    return $pg;
 }
 
-# A page's glyph records with a set of the (font, glyph) pairs they hold, so
-# pre-mapped glyphs are recorded once per page: `render` needs each glyph once
-# (for the widths and the ToUnicode map), and a page carrying one record per
-# drawn glyph would make every later call that takes the page rebuild them all.
-def struct UseSet {
-    uses as list of GlyphUse,
-    seen as map of string to bool
-};
-
-func useSet(uses as list of GlyphUse) {
-    def set as UseSet init UseSet{uses: $uses, seen: {}};
-    for (def gu in $uses) {
-        $set.seen[$gu.font + " {$gu.gid}"] = true;
-    }
-    return $set;
-}
-
-# addUses appends the records of glyphs not yet in the set.
-func addUses(set as UseSet, uses as list of GlyphUse) {
-    for (def gu in $uses) {
-        def k as string init $gu.font + " {$gu.gid}";
-        if (not maps.has($set.seen, $k)) {
-            $set.seen[$k] = true;
-            $set.uses[] = $gu;
-        }
-    }
-    return $set;
+# glyphKey is a glyph record's entry in `Page.glyphSeen`. A page's glyph records
+# come with the set of the (font, glyph) pairs they hold, so pre-mapped glyphs
+# are recorded once per page: `render` needs each glyph once (for the widths and
+# the ToUnicode map), and a page carrying one record per drawn glyph would make
+# every later call that takes the page copy them all.
+func glyphKey(gu as GlyphUse) {
+    return $gu.font + " {$gu.gid}";
 }
 
 # hexByte renders a byte as two uppercase hex digits.
@@ -918,6 +893,7 @@ export func textUnicode(
     def gr as GlyphRun init glyphRun($lf, $str);
     for (def gu in $gr.uses) {
         $pg.glyphUses[] = $gu;
+        $pg.glyphSeen[glyphKey($gu)] = true;
     }
     $pg.content = $pg.content + textUnicodeChunk($x, $y, $lf.name, $size, $gr.hex);
     return $pg;
@@ -972,9 +948,13 @@ export func textGlyphs(
     gids as list of int,
     cps as list of int) {
     def gr as GlyphRun init glyphRunOf($font, $gids, $cps);
-    def set as UseSet init useSet($pg.glyphUses);
-    $set = addUses($set, $gr.uses);
-    $pg.glyphUses = $set.uses;
+    for (def gu in $gr.uses) {
+        def k as string init glyphKey($gu);
+        if (not maps.has($pg.glyphSeen, $k)) {
+            $pg.glyphSeen[$k] = true;
+            $pg.glyphUses[] = $gu;
+        }
+    }
     $pg.content = $pg.content + textUnicodeChunk($x, $y, $font, $size, $gr.hex);
     return $pg;
 }

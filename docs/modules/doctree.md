@@ -389,6 +389,11 @@ order:
 | `y` | the baseline of its line (a table row's first line), in points from the page bottom |
 | `context` | the word, code line, heading or table cell it sits in, as written |
 
+With `unencodable = ""` a word made only of such characters is dropped from the
+line but still reported: its `context` joins it to the next word drawn in the
+paragraph (else the last one), and `pageNr` / `y` are that word's line; a
+paragraph with nothing drawable keeps one empty line for its report.
+
 The report is a list in the result rather than a callback in `PdfOptions`: the
 options stay plain data, the caller decides whether a missing glyph is a warning
 or a failure (and can group the entries by page), and no function value is

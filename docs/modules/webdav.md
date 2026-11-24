@@ -56,7 +56,7 @@ a trusted LAN, set `$c.allowInsecureHttp = true;`.
 | `webdav.walk(c, path)` | `list of Resource` | everything below a collection, `Depth: 1` per level |
 | `webdav.stat(c, path)` | `Resource` | one file or collection |
 | `webdav.exists(c, path)` | `bool` | whether it exists (404 is `false`) |
-| `webdav.get(c, path, maxBytes)` | `bytes` | read a file; `maxBytes` 0 for 64 MiB, `math.MAX_INT` (or a negative value) for no limit |
+| `webdav.get(c, path, maxBytes)` | `bytes` | read a file; `maxBytes` 0 for 64 MiB, `math.MAX_INT` for no limit, a negative value throws `WebdavError` |
 | `webdav.put(c, path, data)` | `string` | write a file; its new ETag, or "" |
 | `webdav.putWith(c, path, data, options)` | `string` | write with a media type, `ifMatch` or `onlyIfNew` |
 | `webdav.mkdir(c, path)` | | create a collection (`MKCOL`) |
