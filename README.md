@@ -253,3 +253,6 @@ ship inside the packaged distributions
 `.deb`, the AUR packages reference the upstream license);
 [gnu.org/licenses/lgpl-3.0.html](https://www.gnu.org/licenses/lgpl-3.0.html)
 is the canonical text.
+
+Third-party names in these docs are trademarks of their owners; see
+[docs/trademarks.md](docs/trademarks.md).

@@ -14,7 +14,7 @@ Description: Jennifer programming language interpreter
  under /usr/share/jennifer/modules.
  .
  The binary is a static, CGO-free build, so it depends on no libc and runs
- on OpenWRT's musl unchanged. It needs roomy storage/RAM relative to a
+ on OpenWrt's musl unchanged. It needs roomy storage/RAM relative to a
  busybox applet - suitable for a NAND / x86 / extroot target, not a small
- internal-flash router. See the OpenWRT README for sizing and the
+ internal-flash router. See the OpenWrt README for sizing and the
  --force-architecture note for non-default aarch64 subtargets.

@@ -24,7 +24,7 @@ prefix per project convention), `.github/workflows/release.yml`:
      MIME definition + README), plus a sidecar `.sha256`.
    - `jennifer_<TAG>_<ARCH>.deb` via `scripts/build-deb.sh`. Sidecar
      `.sha256` next to the `.deb`.
-   - an OpenWRT `.ipk` via `scripts/build-ipk.sh` (`x86_64` /
+   - an OpenWrt `.ipk` via `scripts/build-ipk.sh` (`x86_64` /
      `aarch64_generic`, from the static `jennifer`).
 4. Runs jvc's suite (every overlay, lint, a launcher smoke test)
    against the `linux/amd64` tarball from step 3, with jvc checked out
