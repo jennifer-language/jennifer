@@ -124,117 +124,93 @@ Where Jennifer differs from Python/JS/Go and an assistant usually guesses wrong:
 ## Lexical basics
 
 - **Identifiers** (variables, functions, parameters, library names):
-  `[A-Za-z][A-Za-z0-9]*`, <= 64 chars. Letter-initial (a digit-initial token is a
-  number), then letters and digits; no underscores. Legal: `myVar`, `sha256`,
-  `x2`, `toUtf8`.
-- **Constant names**: uppercase chunks joined by single `_`, with in-chunk
-  digits: `[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*` (each chunk starts with a letter).
-  Legal: `MAX`, `MAX_RETRIES`, `HTTP_OK`, `SHA256`, `HTTP2`, `SCRAM_SHA256`.
-  Illegal: `_MAX`, `MAX_`, `MAX__INT`, `maxInt`, `AES_256` (write `AES256`).
+  `[A-Za-z][A-Za-z0-9]*`, <= 64 chars, no underscores (a digit-initial token is
+  a number). Legal: `myVar`, `sha256`, `x2`, `toUtf8`.
+- **Constant names**: uppercase chunks joined by single `_`, digits inside
+  chunks: `[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*`. Legal: `MAX`, `MAX_RETRIES`,
+  `HTTP_OK`, `SHA256`, `HTTP2`, `SCRAM_SHA256`. Illegal: `_MAX`, `MAX_`,
+  `MAX__INT`, `maxInt`, `AES_256` (write `AES256`).
 - **`.j` import paths** are strings and may contain digits, `_`, `/`.
-- **Reserved words** (cannot be a variable, function, parameter, or library name):
+- **Reserved words** (never a variable, function, parameter or library name):
   `and` `as` `break` `catch` `const` `continue` `def` `defer` `else` `elseif`
   `enum` `errdefer` `exit` `export` `false` `for` `func` `if` `import` `in`
   `include` `init` `len` `list` `map` `match` `not` `null` `of` `or` `repeat`
-  `return` `spawn` `struct` `task` `throw` `to` `true` `try` `until` `use` `when`
-  `while`, plus the type keywords `int` `float` `string` `bool` `bytes` (legal only
-  after `as`). These look contextual but are **not**:
-  `list` / `map` (unlike `channel`, they are hard keywords even outside `list of T`
-  / `map of K to V`), and `to` / `of` / `in` (keywords everywhere, not just in a
-  type or `for`-each). `channel` is the one contextual word - a type only
-  in `channel of T`, a valid identifier elsewhere. So `from`/`to` as a parameter
-  pair fails on `to`; use `to2` / `hi` / `end` instead.
-- A leading `#!` line is allowed (shebang): `#!/usr/bin/env -S jennifer run`,
-  or `#!<PREFIX>/bin/jennifer run` where there is no `/usr/bin/env` (Android).
-  The built-in module dir is `<PREFIX>/share/jennifer/modules` (`make
-  PREFIX=<dir>`, default `/usr`); `jennifer version -v` prints every path and
-  its source. A file with a shebang may also be run **without a `.j` extension** (as an
-  executable installed under a bare command name); `import` / `include` targets
-  still require `.j`.
+  `return` `spawn` `struct` `task` `throw` `to` `true` `try` `until` `use`
+  `when` `while`, plus the type keywords `int` `float` `string` `bool` `bytes`
+  (legal only after `as`). `list` / `map` / `to` / `of` / `in` are keywords
+  everywhere (not only in `list of T` / `map of K to V` / `for`-each); only
+  `channel` is contextual (a type only in `channel of T`). So a `from`/`to`
+  parameter pair fails on `to`; use `to2` / `hi` / `end`.
+- A leading `#!` line is allowed: `#!/usr/bin/env -S jennifer run`, or
+  `#!<PREFIX>/bin/jennifer run` without `/usr/bin/env` (Android); module dir
+  `<PREFIX>/share/jennifer/modules` (`make PREFIX=<dir>`, default `/usr`;
+  `jennifer version -v` prints every path). A shebang file may run **without a
+  `.j` extension**; `import` / `include` targets still need `.j`.
 
 ## Types
 
 Primitive: `null`, `int`, `float`, `string`, `bool`, `bytes`.
 Compound: `list of T`, `map of K to V`, user `struct`s, user `enum`s (sum
-types), `task of T` (a handle to a `spawn`ed computation), `func` (a first-class
-function value), `channel of T` (a CSP channel between goroutines).
+types), `task of T` (handle to a `spawn`ed computation), `func` (first-class
+function value), `channel of T` (CSP channel between goroutines).
 
-- **int** literals: `42`, `0xff`, `0o755`, `0b1010`, with `_` digit separators
+- **int** literals: `42`, `0xff`, `0o755`, `0b1010`, `_` digit separators
   (`1_000_000`, `0xDEAD_BEEF`).
 - **float** literals: a `.` (`3.14`, `0.5`) or an `[eE][+-]?` exponent
-  (`6.022e23`, `1.6e-19`, `1e10` - the exponent alone makes it a float); `_`
-  separators in the mantissa only. Overflow (`1e400`) is an error, not `Infinity`;
-  underflow (`1e-400`) rounds to `0.0` (a finite value; only the non-finite is banned).
-- **string** literals: `"..."` is **cooked** -
-  escape sequences `\n \r \t \\ \" \' \0 \{ \}`, plus Unicode `\uXXXX` (exactly 4
-  hex, the BMP) and `\UXXXXXXXX` (exactly 8 hex, any plane, e.g. `\U0001F600`), are
-  processed; a surrogate, an out-of-range code point, or the wrong digit count is
-  a lex error. A cooked string also **interpolates**: an unescaped `{expr}` is a
-  slot (see below). `'...'` is **raw** - no
-  escape processing at all and no interpolation: every byte to the next `'` is
-  literal (backslashes, braces, and newlines included), so `'\d+\.\d+'` is an
-  8-char string, `'{"port": 8080}'` is literal JSON, and a multi-line block is
-  a `'...'` that spans newlines. To put a `'` inside a string, use the cooked
-  form: `"it's"`. There is no `r"..."` prefix.
-  **Reach for raw `'...'` by default when the text carries backslashes or
-  braces** - regex patterns (`'\d+\.\d+'`, `'\bword\b'`), Windows paths
-  (`'C:\Users\me'`), JSON / template / brace-heavy literals (`'{"a": 1}'`,
-  `'${VAR}'`), and any escape-dense blob: raw needs no escaping, unlike the
-  cooked equivalent (`"\\d+\\.\\d+"`, `"C:\\Users\\me"`, `"\{\"a\": 1\}"`).
-  Pick cooked `"..."` only when you need one of its three features: an escape
-  sequence (`\n`, `\t`, `\uXXXX`), a `'` inside the string, or `{expr}`
-  interpolation. Rule of thumb: **if you find yourself typing `\\`,
-  `\{`, or `\}`, switch the whole literal to raw `'...'`.**
-- **string interpolation**: inside a cooked `"..."` string, each unescaped
-  `{expr}` is a slot - one Jennifer **expression** evaluated in the current scope
-  and stringified in place (the `convert.toString` form; no `use convert` needed).
-  `"total: {$sum}, next {$n + 1}, up {strings.upper($s)}"`. A slot holds a single
-  expression (a variable, constant, field / index access, arithmetic, a call), not
-  a statement - a `;`, `def`, `if`, or assignment in a slot is a parse error, and
-  an empty `{}` is an error. Write a literal brace as `\{` / `\}`; a bare unescaped
-  `}` is a lex error. Trap: `["{", "}"]` is ONE string whose slot holds `", "`
-  (write `['{', '}']`); `lint` flags a slot holding only a literal (L116). A
-  **raw** `'...'` string never interpolates (it is the "no interpolation" form).
-  No `f"..."` prefix - the cooked / raw split is the opt-in.
-  Style: keep slots to variables, field / index access, and arithmetic; a
-  side-effecting or expensive **call** in a slot is flagged by `lint` (L204) -
-  compute it into a variable first. An undefined variable in a slot is a
-  parse-time error, like any other reference.
+  (`6.022e23`, `1.6e-19`, `1e10` - the exponent alone makes a float); `_`
+  separators in the mantissa only. Overflow (`1e400`) is an error, not
+  `Infinity`; underflow (`1e-400`) rounds to `0.0`.
+- **string** literals: `"..."` is **cooked**: escapes `\n \r \t \\ \" \' \0 \{
+  \}`, `\uXXXX` (exactly 4 hex, BMP), `\UXXXXXXXX` (exactly 8 hex, e.g.
+  `\U0001F600`); a surrogate, out-of-range code point or wrong digit count is a
+  lex error; `{expr}` **interpolates** (below). `'...'` is **raw**: no escapes,
+  no interpolation, every byte to the next `'` literal, so `'\d+\.\d+'` is 8
+  chars, `'{"port": 8080}'` literal JSON, and a multi-line block a `'...'`
+  spanning newlines. A `'` inside needs cooked: `"it's"`. No `r"..."` prefix.
+  **Default to raw `'...'` for backslashes or braces**: regex (`'\d+\.\d+'`,
+  `'\bword\b'`), Windows paths (`'C:\Users\me'`), JSON / templates (`'{"a":
+  1}'`, `'${VAR}'`), where cooked needs `"\\d+\\.\\d+"`, `"C:\\Users\\me"`,
+  `"\{\"a\": 1\}"`. Cooked only for an escape (`\n`, `\t`, `\uXXXX`), a `'`
+  inside, or `{expr}`. **Typing `\\`, `\{` or `\}`? Switch the literal to raw
+  `'...'`.**
+- **string interpolation**: each unescaped `{expr}` in a cooked `"..."` is one
+  **expression**, evaluated in the current scope and stringified (the
+  `convert.toString` form; no `use convert`): `"total: {$sum}, next {$n + 1}, up
+  {strings.upper($s)}"`. A `;`, `def`, `if` or assignment in a slot is a parse
+  error, an empty `{}` an error, an undefined variable a parse-time error.
+  Literal braces: `\{` / `\}`; a bare `}` is a lex error. Trap: `["{", "}"]` is
+  ONE string whose slot holds `", "` (write `['{', '}']`); `lint` flags a
+  literal-only slot (L116). Raw `'...'` never interpolates; no `f"..."` prefix.
+  Keep slots to variables, field / index access and arithmetic: `lint` flags a
+  side-effecting or expensive **call** in a slot (L204).
 - **bool**: `true`, `false`. **null**: `null`.
 - **bytes** has no literal: build with `encoding.encode("utf-8", s)`
   or append into `def b as bytes;` with `$b[] = 65;`.
-- **list** literals: `[1, 2, 3]`, `[]`. Lists are homogeneous (one element
-  type).
+- **list** literals: `[1, 2, 3]`, `[]`; homogeneous (one element type).
 - **map** literals: `{"a": 1, "b": 2}`, `{}`. Insertion-ordered.
-- **struct** literals: `Point{x: 1, y: 2}` after
-  `def struct Point { x as int, y as int };`. Every field must be named, with two
-  exceptions: an `Error` literal may omit `file` / `line` / `col`, and a literal
-  of a **library** struct (`net.Datagram{peer: $p}`, `os.Result{...}`) or of a
-  struct from a module that ships with Jennifer (`jwt.Policy{iss: $i}`) may omit
-  any field, which then takes its zero value - so a field added later does not
-  break it. An unknown or missing field is an error when the program
-  loads, not when the literal runs.
+- **struct** literals: `Point{x: 1, y: 2}` after `def struct Point { x as int, y
+  as int };`. Every field must be named, except: an `Error` literal may omit
+  `file` / `line` / `col`; a literal of a **library** struct
+  (`net.Datagram{peer: $p}`, `os.Result{...}`) or of a struct from a module
+  shipped with Jennifer (`jwt.Policy{iss: $i}`) may omit any field (zero value).
+  An unknown or missing field is an error at load, not when the literal runs.
 - **enum** (sum type): `def enum Shape { Circle { r as float }, Empty };` at top
-  level. A value is one variant: construct with `Shape.Circle{r: 2.0}` or the
-  payload-less `Shape.Empty` (cross-module: `alias.Shape.Circle{...}`). Value
-  semantics + equality like structs. `def s as Shape;` (no init) zeroes to the
-  **first** variant, payload zeroed. Read the payload only through `match` (no
-  `$enum.field`). Names may be any case (an all-`UPPERCASE` name is a constant,
-  so don't name a type all-caps).
+  level. A value is one variant: `Shape.Circle{r: 2.0}` or payload-less
+  `Shape.Empty` (cross-module: `alias.Shape.Circle{...}`). Value semantics +
+  equality like structs. `def s as Shape;` zeroes to the **first** variant,
+  payload zeroed. Payload only through `match` (no `$enum.field`). Names any
+  case (all-`UPPERCASE` is a constant, so no all-caps types).
 - **func** (first-class function value): a bare function name in expression
-  position **is** the value; a name followed by `(` is a call.
-  `def f as func init greet;` binds the function `greet` into a value; call it
-  through a variable or any function-valued expression: `$f(args)`,
-  `$fns[0](x)`, `makeAdder(1)(2)`. Pass and return them like any value
-  (`func apply(fn as func, x as int) { return $fn($x); }`). Arity + argument
-  types are checked at the call site (the `func` type has no signature).
-  Immutable (copies share the function; value semantics hold). Zero value
-  (`def f as func;`) is a **null** function: `$f == null` is true, calling
-  it errors. No `&NAME`
-  sigil and no anonymous-function / closure literal (yet). Powers the
+  position **is** the value; name + `(` is a call. `def f as func init greet;`,
+  then call through any function-valued expression: `$f(args)`, `$fns[0](x)`,
+  `makeAdder(1)(2)`. Pass and return like any value (`func apply(fn as func, x
+  as int) { return $fn($x); }`). Arity and argument types are checked at the
+  call (the `func` type has no signature). Immutable. Zero value (`def f as
+  func;`) is a **null** function: `$f == null` is true, calling it errors. No
+  `&NAME` sigil, no anonymous-function / closure literal (yet). Powers the
   higher-order `lists` layer (`map` / `filter` / `reduce` / `find` / `any` /
-  `all` / `sortBy`). A func value a module hands out runs in that module, also
-  as a `lists.map` / `filter` / ... callback, and a struct it throws keeps its
+  `all` / `sortBy`). A func value a module hands out runs in that module (also
+  as a `lists.map` / `filter` / ... callback); a struct it throws keeps its
   `alias.Struct` identity.
 
   ```jennifer
@@ -258,34 +234,30 @@ $x = 7;                       # assignment uses the $ sigil
 - The name at the `def` site is bare (`def x`), never `def $x`.
 - `const` is deep: a const list/map/struct rejects mutation at any depth.
 - Top-level code runs in source order: define a constant or variable **above**
-  the code that first uses it. A top-level read before its `def const` is a
-  load-time error; a function may use a global defined lower down, but one called
-  before that definition has run throws (`variable $x is read before its
-  definition has run`).
-- A function body may not `def` a name that a top-level `def` already uses (no
-  shadowing, globals included): a helper's loop variable cannot reuse the name
-  of a top-level loop variable.
+  its first use. A top-level read before its `def const` is a load-time error; a
+  function may use a global defined lower down, but calling it before that
+  definition ran throws (`variable $x is read before its definition has run`).
+- No shadowing: a function body may not `def` a name a top-level `def` uses (not
+  even as a loop variable).
 
 ## Operators
 
 - Arithmetic: `+  -  *  /  //  %`. `/` is float division; `//` is floor.
 - Unary `-` (negation). `+` also concatenates two strings.
-- Comparison: `<  >  <=  >=  ==  !=` -> `bool`. `!=` is `not (a == b)`. The
-  ordering operators (`<  >  <=  >=`) work on two numbers or two strings
-  (strings compare lexicographically by UTF-8 bytes); a string/number mix is a
-  type error. There is no bare `!` (logical negation is the word `not`); a lone
+- Comparison: `<  >  <=  >=  ==  !=` -> `bool` (`!=` is `not (a == b)`).
+  Ordering (`<  >  <=  >=`) takes two numbers or two strings (UTF-8 byte order);
+  a string/number mix is a type error. No bare `!` (negation is `not`); a lone
   `!` is a lex error.
 - Logical (words, short-circuit): `and`, `or`, `not`. Operands must be `bool`.
-- Bitwise (int only): `&  |  ^  ~  <<  >>`. `>>` is arithmetic (sign-filling;
-  no logical shift); `<<` drops the bits shifted out, the sign bit too, without
-  an error. A negative count is an error; a count >= 64 gives 0 (-1 for `>>` of
-  a negative).
+- Bitwise (int only): `&  |  ^  ~  <<  >>`. `>>` is arithmetic (sign-filling);
+  `<<` silently drops bits shifted out, the sign bit too. A negative count is an
+  error; a count >= 64 gives 0 (-1 for `>>` of a negative).
 - Mixed int/float arithmetic promotes to `float`.
-- Range `..`: `lo..hi` is a half-open range `[lo, hi)`, int bounds only,
-  non-associative, looser than every other operator. Builds a `list of int`
-  (`def r as list of int init 0..n;`), or iterates lazily as a for-each source
-  (`for (def i in 0..n)`), or slices (`$xs[a..b]`). `lo > hi` errors; `lo == hi`
-  is empty. Always a fresh copy, never a view.
+- Range `..`: `lo..hi` is half-open `[lo, hi)`, int bounds only,
+  non-associative, looser than every other operator: a `list of int` (`def r as
+  list of int init 0..n;`), a lazy for-each source (`for (def i in 0..n)`) or a
+  slice (`$xs[a..b]`). `lo > hi` errors; `lo == hi` is empty. Always a fresh
+  copy, never a view.
 - Precedence, low to high: `..` < `or` < `and` < `not` < comparison < `|` < `^`
   < `&` < shifts < `+ -` < `* / // %` < unary `- ~`. So `$x & 0xff == 0` parses
   as `($x & 0xff) == 0`, and `1+1..2*3` as `(1+1)..(2*3)`.
@@ -332,16 +304,16 @@ continue;   # next iteration
 exit;       # terminate the whole program (exit 0); exit EXPR sets the code (Unix: 0..255, masked to 8 bits)
 ```
 
-Conditions must be `bool` (there is no truthiness). `and` / `or` **short-circuit**
-(`true or f()` never calls `f`). `break`/`continue` do not cross a function-call or
-`spawn` boundary.
+Conditions must be `bool` (no truthiness). `and` / `or` **short-circuit**
+(`true or f()` never calls `f`). `break`/`continue` do not cross a function-call
+or `spawn` boundary.
 
 `match` compares the subject to each `when` value by strict `==`; the first
-matching arm runs and its values evaluate left-to-right only until a match. There
-is **no fall-through**, and `match` is **not** a `break` target - `break` /
-`continue` in an arm act on the enclosing loop. A bare `when Name { }` reads
-`Name` as a value and `{` as the block, so a struct-literal value needs parens:
-`when (Point{x: 1}) { ... }`. No matching arm and no `else` is a no-op.
+matching arm runs, its values evaluated left-to-right only until a match. **No
+fall-through**; `match` is **not** a `break` target (`break` / `continue` in an
+arm act on the enclosing loop). A bare `when Name { }` reads `Name` as a value
+and `{` as the block, so a struct-literal value needs parens: `when (Point{x:
+1}) { ... }`. No matching arm and no `else` is a no-op.
 
 ### Errors
 
@@ -354,36 +326,28 @@ try {
 }
 ```
 
-`throw EXPR;` raises any value; convention is the auto-provided `Error` struct
-`{kind, message, file, line, col}`. An `Error` literal may omit `file` / `line` /
-`col` (only `kind` and `message` are required), and `throw` stamps a missing
-location with the throw site. `catch` also catches the runtime errors builtins
-raise (out-of-range, missing key, etc.), wrapped into `Error` with `kind:
-"runtime"` (a fault in the program). Input data a library reads and finds bad
-(malformed JSON, a corrupt archive, a failed decryption, a string `convert`
-cannot parse, invalid UTF-8 read from a file, stdin or a child process) is the
-library's own kind instead: `"json"`, `"xml"`, `"toml"`, `"yaml"`, `"asn1"`,
-`"encoding"`, `"compress"`, `"archive"`, `"images"`, `"crypto"`, `"time"`,
-`"uuid"`, `"decimal"`, `"convert"`, `"kv"`, `"fs"`, `"io"`, `"os"`, `"sql"`, `"serial"`. A builtin
-may also raise a generic kind: `"limit"` (a size / count / depth cap),
-`"timeout"` (a deadline), `"closed"` (any use of a closed socket or handle, or a peer
-that closed mid-read; a second `close` does nothing), `"net"` (a network failure, always a `net.NetError`),
-`"cancelled"` (the task was cancelled; message `task
-cancelled`), `"value"` (an invalid input value, in some modules). Match `kind`,
-never the message.
-Runaway recursion raises a catchable `"limit"` too ("call stack too deep"). The
-depth budget (10000 on the default binary, 120 on `jennifer-tiny`; on
-`jennifer-tiny` a call also throws this `"limit"` once the call chain has used
-3 MB of its 4 MB stack, which a heavy recursive body can reach well below 120)
-counts nested
-blocks and operand evaluations as well as calls, so the reachable recursion depth
-is lower than 10000 - a few hundred to a few thousand calls, depending on how
-much nesting each call adds. A library that promises callers a specific error
-kind should expect `"limit"` from deep input (a deeply nested document) and
-translate it. Values are capped the same way where they are built: a literal,
-index, field or append write that would nest a value past 1000 container levels
-(64 on `jennifer-tiny`; one `N{kids: [...]}` wrap is two levels) throws a
-catchable `"limit"` ("value nests deeper than the N-level limit").
+`throw EXPR;` raises any value; convention: the auto-provided `Error` struct
+`{kind, message, file, line, col}` (a literal may omit `file` / `line` / `col`;
+`throw` stamps the throw site). `catch` also catches builtin runtime errors
+(out-of-range, missing key, ...) as `Error` with `kind: "runtime"` (a program
+fault). Bad input a library reads (malformed JSON, a corrupt archive, a failed
+decryption, a string `convert` cannot parse, invalid UTF-8 from a file, stdin or
+a child process) has the library's own kind: `"json"`, `"xml"`, `"toml"`,
+`"yaml"`, `"asn1"`, `"encoding"`, `"compress"`, `"archive"`, `"images"`,
+`"crypto"`, `"time"`, `"uuid"`, `"decimal"`, `"convert"`, `"kv"`, `"fs"`,
+`"io"`, `"os"`, `"sql"`, `"serial"`. Generic kinds: `"limit"` (size / count /
+depth cap), `"timeout"`, `"closed"` (a closed socket or handle, or a peer
+closing mid-read; a second `close` is a no-op), `"net"` (always a
+`net.NetError`), `"cancelled"` (message `task cancelled`), `"value"` (invalid
+input value, some modules). Match `kind`, never the message. Runaway recursion
+raises `"limit"` ("call stack too deep"). The depth budget (10000; 120 on
+`jennifer-tiny`, which also throws once calls use 3 MB of its 4 MB stack) counts
+nested blocks and operand evaluations too, so real recursion depth is a few
+hundred to a few thousand calls. A library promising callers a specific kind
+should expect `"limit"` from deep input (a deeply nested document) and translate
+it. A literal, index, field or append write nesting a value past 1000 container
+levels (64 on `jennifer-tiny`; one `N{kids: [...]}` wrap is two) throws
+`"limit"` ("value nests deeper than the N-level limit").
 `exit`/`return`/`break`/`continue` are control flow, not catchable.
 
 ### Cleanup with `defer`
@@ -397,19 +361,17 @@ func write(path as string) {
 }
 ```
 
-`defer CALL(args);` schedules a **call** (function / namespaced / module call - a
-non-call is a parse error) to run when the **enclosing block** exits, on every
-path (`return`/`break`/`continue`/`throw`/`exit`/fall-through), **LIFO**.
-Arguments are evaluated at the `defer` line; the call runs at block exit.
-Block-scoped (a `defer` in a loop body runs each iteration); does not cross a
-function or `spawn` boundary. A deferred throw propagates and supersedes a pending
-error (never an `exit`). There is no `finally`.
+`defer CALL(args);` schedules a **call** (function / namespaced / module call; a
+non-call is a parse error) to run when the **enclosing block** exits by any path
+(`return`/`break`/`continue`/`throw`/`exit`/fall-through), **LIFO**; arguments
+are evaluated at the `defer` line. Block-scoped (in a loop body: each
+iteration); does not cross a function or `spawn` boundary. A deferred throw
+propagates and supersedes a pending error (never an `exit`). No `finally`.
 
-`errdefer CALL(args);` is the error-path variant: same form, same LIFO stack,
-but the call runs **only when the block exits with a propagating error** (a
-`throw` or a runtime error) - skipped on fall-through, `return`, `break`,
-`continue`, and `exit`. It is the undo half of an acquire whose resource must
-survive on success:
+`errdefer CALL(args);`: same form and LIFO stack, but runs **only when the
+block exits with a propagating error** (a `throw` or runtime error), not on
+fall-through, `return`, `break`, `continue` or `exit`. The undo half of an
+acquire whose resource must survive on success:
 
 ```jennifer
 func connect(addr as string) {
@@ -436,11 +398,9 @@ greet("ada");
 - Bare parameter names (`name as string`), referenced inside as `$name`.
 - No return type is declared; the caller's `def x as T init f();` checks it.
 - Functions are **top-level only** (not nested). Recursion works.
-- Function bodies see global variables/constants. A `def` in a function may not
-  shadow a global name; a **parameter** may (inside the function the name is the
-  parameter). A function may not share a name with a builtin from an imported
-  library.
-- A program has **no required entry point**: top-level statements run in order.
+- Bodies see globals; a **parameter** may shadow one (a `def` may not). No
+  function may share a name with a builtin of an imported library.
+- **No required entry point**: top-level statements run in order.
 
 ## Compound types: indexing and iteration
 
@@ -468,29 +428,24 @@ def mid as list of int init $xs[1..3];   # slice: half-open [1, 3) copy
 $xs[2..];  $xs[..3];  $xs[..];           # open ends default to 0 / len
 ```
 
-**Slicing (`$xs[a..b]`)** returns a fresh, value-semantic copy of a half-open
-`[a, b)` sub-range of a `list`, `bytes`, or `string` (rune-indexed). Open ends
-default to the extremes (`$xs[a..]`, `$xs[..b]`, `$xs[..]`). Bounds are strict
-(`0 <= a <= b <= len`). A slice is **read-only**: `$xs[a..b] = ...` is a parse
-error (it is a copy, so a write through it would do nothing).
+**Slicing** `$xs[a..b]` copies the half-open `[a, b)` range of a `list`, `bytes`
+or `string` (rune-indexed); open ends `$xs[a..]`, `$xs[..b]`, `$xs[..]`; strict
+bounds (`0 <= a <= b <= len`). **Read-only**: `$xs[a..b] = ...` is a parse
+error.
 
-**Prefer `$xs[]` over `lists.push` in loops.** The `$xs[] = item;` append sugar
-(lists and bytes) mutates in place - amortized O(N) to append
-N items. `$xs = lists.push($xs, item)` returns a *new* list each pass and copies
-the whole list, so the same loop is O(N^2). Use `$xs[]` to build a list element
-by element (a raster, a buffer, a big result set); use `lists.push` only when you
-want a fresh list and keep the original.
+**Prefer `$xs[]` over `lists.push` in loops.** `$xs[] = item;` (lists, bytes)
+appends in place (amortized O(N) for N items); `$xs = lists.push($xs, item)`
+copies the whole list each pass (O(N^2)). `lists.push` only when you want a
+fresh list and keep the original.
 
-**Thread a growing accumulator through a call only as `$acc = f($acc, ...)` in
-a function.** A `list` / `bytes` / struct argument is deep-copied on a call (value
-semantics), so passing a growing accumulator into a helper each iteration is
-O(N^2) - the tell is that it scales *backwards*: smaller batches run slower,
-because each call re-copies a larger accumulator. The one exception: inside a
-function, `$acc = addTo($acc, v);` on a local or parameter, outside a `try`, moves
-the old value in (it is dead after the call) and takes the mutated parameter back
-without a copy - O(1) per call. Top-level code (its variables are globals), a
-global, a `try`, or another target copies. Simplest is to keep the
-accumulator in the caller and append with `$xs[]`:
+**Thread a growing accumulator through a call only as `$acc = f($acc, ...)` in a
+function.** A `list` / `bytes` / struct argument is deep-copied on a call, so
+passing a growing accumulator into a helper each iteration is O(N^2) (tell:
+smaller batches run slower). Exception: inside a function, outside a `try`,
+`$acc = addTo($acc, v);` on a local or parameter moves the value in and back
+without a copy: O(1). Top-level code (globals), a global, a `try`, or another
+target copies. Simplest: keep the accumulator in the caller and append with
+`$xs[]`:
 
 ```jennifer
 # O(1) per call when called as `$acc = addTo($acc, v);` inside a function;
@@ -505,14 +460,13 @@ func addTo(acc as list of int, v as int) {
 for (def v in $items) { $results[] = compute($v); }
 ```
 
-`jennifer profile --allocs` names the offending line when a copy like this shows up,
-ranked by bytes copied (with the copied type), so a big accumulator outranks a
-small value copied more often. `jennifer lint` flags both accumulator shapes
-before you profile (`L205`): a parameter mutated and returned, and a parameter
-copied into a local that is grown with `[] =` and returned.
+`jennifer profile --allocs` ranks the lines making such copies by bytes copied
+(with the type). `jennifer lint` flags both accumulator shapes (`L205`): a
+parameter mutated and returned, and a parameter copied into a local grown with
+`[] =` and returned.
 
-`len(EXPR)` is a language built-in (not a library): rune count of a string,
-element count of a list, entry count of a map, byte count of bytes.
+`len(EXPR)` is a language built-in: runes of a string, elements of a list,
+entries of a map, bytes of bytes.
 
 ## Concurrency
 
@@ -523,43 +477,40 @@ def result as int init task.wait($t);   # also poll / discard / waitAll / waitAn
 ```
 
 `spawn { ... }` runs concurrently and evaluates to a `task of T`. It deep-copies
-its enclosing scope at launch, so there are no shared-memory data races.
+its enclosing scope at launch: no shared-memory data races.
 
-**Cancellation + timeouts.** `task.cancel($t)` requests cooperative cancellation:
-the body observes it at its next loop checkpoint, where the runtime raises a
-catchable "task cancelled" (so a runaway `spawn` can be stopped). `time.sleep`,
-`channel.send` / `recv` / `select`, the `task` waits and socket reads (TCP and UDP) wake and
-raise the same (in module code too). A task blocked in another system call
-(`net.accept`, `term.readByte`) only sees it when the call returns: close its
-socket from another task (the call then throws `Error{kind: "closed"}`), or
-`task.discard` it.
-Catch it inside the body for a clean partial result; `task.cancel` plus
-`task.discard` is stop-and-forget. A program that runs to its end waits for
-every undiscarded task; one that ends by `exit` or an uncaught error does not.
-`task.cancelled()` is a non-raising poll.
+**Cancellation + timeouts.** `task.cancel($t)` requests cooperative
+cancellation: the body gets a catchable "task cancelled" at its next loop
+checkpoint; `time.sleep`, `channel.send` / `recv` / `select`, the `task` waits
+and socket reads (TCP, UDP) wake and raise it too (module code included). A task
+blocked in another system call (`net.accept`, `term.readByte`) sees it only when
+the call returns: close its socket from another task (the call throws
+`Error{kind: "closed"}`), or `task.discard` it. Catch it in the body for a clean
+partial result; `task.cancel` + `task.discard` is stop-and-forget. A program
+running to its end waits for every undiscarded task; one ending by `exit` or an
+uncaught error does not. `task.cancelled()` polls without raising.
 `task.waitTimeout($t, ms)` / `waitAnyTimeout($ts, ms)` / `waitAllTimeout($ts,
-ms)` are bounded waits that throw a catchable `Error{kind: "timeout"}` and leave
-the tasks running. An xTimeout's `ms` `0` polls; negative or oversized throws.
+ms)` throw a catchable `Error{kind: "timeout"}` and leave the tasks running;
+`ms` `0` polls, negative or oversized throws.
 
 **Allocation budget.** `task.setAllocBudget(bytes)` makes the calling task count
-what it allocates (copies, appends, growing writes, string `+` and
-interpolation, literals, builtin results; cumulative, an estimate); past
-`bytes` its next such operation throws a catchable `Error{kind: "limit"}` in
-that task only. Tasks it spawns share the budget; a second call changes the
-limit and keeps the count; `math.MAX_INT` lifts it; 0 / negative throws.
-`task.allocated()` reads the count. Off unless set.
+its allocations (copies at every level, appends, growing writes, string `+` and
+interpolation, literals, estimated builtin results; cumulative); past `bytes`
+the next one throws a catchable `Error{kind: "limit"}` in that task only.
+Spawned tasks share the budget; a second call changes the limit, keeps the
+count; `math.MAX_INT` lifts it; 0 / negative throws. `task.allocated()` reads
+the count. Off unless set.
 
-**Channels.** `channel of T` streams values between goroutines (the counterpart to
-`task`'s single result). `channel.make(capacity)` (0 = unbuffered), `send`
-(deep-copies the value in - the receiver gets its own copy), `recv` (blocks;
-kind `"closed"` on a closed+drained channel, as `send` / `select` on a closed
-one - drain with `while ($open) { try { process(channel.recv($ch)); } catch (e)
-{ if ($e.kind != "closed") { throw $e; } $open = false; } }`), `close`, `select([...])` (fan-in:
-next value from any open channel), `recvTimeout(ch, ms)` (kind `"timeout"`,
-nothing taken), `selectTimeout(chs, ms)`, `len` / `capacity`. A channel is a shared
-handle but the values through it are copied, so no-shared-mutable-state holds.
-`channel` is a contextual keyword (a type only in `channel of T`; a valid
-identifier elsewhere).
+**Channels.** `channel of T` streams values between goroutines.
+`channel.make(capacity)` (0 = unbuffered), `send` (deep-copies the value in),
+`recv` (blocks; kind `"closed"` on a closed+drained channel, as `send` /
+`select` on a closed one - drain with `while ($open) { try {
+process(channel.recv($ch)); } catch (e) { if ($e.kind != "closed") { throw $e; }
+$open = false; } }`), `close`, `select([...])` (fan-in: next value from any open
+channel), `recvTimeout(ch, ms)` (kind `"timeout"`, nothing taken),
+`selectTimeout(chs, ms)`, `len` / `capacity`. A shared handle; the values
+through it are copied. `channel` is a contextual keyword (a type only in
+`channel of T`).
 
 ## Imports
 
@@ -571,47 +522,46 @@ import "./util.j" as u; # load util.j as a module, addressed u.fn(...) / u.CONST
 ```
 
 - `use NAME [as ALIAS];` - system library. Nothing auto-loads; every program
-  states its imports. Aliasing is a rename (the canonical prefix stops working).
-- `include "path.j";` - textual file splice (path is a string literal ending in
-  `.j`, resolved relative to the including file). A file only ever `include`d is
-  named `NAME.inc.j`; `jennifer lint` then skips the names it takes from its
-  includer (lint the including file).
+  states its imports. An alias renames (the canonical prefix stops working).
+- `include "path.j";` - textual file splice (a string literal ending in `.j`,
+  relative to the including file). A file only ever `include`d is named
+  `NAME.inc.j`; `jennifer lint` then skips the names it takes from its includer
+  (lint the including file).
 - `import "PATH.j" [as NAME];` - **module** import (a real boundary, not a
-  splice). Path forms: `./x.j` / `../x.j` local, `/x.j` absolute, bare `x.j`
-  from the module search path. Loads once (run-once, cached), depth-first
-  post-order; cycles error. Re-importing the same module under the same alias
-  is a no-op. Reach the module's surface as `NAME.fn(args)`,
-  `NAME.CONST`, and `NAME.Struct` / `NAME.Struct{...}` (`NAME` is the `as`
-  alias, else the file stem). A **module top level is declarations-only**:
-  `def const`, `def struct`, `func`, `use`, `import` - no mutable `def`, no
-  free-standing statements. `use` is not transitive across the boundary.
+  splice). Paths: `./x.j` / `../x.j` local, `/x.j` absolute, bare `x.j` from the
+  module search path. Loads once, depth-first post-order; cycles error;
+  re-import under the same alias is a no-op. Surface: `NAME.fn(args)`,
+  `NAME.CONST`, `NAME.Struct` / `NAME.Struct{...}` (`NAME` = the `as` alias,
+  else the file stem). A type `stem.T` whose stem is also a used library
+  namespace with a `T` (`use json;` plus `import "./json.j"` declaring `Value`)
+  is a load error; import it `as` another name. A **module top level is
+  declarations-only**: `def const`, `def struct`, `func`, `use`, `import`; no
+  mutable `def`, no free-standing statements. `use` is not transitive.
 - `export` publishes a top-level `def const` / `def struct` / `func` from a
-  module; unmarked names are private (reaching one from outside errors). A
-  module struct type has one identity `(module, name)` inside the module and at
-  the consumer (thrown ones too; it prints as `NAME.Struct` on both sides), so
-  `def p as NAME.Struct init NAME.make();` type-checks and `a.Point` /
-  `b.Point` are distinct. An exported struct/func may not expose a private
-  struct. `export` is only valid in a module (a parse error in a `run`
-  script). A co-located `MODULE_test.j` white-box overlay runs under
+  module; unmarked names are private. A module struct type has one identity
+  `(module, name)` inside the module and at the consumer (thrown ones too;
+  prints as `NAME.Struct`), so `def p as NAME.Struct init NAME.make();`
+  type-checks and `a.Point` / `b.Point` are distinct. An exported struct/func
+  may not expose a private struct. `export` outside a module (a `run` script) is
+  a parse error. A co-located `MODULE_test.j` white-box overlay runs under
   `jennifer test`.
-- **Requirement header** - a file may declare what it needs with typed comment
-  pragmas in its header block, checked at read time (a program, a module, and each
-  `include`d file self-checks): `# pragma-jennifer-version: >=0.25.0` (a minimum
-  interpreter floor, optionally capped: `>=0.25.0 <0.26.0`, no other forms, no `-rc` / `+build`
-  suffix on a bound; a `-dev`
-  build passes every floor and fails every cap, only a release tag is compared - one
-  per file) and `# pragma-jennifer-capability: net` (a host facility the build
-  must have: `net`, `exec` or `sql`, none on `jennifer-tiny`; multiple accumulate). A
-  mismatch aborts with a clear message; a malformed directive is a hard error.
-  Query capabilities at runtime with `meta.hasCapability("net")` / `meta.CAPABILITIES`.
+- **Requirement header**: typed comment pragmas in a file's header block,
+  checked at read time (program, module, each `include`d file): `#
+  pragma-jennifer-version: >=0.25.0` (interpreter floor, optionally capped
+  `>=0.25.0 <0.26.0`; no other forms, no `-rc` / `+build` on a bound; a `-dev`
+  build passes every floor, fails every cap; one per file) and `#
+  pragma-jennifer-capability: net` (`net`, `exec` or `sql`, none on
+  `jennifer-tiny`; several accumulate). Mismatch aborts; a malformed directive
+  is a hard error. At runtime: `meta.hasCapability("net")` /
+  `meta.CAPABILITIES`.
 
 ### Decks (packages)
 
 A **deck** is a third-party package with a scoped name: `@jennifer/NAME`
-(official) or `@deckyard/NAME` (community), among others. Find decks, their
-versions and manuals in the registry at <https://registry.jennifer-lang.dev/>
-(search, `/browse`, a page per deck at `/deck/<scope>/<deck>`). Bare names
-(`import "http.j";`) are the bundled modules below, never decks.
+(official), `@deckyard/NAME` (community), others; versions and manuals in the
+registry <https://registry.jennifer-lang.dev/> (`/browse`,
+`/deck/<scope>/<deck>`). Bare names (`import "http.j";`) are the bundled modules
+below, never decks.
 
 ```sh
 jvc add "@jennifer/slack" "^0.1.0"   # record the requirement in deck.toml
@@ -619,10 +569,9 @@ jvc install                          # resolve, vendor into ./vendor/, pin camco
 jvc update                           # move to the newest versions the ranges allow
 ```
 
-`jvc` (the package manager, <https://jvc.jennifer-lang.dev/>) keeps the
-requirements in the project's `deck.toml`, next to the interpreter range
-(`>=X.Y.Z`, or `>=X.Y.Z <A.B.C` once a later release breaks the deck; jvc picks
-the newest deck version whose range admits the local interpreter):
+`jvc` (<https://jvc.jennifer-lang.dev/>) keeps the requirements in the project's
+`deck.toml`, next to the interpreter range (`>=X.Y.Z`, or `>=X.Y.Z <A.B.C` once
+a later release breaks the deck):
 
 ```toml
 [engines]
@@ -637,951 +586,808 @@ import "@jennifer/slack/" as slack;           # the deck's entry module (slack.j
 import "@deckyard/forensicgenetics/lineage.j" as lineage;  # another module in it
 ```
 
-- A trailing `/` imports the deck's entry module `<deck>.j`; the default alias is
-  the deck name. `@scope/deck/file.j` reaches another module in the deck.
+- A trailing `/` imports the deck's entry module `<deck>.j`; the default alias
+  is the deck name. `@scope/deck/file.j` reaches another module in the deck.
 - `@` resolves only under a vendored tree: `--vendor DIR`, else
-  `JENNIFER_VENDOR`, else the nearest `vendor/` above the program. A sibling
-  checkout of the deck is not found; run `jvc install` (`vendor/` is
-  gitignored, `camcorder.lock` is committed). No `.` / `..` in the path.
-- A deck's files carry its version range and capabilities as pragmas, so a deck needing
-  `net` / `exec` / `sql` refuses to load on `jennifer-tiny`.
+  `JENNIFER_VENDOR`, else the nearest `vendor/` above the program; a sibling
+  checkout is not found (`jvc install`; `vendor/` gitignored, `camcorder.lock`
+  committed). No `.` / `..` in the path.
+- Deck files carry their version range and capabilities as pragmas (a deck
+  needing `net` / `exec` / `sql` refuses to load on `jennifer-tiny`).
 
 ## Standard library (all namespaced, all opt-in via `use`)
 
-Call as `LIB.name(...)` after `use LIB;`. Argument order everywhere (also for
-your own modules): a handle first, then an algorithm / format / codec name, then
-the subject, then other parameters, optional ones last. **`[full]`** marks a library (or part)
-that needs the default `jennifer` binary; `jennifer-tiny` stubs it. Reads that
-return outside data as a `string` (`io` / `fs` text reads, `os.run` / `wait`
-output) error on invalid UTF-8, naming the byte offset; read `bytes` for
-binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query / header 400 itself.
+Call as `LIB.name(...)` after `use LIB;`. Argument order everywhere (your own
+modules too): handle, algorithm / format / codec name, subject, other
+parameters, optional last. **`[full]`** = library (or part) needing the default
+`jennifer` binary; `jennifer-tiny` stubs it. Reads returning outside data as
+`string` (`io` / `fs` text reads, `os.run` / `wait` output) throw on invalid
+UTF-8, naming the byte offset; read `bytes` for binary data (`os.runBytes` /
+`waitBytes`); `httpd` answers such a path / query / header 400. Notation:
+`f(a)->T`; caps and timeouts `0=default`, `MAX_INT` (= `math.MAX_INT`) none,
+`<0 throws`. **Deprecated** names (libraries and modules) still work in 0.28.0,
+are removed in 0.29.0 and are not listed; `jennifer lint` (L301) names the
+replacement at each call.
 
-- **`io`** - `printf` (stdout) / `eprintf` (stderr) / `sprintf` (to a string)
-  with verbs `%d %f %s %t %v %a` and `%verb|key=value` modifiers (`pad`,
-  `align`, `base`, `prec`, `sign`, `fill`, `group`, `case`, ...); `%a` (list / map) also
-  takes `prec trim sci base sign mode case` per element (`%a|prec=2`). A bare
-  modifier value ends at the first non-`[A-Za-z0-9_]` character (`"%d|base=16,
-  %d"` prints the comma; quote others: `%a|sep=" | "`). No C flags: `%-20s` is
-  `%s|pad=20|align=left`; lint L117 checks a literal format. `prec` rounds the shortest round-trip
-  decimal half to even, as `intl` and `decimal` do (`1002.675` -> `1002.68`,
-  `2.345` -> `2.34`). Input `readLine` /
-  `readLines` / `eof`, binary `readBytes` / `readChars`.
-- **`convert`** - `toInt toFloat toString toBool` (the type names are keywords),
-  `typeOf`, `objectType`, `fromCodepoint` / `toCodepoint`. Text to bytes is
-  `encoding.encode("utf-8", s)`. `toInt(s, radix)` takes bare digits in base
-  2 / 8 / 10 / 16 (strip `0x` first); the inverse is `io.sprintf("%d|base=16", n)`.
-  `toInt(float)` truncates but is deprecated: `math.trunc` / `round` /
-  `floor` / `ceil` return the int.
+- **`io`** - `printf` (stdout)/`eprintf` (stderr)/`sprintf` (to string); verbs
+  `%d %f %s %t %v %a`, modifiers `%verb|key=value` (`pad`, `align`, `base`,
+  `prec`, `sign`, `fill`, `group`, `case`, ...); `%a` (list/map) takes `prec
+  trim sci base sign mode case` per element (`%a|prec=2`). A bare modifier value
+  ends at the first non-`[A-Za-z0-9_]` char; quote others: `%a|sep=" | "`. No C
+  flags: `%-20s` is `%s|pad=20|align=left`; lint L117 checks them. `prec` rounds
+  half-even on the shortest decimal (`2.345` -> `2.34`). Input `readLine
+  readLines eof`, binary `readBytes readChars`.
+- **`convert`** - `toInt toFloat toString toBool` (type names are keywords),
+  `typeOf`, `objectType`, `fromCodepoint toCodepoint`. `toInt(s, radix)`: bare
+  digits, base 2/8/10/16 (strip `0x`); inverse `io.sprintf("%d|base=16", n)`.
+  Text->bytes: `encoding.encode("utf-8", s)`; float->int: `math.trunc round
+  floor ceil`.
 - **`math`** - `abs min max sqrt pow floor ceil round trunc sign cbrt hypot`;
-  `sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh`; `exp
-  expm1 ln log10 log2 log1p log`(x, base); `factorial comb perm gcd lcm`; `rand
-  randInt randSeed` (not crypto-grade); `erf erfc gamma lgamma beta lbeta
-  regGammaP regGammaQ regBetaI`; `PI E TAU MAX_INT MIN_INT`. Radians; `floor` / `ceil` /
-  `round` / `trunc` return int; undefined results throw (no NaN).
-- **`decimal`** - exact base-10 numbers in an opaque `decimal.Decimal`;
-  operands are a Decimal, an `int` or a decimal string (`"12.34"`), never a
-  float (`from(f)` converts one). `add` / `sub` / `mul` / `sum` / `pow(d, n)`;
-  `div(a, b)` is exact or throws, `div(a, b, scale[, mode])` rounds;
-  `round(d, scale[, mode])`. Modes `"half-even"` (default), `"half-up"`,
-  `"half-down"`, `"up"`, `"down"`, `"ceiling"`, `"floor"`. `==` is numeric
-  (`1.0 == 1.00`), `%v` keeps the scale; order with `compare(a, b)` (`<`
-  throws); `sign` / `scale` / `isInteger` / `normalize` / `neg` / `abs`;
-  `toInt` (exact only) / `toFloat`; text via `convert.toString` / `%v`
-  (`toString` deprecated). Big integers are scale-0
-  Decimals; over 1,000,000 digits (tiny 100,000) is kind `"limit"`.
-- **`stats`** - over `list of int` / `float`: `mean median mode modes
+  `sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh` (radians);
+  `exp expm1 ln log10 log2 log1p log`(x, base); `factorial comb perm gcd lcm`;
+  `rand randInt randSeed` (not crypto-grade); `erf erfc gamma lgamma beta lbeta
+  regGammaP regGammaQ regBetaI`; `PI E TAU MAX_INT MIN_INT`. `floor ceil round
+  trunc` -> int; undefined results throw (no NaN).
+- **`decimal`** - exact base-10 in opaque `decimal.Decimal`; operands Decimal,
+  `int` or decimal string (`"12.34"`), never float (`from(f)` converts). `add
+  sub mul sum`/`pow(d, n)`; `div(a, b)` exact or throws, `div(a, b, scale[,
+  mode])` rounds; `round(d, scale[, mode])`; modes `"half-even"` (default)
+  `"half-up"` `"half-down"` `"up"` `"down"` `"ceiling"` `"floor"`. `==` numeric
+  (`1.0 == 1.00`), `%v` keeps scale; order via `compare(a, b)` (`<` throws);
+  `sign scale isInteger normalize neg abs`; `toInt` (exact only)/`toFloat`;
+  text: `convert.toString` or `%v`. Big integers = scale-0; >1,000,000 digits (tiny
+  100,000): `"limit"`.
+- **`stats`** - over `list of int`/`float`: `mean median mode modes
   geometricMean harmonicMean weightedMean variance stddev sampleVariance
   sampleStddev range iqr mad skewness kurtosis percentile quartiles min max sum
   zscore correlation covariance sampleCovariance describe` (population unless
-  `sample*`; `kurtosis` is excess; `min` / `max` / `mode` / `modes` / `range` /
-  `sum` keep the input kind, `describe -> Summary`). Distributions:
-  `normalPdf/Cdf/Quantile/Sample`, `tPdf/tCdf/tQuantile`,
-  `chiSquareCdf/Quantile`, `fCdf/fQuantile`, `binomialPmf/Cdf`,
-  `poissonPmf/Cdf`. Inference: `linearRegression` (`multipleRegression`
-  deprecated: `ml.linearRegression`),
-  `confidenceInterval`, `proportionCi` (wald / wilson / clopper-pearson),
-  `tTest` / `tTest2`, `chiSquareTest`, `fTest`, `anova`, `histogram` ->
-  `Regression` / `Interval` / `Test` structs. Undefined results throw. There
-  is no `prob` library: distributions live here.
-- **`ml`** - classical ML on tabular data: a fit returns an `ml.Model`, an
-  immutable value (copies share it, the GC frees it; `free` deprecated),
-  used with `predict` / `transform` / `predictProba`. `linearRegression`
-  `ridge` `lasso` `kNNRegressor` `decisionTreeRegressor`
-  `randomForestRegressor`; `kNN` `naiveBayes` `logisticRegression`
-  (hyper-parameters in `xWith(X, y, LogisticOptions` / `TreeOptions` /
-  `ForestOptions` / `KMeansOptions)`; the trailing arguments deprecated)
-  `decisionTree` `randomForest`; `kMeans` `pca` `standardScaler`
-  `minMaxScaler`. `coefficients` `intercept` `centroids` `components`
-  `explainedVariance` `featureImportances`; `trainTestSplit -> Split`, `kFold
-  -> list of Fold`, `polynomialFeatures`; `accuracy` `precision` `recall` `f1`
-  `confusionMatrix` `rocAuc` `logLoss` `rmse` `mse` `mae` `r2`. X is rows
-  (`list of list of float/int`), y a list; `math.randSeed` makes it repeatable.
+  `sample*`; `kurtosis` excess; `min max mode modes range sum` keep the input
+  kind; `describe -> Summary`); `normalPdf/Cdf/Quantile/Sample`,
+  `tPdf/tCdf/tQuantile`, `chiSquareCdf/Quantile`, `fCdf/fQuantile`,
+  `binomialPmf/Cdf`, `poissonPmf/Cdf`; `linearRegression` (multiple: `ml`),
+  `confidenceInterval`, `proportionCi` (wald/wilson/clopper-pearson), `tTest
+  tTest2`, `chiSquareTest`, `fTest`, `anova`, `histogram` -> `Regression
+  Interval Test`.Undefined results throw; no `prob` library.
+- **`ml`** - a fit returns an immutable `ml.Model` for `predict transform
+  predictProba`. `linearRegression ridge lasso kNNRegressor
+  decisionTreeRegressor randomForestRegressor kNN naiveBayes logisticRegression
+  decisionTree randomForest kMeans pca standardScaler minMaxScaler`;
+  hyper-parameters: `xWith(X, y, LogisticOptions`/`TreeOptions
+  ForestOptions`/`KMeansOptions)`. `coefficients intercept centroids
+  components explainedVariance featureImportances`; `trainTestSplit -> Split`,
+  `kFold -> list of Fold`, `polynomialFeatures`; `accuracy precision recall f1
+  confusionMatrix rocAuc logLoss rmse mse mae r2`.X: rows (`list of list of
+  float/int`), y: list; `math.randSeed` repeats.
 - **`linalg`** - vectors (`list of float`): `dot distance cross normalize`;
-  matrices (`list of list of float`): `transpose trace determinant inverse
-  solve identity zeros shape`; `norm` / `scale` / `add` / `sub` take either;
-  `matmul` does matrix*matrix, matrix*vector, vector*matrix (use `dot` for two
-  vectors). Mismatched shapes, singular matrices, a zero vector to
-  `normalize` and overflow throw.
+  matrices (`list of list of float`): `transpose trace determinant inverse solve
+  identity zeros shape`; either: `norm scale add sub`; `matmul` matrix*matrix,
+  matrix*vector, vector*matrix (two vectors: `dot`).Bad shapes, singular
+  matrices, zero vector `normalize`, overflow throw.
 - **`strings`** - `upper lower fold contains startsWith endsWith indexOf
   lastIndexOf count trim trimLeft trimRight trimPrefix trimSuffix replace
-  replicate split chars join` (an empty `sub` / `sep` / `old` in `count` /
-  `split` / `replace` throws), `trimSet` / `trimLeftSet` / `trimRightSet(s,
-  cutset)` (any rune of `cutset`), rune-indexed (`indexOf(s, sub[, from])`).
-  `fold` strips Latin diacritics / ligatures but keeps case: compare
+  replicate split chars join`, `trimSet trimLeftSet`/`trimRightSet(s, cutset)`
+  (any rune of `cutset`); rune-indexed (`indexOf(s, sub[, from])`); empty `sub
+  sep old` throws. `fold` strips Latin diacritics, keeps case: compare
   `lower(fold(a)) == lower(fold(b))`.
-- **`lists`** - `push first last reverse sort contains indexOf
-  mismatch concat replicate shuffle`, `range(a, b, step)` (stepped or counting
-  down; consecutive ints are `a..b`), higher-order `map filter reduce
-  find any all sortBy sortWith` (take `func` values; `sortWith` `cmp(a, b)` int,
-  < 0 puts `a` first). Non-mutating. `mismatch(a, b[, from])` is
-  the first differing index or `-1`.
-- **`binary`** - bulk `bytes` operations in Go (`bytes` is a keyword, hence the
-  name): `make(n[, fill])` (`n` <= 256 MiB, 32 MiB tiny; the only way to get a sized
-  buffer), `concat`, `join(parts[, sep])`, `indexOf(haystack, needle[, from[, limit]])`
-  (byte offsets; `limit` bounds the scan), `contains`, `split`, `startsWith`,
-  `endsWith`, `bitXor` / `bitAnd` / `bitOr(data, key)` (key repeated over the
-  data, extra key bytes ignored: a WebSocket mask, an equal-length XOR) and
-  `bitNot(data)`.
-  `readInt` / `readUint(order, b, offset, size)` (size 1/2/4/8, order
-  `"le"`/`"be"`), `readFloat` (4/8; NaN/Inf throw), `readInts` /
-  `readFloats(order, b, offset, count, size[, stride])`. Build a
-  buffer with `net.readAll` / `readN` or one `join` over a `list of bytes`;
-  `concat` in a loop is O(n^2), `$out[] = byte` linear (~0.35 us per byte).
-- **`maps`** - `keys values has delete merge`, `without(m, keys)` (several
-  keys, one copy). `has` before reading a key that may be missing.
-- **`os`** - `getEnv` / `setEnv` / `unsetEnv` / `hasEnv` (true even when set to
-  `""`), `getEnvBytes`, `argsBytes()` (`getEnv` / reading `ARGS` throw
-  `"os"` on non-UTF-8; `hasFlag` / `flag` deprecated: the `args` module),
-  `isTerminal`, `cwd` / `homeDir` / `tempDir`.
-  Processes: `run(argv[, stdin]) -> Result{exitCode, stdout, stderr}`
-  (blocking) and `spawn(argv)` / `spawnWith(argv, SpawnOptions{stdout, stderr})` ->
-  `Process{handle, pid}` with `wait` / `waitTimeout(p, ms)` (`"timeout"`, the
-  child keeps running) / `poll` / `kill` / `release`; `runBytes` / `waitBytes`
-  / `waitBytesTimeout` return `BytesResult{exitCode, stdout, stderr as bytes,
-  truncated}`; a stream is `""` (capture), `"inherit"`, `"discard"` or a path
-  containing `/` (the `spawn(argv, map)` form is deprecated).
-  Signals: `catchSignal(name)` / `gotSignal(name)` for `"int"` / `"term"` / `"hup"` /
-  `"usr2"` (`"usr1"` is reserved). Constants `PLATFORM ARCH NCPU EOL DIRSEP
-  PATHSEP ARGS`.
+- **`lists`** - `push first last reverse sort contains indexOf mismatch concat
+  replicate shuffle`, `range(a, b, step)` (stepped/counting down; consecutive
+  ints: `a..b`); higher-order `map filter reduce find any all sortBy sortWith`
+  (take `func` values; `sortWith` `cmp(a, b)` int, <0 puts `a` first).
+  Non-mutating. `mismatch(a, b[, from])`: first differing index or `-1`.
+- **`binary`** - bulk `bytes` ops (`bytes` is a keyword): `make(n[, fill])` (`n`
+  <= 256 MiB, 32 MiB tiny; the only sized buffer), `concat`, `join(parts[,
+  sep])`, `indexOf(haystack, needle[, from[, limit]])` (byte offsets; `limit`
+  bounds the scan), `contains`, `split`, `startsWith`, `endsWith`, `bitXor
+  bitAnd`/`bitOr(data, key)`(key repeated), `bitNot(data)`; `readInt`/
+  `readUint(order, b, offset, size)` (size 1/2/4/8, order `"le"`/`"be"`),
+  `readFloat` (4/8; NaN/Inf throw), `readInts`/`readFloats(order, b, offset,
+  count, size[, stride])`. `concat` in a loop is O(n^2): append `$out[] = byte`
+  or `join` a `list of bytes`.
+- **`maps`** - `keys values has delete merge`, `without(m, keys)` (one copy).
+  `has` before reading a maybe-missing key.
+- **`os`** - `getEnv setEnv unsetEnv hasEnv` (true for `""`), `getEnvBytes`,
+  `argsBytes()` (`getEnv ARGS` throw `"os"` on non-UTF-8; flags: `args` module),
+  `isTerminal`, `cwd homeDir tempDir`. Blocking `run(argv[, stdin]) ->
+  Result{exitCode, stdout, stderr}`; `spawn(argv)`/`spawnWith(argv,
+  SpawnOptions{stdout, stderr})` -> `Process{handle, pid}`, `wait`/
+  `waitTimeout(p, ms)` (`"timeout"`, child keeps running)/`poll kill release`;
+  `runBytes waitBytes waitBytesTimeout` -> `BytesResult{exitCode, stdout, stderr
+  as bytes, truncated}`; streams `""` (capture), `"inherit"`, `"discard"` or a
+  path with `/`. `catchSignal(name)`/`gotSignal(name)`: `"int" "term" "hup"
+  "usr2"` (`"usr1"` reserved). `PLATFORM ARCH NCPU EOL DIRSEP PATHSEP ARGS`.
 - **`path`** - path strings, no I/O: `base dir ext stem join clean isAbs`,
-  `split(p) -> [dir, file]`, with the host separator. Not a filename sanitizer.
-- **`json`** - `encode` / `encodePretty` / `decode` into an opaque `json.Value`,
-  read by JSON Pointer (`get` / `asInt` / `asString` / `typeOf` / `has` / `keys`
-  / `length` / ...; `asFloats` / `asInts` / `asStrings` read a list) and edited by non-mutating `set` / `insert` / `append` /
-  `remove` / `move`. `typeOf(v, ptr)` is `"missing"` for an absent pointer. A
-  repeated key is a decode error. An integer past int64 keeps its digits:
-  `asInt` refuses it, `asDecimal -> decimal.Decimal` reads it (also `yaml`;
-  `toml` refuses it at decode); `asFloat` refuses an int a float cannot hold. `json.list(xs)` / `json.map(m)` build a
-  document in one step: collect first, then convert, instead of a `set` per
-  item. `encodeWith(v, EncodeOptions{indent sortKeys rawHtml canonical})`
-  (canonical = RFC 8785); `mergePatch(target, patch)` is RFC 7386.
-  `decodeWith(s, DecodeOptions{maxDepth, maxNodes})` only lowers the caps
-  (1000 / 2M, 0 = default). A reached cap is kind `"limit"`; `toml`, `yaml`, `xml`
-  and `asn1` have the same `decodeWith` (asn1 takes bytes, xml adds
-  `namespaces`).
-- **`asn1`** - BER decode / DER encode, shaped like `json`: `decode(bytes)` / `decodeWith`
-  `-> asn1.Value` with child-index pointers (`typeOf` / `tagClass` / `tagNumber` /
-  `isConstructed` / `get` / `has` / `length` / `asInt` / `asBool` / `asString`
-  / `asBytes` / `asOid` / `isNull`); build with `integer` / `enumerated` /
-  `boolean` / `null` / `octetString` / `utf8String` / `printableString` /
-  `ia5String` / `oid` / `sequence` / `set`, `tagged` (explicit) / `retag`
+  `split(p) -> [dir, file]`, host separator. Not a filename sanitizer.
+- **`json`** - `encode encodePretty decode` into opaque `json.Value`, read by
+  JSON Pointer (`get asInt asString typeOf has keys length`/...; lists `asFloats
+  asInts asStrings`), edited by non-mutating `set insert append remove move`.
+  `typeOf(v, ptr)` = `"missing"` for an absent pointer. Repeated key: decode
+  error. Integer past int64 keeps its digits: `asInt` refuses, `asDecimal ->
+  decimal.Decimal` reads it (also `yaml`; `toml` refuses at decode); `asFloat`
+  refuses an int a float cannot hold. Build in one step: `json.list(xs)`/
+  `json.map(m)`, not a `set` per item. `encodeWith(v, EncodeOptions{indent
+  sortKeys rawHtml canonical})`; `mergePatch(target, patch)` RFC 7386.
+  `decodeWith(s, DecodeOptions{maxDepth, maxNodes})`only lowers caps (1000/2M);
+  cap reached: `"limit"`. Same `decodeWith` in `toml`, `yaml`, `xml`, `asn1`
+  (asn1 takes bytes, xml adds `namespaces`).
+- **`asn1`** - BER decode/DER encode, `json`-shaped: `decode(bytes)`/
+  `decodeWith` `-> asn1.Value` with child-index pointers (`typeOf tagClass
+  tagNumber isConstructed get has length asInt asBool asString asBytes asOid
+  isNull`); build `integer enumerated boolean null octetString utf8String
+  printableString ia5String oid sequence set`, `tagged` (explicit)/`retag`
   (implicit), then `encode(v)`.
-- **`toml`** - TOML 1.0 `encode` / `encodePretty` / `decode`, the `json` API
-  name for name, plus `asDatetime` (an offset date-time only) and `asLocal ->
-  toml.Local{year, month, day, hour, minute, second, nanosecond}` for the
-  local forms (`typeOf` `"local-datetime"` / `"local-date"` / `"local-time"`).
+- **`toml`** - TOML 1.0, the `json` API name for name, plus `asDatetime` (offset
+  date-time only) and `asLocal -> toml.Local{year, month, day, hour, minute,
+  second, nanosecond}` (`typeOf` `"local-datetime" "local-date" "local-time"`).
   Jennifer's config format.
-- **`xml`** - `decode` / `encode` / `encodePretty` over an `xml.Value` element
-  tree: `tag` / `text` / `attr` / `hasAttr` / `attrs` / `children` / `typeOf`;
-  paths `name`, `name[k]` (1-based), `*`, `*:local` in `get` / `findAll` /
-  `has`; build with `element` / `setAttr` / `setText` / `append`. Namespaces:
-  `localName` / `namespace` / `lookupPrefix` / `attrNS` / `hasAttrNS`; match by
-  URI with a prefix map as the third path argument (`xml.findAll($r,
-  "k:Document", {"k": KML_URI})`); `xml.decodeWith($frag, xml.DecodeOptions{namespaces:
-  {"p": URI}})` decodes a fragment with bindings (two-argument `decode`
-  deprecated); `elementNS` / `setAttrNS` build. A C0 control
-  other than tab / LF / CR, U+FFFE or U+FFFF is an error in decode and build.
-- **`yaml`** - YAML 1.2 `decode` (one document) / `decodeAll` / `encode` (flow)
-  / `encodePretty` (block), the `json` API name for name, plus `asDatetime` /
-  `isDatetime` / `isNull` / `asBytes` (`!!binary`). Anchors, aliases and `<<` merges resolve. YAML 1.1
-  numbers (`012`, `0b11`, `1_000`) are errors: quote them.
-- **`intl`** - message catalogs: `load(lang, catalog)` (first is the default),
-  `setLocale` / `locale`, `tr(key[, params])` with `%name%` placeholders (`%%`
-  for `%`) and fallback locale -> base language -> default -> the key. Not
-  `i18n`; there is no `_()`. `formatNumber(locale, value, digits)` (int /
-  float / `decimal.Decimal`, 0-20 digits, half-even) writes CLDR separators
-  and grouping (`de` `1.234,5`, `de-CH` `1'234.5` with U+2019, `fr` U+202F,
-  `en-IN` 3;2). One locale rule everywhere (`_` is `-`, `de-AT` case);
-  `setLocale` needs a catalog for the tag or its language; misuse throws
-  `"runtime"`.
-- **`httpd`** `[full]` - HTTP/1.1 server engine, a pull loop: `listen(addr) -> Server` /
-  `listenWith(addr, Options{maxBodyBytes, maxInFlight, respondTimeoutMs,
-  bodyTimeoutMs, writeTimeoutMs, maxHeaderBytes, dirListing, followSymlinks,
-  etag, certPem, keyPem})` (`certPem` + `keyPem`: TLS + HTTP/2; `etag`:
-  content-hash ETags from `serveFile` / `serveDir`; 0 = default: 10 MiB body, 256
-  in flight, 60 s respond -> `503`, 60 s body -> `408`). `maxInFlight x
-  maxBodyBytes` must fit a process budget (4 GiB; `setMaxBufferBudget(bytes)` /
-  `setMaxBufferBudgetFromRAM(fraction)`). Loop `accept($srv) -> Request` and
-  `respond($req, status, body)`; `method` / `path` / `query` / `rawQuery` /
-  `header` / `body` / `remoteAddr`, `setHeader`, `serveFile` / `serveDir`, `etag($req,
-  tag)` (true = 304 sent, stop), `isOpen` / `timedOut`, per-request
-  `setRequestValue` / `requestValue`, `shutdown`. Paths never contain `.` /
-  `..`, and path / query / headers are valid UTF-8 (else 400); `serveDir` hides dotfiles except `.well-known/` and answers
-  a symlink out of `root` 404 (`followSymlinks` follows it). `spawn` several
-  accept loops for a pool. After `shutdown` (a second does nothing), and on a
-  finished request, calls throw `"closed"`. Deprecated: `listenTLS`,
-  `listenTLSWith`, `serveFileEtag`, `serveDirEtag`.
-- **`term`** `[full]` - `makeRaw(stream) -> State` / `restore(state)`,
-  `size(stream) -> Size{rows, cols}` (throws off a terminal), `readByte()`
-  / `readByteTimeout(ms)` (`0` polls): `"closed"` at end of input,
-  `"timeout"` when no byte came; a second `restore` does nothing. Not in the
-  REPL. Output-only TUIs need just `ansi` + `os.isTerminal`.
+- **`xml`** - `decode encode encodePretty` over an `xml.Value` element tree:
+  `tag text attr hasAttr attrs children typeOf`; paths `name`, `name[k]`
+  (1-based), `*`, `*:local` in `get findAll has`; build `element setAttr setText
+  append`. Namespaces: `localName namespace lookupPrefix attrNS hasAttrNS`, a
+  prefix map as 3rd path argument (`xml.findAll($r, "k:Document", {"k":
+  KML_URI})`), fragments via `decodeWith($frag, DecodeOptions{namespaces: {"p":
+  URI}})`; build `elementNS setAttrNS`. C0 controls but tab/LF/CR, U+FFFE,
+  U+FFFF: error.
+- **`yaml`** - YAML 1.2, the `json` API name for name (`decode` one document,
+  `decodeAll`; `encode` flow, `encodePretty` block), plus `asDatetime isDatetime
+  isNull asBytes` (`!!binary`). Anchors, aliases, `<<` merges resolve. YAML 1.1
+  numbers (`012`, `0b11`, `1_000`) are errors: quote.
+- **`intl`** - message catalogs: `load(lang, catalog)` (first = default),
+  `setLocale locale`, `tr(key[, params])`, `%name%` placeholders (`%%` for `%`),
+  fallback locale -> base language -> default -> key. Not `i18n`; no `_()`.
+  `formatNumber(locale, value, digits)` (int/float/`decimal.Decimal`, 0-20
+  digits, half-even): CLDR separators and grouping (`de` `1.234,5`). Locale
+  tags: `_` = `-`, any case; `setLocale` needs a catalog for the tag or its
+  language; misuse throws `"runtime"`. Details:
+  https://docs.jennifer-lang.dev/libraries/intl.html
+- **`httpd`** `[full]` - HTTP/1.1 server engine, a pull loop: `listen(addr) ->
+  Server`/`listenWith(addr, Options{maxBodyBytes, maxInFlight,
+  respondTimeoutMs, bodyTimeoutMs, writeTimeoutMs, maxHeaderBytes, dirListing,
+  followSymlinks, etag, certPem, keyPem})`(`certPem` + `keyPem`: TLS + HTTP/2);
+  `maxInFlight x maxBodyBytes` must fit `setMaxBufferBudget(bytes)`/
+  `setMaxBufferBudgetFromRAM(fraction)`. Loop `accept($srv) -> Request`,
+  `respond($req, status, body)`; `method path query rawQuery header body
+  remoteAddr`, `setHeader`, `serveFile serveDir`, `etag($req, tag)` (true = 304
+  sent, stop), `isOpen timedOut`, `setRequestValue requestValue`, `shutdown`.
+  Paths never hold `.`/`..`; path/query/headers are UTF-8 (else 400);
+  `serveDir` hides dotfiles but `.well-known/`, 404s a symlink out of `root`
+  (`followSymlinks`). `spawn` several accept loops for a pool. After `shutdown`
+  and on a finished request, calls throw `"closed"`. Details:
+  https://docs.jennifer-lang.dev/libraries/httpd.html
+- **`term`** `[full]` - `makeRaw(stream) -> State`/`restore(state)`,
+  `size(stream) -> Size{rows, cols}` (throws off a terminal), `readByte()`/
+  `readByteTimeout(ms)` (`0` polls; `"closed"` at end of input, `"timeout"`).
+  Not in the REPL. Output-only TUIs: `ansi` + `os.isTerminal`.
 - **`serial`**, **`spi`**, **`i2c`**, **`gpio`** `[full]`, Linux only -
-  `serial.open(path, baud) -> Port` (raw 8N1, exclusive; `read` / `write`
-  (-> null) / `flush` / `close`; with parity, a bad byte throws `"serial"`
-  naming its offset; `openWith(path, Options)` adds `flowControl`
-  `"none"|"rtscts"|"xonxoff"`, `shared`; `setReadDeadline` /
-  `setWriteDeadline` ms as in `net`; kinds `"timeout"`, `"closed"` also on
-  hangup); `spi.open(path)` = `openWith(path, Options{mode, speedHz, bitsPerWord})` ->
-  `Device` (`configure` deprecated), `transfer(dev, bytes)` (over spidev
-  bufsiz: `"limit"`, not split);
-  `i2c.open(path, addr) -> Bus`, `read` / `write` / `readReg(bus, reg, n)` /
-  `writeReg` / `writeRead(bus, data, n)` (repeated start; over 8192 bytes:
-  `"limit"`); `gpio.open(path) -> Chip` over `/dev/gpiochipN`, then
-  `setup(chip, pin, IN | OUT)` / `read` / `write` / `release` / `close(chip)`
-  (`gpio.chip`, `JENNIFER_GPIO_CHIP` and the pin-only forms deprecated).
-- **`sql`** `[full]` - MySQL / MariaDB / PostgreSQL (no SQLite):
-  `open(driver, dsn)` = `openWith(driver, dsn, Options{allowInsecure,
-  queryTimeoutMs})`, driver `"mysql"` / `"postgres"` (`queryTimeoutMs` 0 =
-  30 s, `math.MAX_INT` none). A DSN to another host gets verified TLS added
-  (`sslmode=verify-full` / `tls=true`); a weaker mode is refused unless
-  `allowInsecure`; a Unix socket or loopback host is used as written. `query`
-  / `exec` on a Connection or Tx, cursor `next` + `asInt` / `asFloat` /
-  `asString` / `asBool` / `asBytes` / `isNull`, `begin` / `commit` /
-  `rollback`, prepared statements. Values bind only through placeholders.
-  A closed Connection / Statement / Rows or an ended Tx throws `"closed"`;
-  `close` / `closeStmt` / `closeRows` and `rollback` of an ended Tx do
-  nothing (defer-safe), a second `commit` throws.
-  Errors: `"sql"`, always a `SqlError{kind, message, code, sqlState}` (server
-  errors, text not UTF-8, NaN, a bool not 0 / 1), `"timeout"`, `"net"`.
-  Deprecated (removed in 0.29.0): `"mariadb"` / `"postgresql"`,
-  `setQueryTimeout`.
-- **`time`** - `Time` / `Duration` / `Zone`. `now`; `unix` / `unixMilliseconds` /
-  `unixNanos` and `fromUnix` / `fromUnixMilliseconds` / `fromUnixNanos`
-  (`unixMillis` / `fromUnixMillis` deprecated, removed in 0.29.0); `year`
-  `month` `day` `hour` `minute` `second` `nanosecond` `weekday`; durations
-  `fromSeconds` / `fromMilliseconds` / `fromMinutes` / `fromHours` and
-  `seconds` / `milliseconds` / `minutes` / `hours` (not `toMillis`); `add` /
-  `sub` / `before` / `after` / `equal`; `zone` / `inZone` / `local` / `utc`;
-  `sleep` (`0` returns at once, negative throws); strftime `format` / `parse` (`%d|pad=0` unpadded); `iso` / `fromIso`; `UTC`,
-  `PROGRAM_START`. Fixed-offset zones only (no IANA / DST).
-- **`fs`** - `read` / `write` / `append` (String / Bytes forms),
-  `writeNew(path, content)` (fails if it exists: the lock primitive),
-  `readSecretBytes` / `readSecretString` (refuse a non-regular file, one with group /
-  other bits or not yours; on a read-only mount, e.g. `/run/secrets`, only
-  group / other write bits: kind `"fs"`; over 1 MiB `"limit"`), `exists` /
-  `isFile` / `isDir` / `stat` / `realpath` / `readlink` / `symlink`, `mkfifo`,
-  `chmod` / `chown`, `mkdir` / `mkdirAll` / `remove` / `removeAll` / `rename`
-  (atomic replace: write a temp file, then rename) / `list` / `walk` (a name
-  that is not UTF-8 throws `"fs"`, also `readlink` / `realpath`;
-  `listBytes` / `walkBytes` give names as `bytes`),
-  `makeTempFile` / `makeTempDir`, `fs.File` handles (`open` / `readLine` / ... /
-  `sync` / `close`), polling `watch(path)` / `watchWith(path,
-  WatchOptions{intervalMs})` -> `Watcher` (`next` / `hasEvent` / `close`).
-- **`net`** `[full]` - TCP `connect(addr)` / `connectWith(addr,
-  ConnectOptions{timeoutMs, tls, tlsOptions, dnsServers})` / `listen` / `accept` /
-  `readBytes` (empty once the peer closed) / `writeBytes` / `readAll` / `readN`
-  (per-call size over 256 MiB: kind `"limit"`, also `recvFrom`). `timeoutMs`
-  bounds connect + handshake or a lookup, never later reads: `0` = 30 s (the
-  plain calls too), `math.MAX_INT` = none, negative throws. Streams:
-  `setReadDeadline` / `setWriteDeadline` (ms, bound the whole exchange) and
-  `setIdleTimeout` (a stall of ms); `0` clears, the first to pass fires.
-  Errors: `"timeout"`, `"closed"`, or `"net"`, a `NetError{kind, message, op,
-  reason, sent, replied}` (reason `refused` / `reset` / `unreachable` / `dns` /
-  `tls` / `closed` / `other`); a bad address is `"runtime"`. `abort(conn)`
-  resets. TLS `connectTLS(addr[, TLSOptions])` / `startTLS(conn[,
-  TLSOptions])` / `startTLSWith(conn, ConnectOptions)` (+ `TLSOptions{
-  skipVerify, caCert}`); UDP `listenUDP` / `sendTo` / `recvFrom -> Datagram{data,
-  peer, truncated}` / `setBroadcast` / `bindToDevice` (Linux); DNS `lookup` /
-  `reverseLookup` / `lookupWith` / `reverseLookupWith`; `lookupWith` with
-  `dnsServers` (`"ip"` / `"ip:port"`, at most 16) asks only those servers (no
-  hosts file, no search list), the other calls ignore it; `close` / `address`. Name
-  resolution reads `$JENNIFER_RESOLV_CONF` / `$JENNIFER_HOSTS`, else
-  `<PREFIX>/etc`, else `/etc` (`jennifer version -v` shows which); a named
-  file that is missing, or a lookup failing with no resolv.conf at all, is a
-  `NetError` reason `"dns"` naming the files; never a public fallback.
-  Deprecated (removed in 0.29.0): a trailing timeout int on connect /
-  connectTLS / startTLS / readAll / readN, and `eof`.
-- **`regex`** - RE2: `matches` / `find` / `findAll` / `replace` / `split` /
-  `escape`; `Match{text, start, end, groups, groupsNamed}` (rune indices,
-  `start == -1` = no match). Patterns are cached.
-- **`hash`** - `compute(algo, b)` (`"md5"` / `"sha256"` / `"sha3-256"` /
-  `"blake2b-256"` / ...), `hmac(algo,
-  message, key)`, constant-time `equal`, streaming `stream` / `update` /
-  `finalize` / `discard` (after `finalize` or `discard`, `update` / `finalize`
-  throw `"closed"`; `discard` does nothing).
-- **`crc`** - CRC-32 / CRC-64 over `bytes`, shaped like `hash`.
-- **`crypto`** - `randBytes(n)` / `randInt(lo, hi)` (crypto-grade),
-  `deriveKey(algo, secret, salt, length, KdfParams{...})` (`"hkdf-<hash>"` `info`,
-  `"pbkdf2-<hash>"` `iterations` (any `hash` name but md5), `"argon2id"` `time memoryKiB threads`,
+  `serial.open(path, baud) -> Port` (raw 8N1, exclusive; `read write flush
+  close`; parity error `"serial"` with offset; `openWith(path, Options)` adds
+  `flowControl` `"none"|"rtscts"|"xonxoff"`, `shared`; `setReadDeadline
+  setWriteDeadline` as in `net`; `"timeout"`, `"closed"` also on hangup);
+  `spi.open(path)` = `openWith(path, Options{mode, speedHz, bitsPerWord})` ->
+  `Device`, `transfer(dev, bytes)` (over spidev bufsiz: `"limit"`);
+  `i2c.open(path, addr) -> Bus`, `read write`/`readReg(bus, reg, n)`/
+  `writeReg`/`writeRead(bus, data, n)` (repeated start; >8192 bytes:
+  `"limit"`); `gpio.open(path) -> Chip` over `/dev/gpiochipN`, `setup(chip, pin,
+  IN | OUT)`/`read write release`/`close(chip)`.
+- **`sql`** `[full]` - MySQL/MariaDB/PostgreSQL (no SQLite): `open(driver, dsn)`
+  = `openWith(driver, dsn, Options{allowInsecure, queryTimeoutMs})`, driver
+  `"mysql" "postgres"` (`queryTimeoutMs` 0=30 s). A DSN to another host gets
+  verified TLS (`sslmode=verify-full`/`tls=true`), weaker modes need
+  `allowInsecure`; Unix socket/loopback used as written (`localhost` dials
+  127.0.0.1/::1, never DNS). `query(target, sql,
+  params...) -> Rows`/`exec -> Result{affected, lastId}` (-1 unknown) on a
+  Connection or Tx; `next` + `asInt asFloat asString asBool asBytes isNull`
+  (column index or name), `columns(rows) -> list of string`; `begin commit
+  rollback`; `prepare(conn, sql) -> Statement`, `queryStmt(stmt, params...)`/
+  `execStmt closeStmt`. Values bind only through placeholders (one `list`
+  argument spreads). Closed handle or ended Tx: `"closed"`; `close closeStmt
+  closeRows`, `rollback` of an ended Tx: no-ops (defer-safe); second `commit`
+  throws. Errors `"sql"` (always `SqlError{kind, message, code, sqlState}`),
+  `"timeout"`, `"net"`. Details:
+  https://docs.jennifer-lang.dev/libraries/sql.html
+- **`time`** - `Time Duration Zone`. `now`; `unix unixMilliseconds unixNanos`,
+  `fromUnix fromUnixMilliseconds fromUnixNanos`; `year month day hour minute
+  second nanosecond weekday`; durations `fromSeconds fromMilliseconds
+  fromMinutes fromHours`, `seconds milliseconds minutes hours` (not `toMillis`);
+  `add sub before after equal`; `zone inZone local utc`; `sleep` (`0` returns,
+  <0 throws); strftime `format parse` (`%d|pad=0` unpadded); `iso fromIso`;
+  `UTC`, `PROGRAM_START`. Fixed-offset zones only (no IANA/DST).
+- **`fs`** - whole file `readString readBytes` (>256 MiB, tiny 32 MiB: error,
+  use a handle), `writeString writeBytes`, `appendString`/`appendBytes(path,
+  content)` (creates), `writeNew(path, content)` (fails if it exists: the lock
+  primitive), `readSecretBytes readSecretString` (refuse a non-regular file,
+  group/other bits, or not yours; read-only mount, e.g. `/run/secrets`: only
+  group/other write bits; `"fs"`; >1 MiB `"limit"`), `exists isFile isDir stat
+  realpath readlink symlink mkfifo chmod chown mkdir mkdirAll remove removeAll
+  rename` (atomic replace: write temp, rename), `list walk` (non-UTF-8 name:
+  `"fs"`, also `readlink realpath`; `listBytes walkBytes` give `bytes` names),
+  `makeTempFile makeTempDir`, `fs.File` handles (`open`, `readLine`, ...,
+  `sync`, `close`), polling `watch(path)`/`watchWith(path,
+  WatchOptions{intervalMs})` -> `Watcher` (`next hasEvent close`).
+- **`net`** `[full]` - TCP `connect(addr)`/`connectWith(addr,
+  ConnectOptions{timeoutMs, tls, tlsOptions, dnsServers})`/`listen accept
+  readBytes` (empty once the peer closed)/`writeBytes readAll readN` (>256 MiB
+  per call: `"limit"`, also `recvFrom`). `timeoutMs` (0=30 s) bounds connect +
+  handshake or a lookup, never later reads; for streams `setReadDeadline
+  setWriteDeadline` (ms, whole exchange) and `setIdleTimeout` (a stall), `0`
+  clears. Errors `"timeout"`, `"closed"`, `"net"` = `NetError{kind, message, op,
+  reason, sent, replied}` (reason `refused reset unreachable dns tls closed
+  other`); bad address `"runtime"`. `abort(conn)` resets. TLS `connectTLS(addr[,
+  TLSOptions])`/`startTLS(conn[, TLSOptions])`/`startTLSWith(conn,
+  ConnectOptions)` (`TLSOptions{skipVerify, caCert}`); UDP `listenUDP sendTo`/
+  `recvFrom -> Datagram{data, peer, truncated}`/`setBroadcast bindToDevice`;
+  DNS `lookup reverseLookup lookupWith reverseLookupWith` (`dnsServers` `"ip"`/
+  `"ip:port"`: only those); `close address`. Resolver: `$JENNIFER_RESOLV_CONF`/
+  `$JENNIFER_HOSTS`, else `<PREFIX>/etc`, `/etc`. Details:
+  https://docs.jennifer-lang.dev/libraries/net.html
+- **`regex`** - RE2: `matches find findAll replace split escape`; `Match{text,
+  start, end, groups, groupsNamed}` (rune indices, `start == -1` = no match).
+  Patterns cached.
+- **`hash`** - `compute(algo, b)` (`"md5" "sha256" "sha3-256"
+  "blake2b-256"`/...), `hmac(algo, message, key)`, constant-time `equal`,
+  streaming `stream update finalize discard` (then `update finalize` throw
+  `"closed"`).
+- **`crc`** - CRC-32/CRC-64 over `bytes`, shaped like `hash`.
+- **`crypto`** - `randBytes(n)`/`randInt(lo, hi)` (crypto-grade);
+  `deriveKey(algo, secret, salt, length, KdfParams{...})` (`"hkdf-<hash>"`
+  `info`, `"pbkdf2-<hash>"` `iterations`, `"argon2id"` `time memoryKiB threads`,
   `"scrypt"` `n r p`; no defaults); `hashPassword(algo, pw) -> string`
-  (`"argon2id"` / `"bcrypt"` / `"scrypt"`) / `verifyPassword(pw, hash) -> bool`
-  (`pw` is `bytes`; a `string` is deprecated);
-  one function per operation, the algorithm first: `encrypt(algo, plaintext,
-  key, nonce, aad)` / `decrypt` (`"aes-gcm"` / `"chacha20-poly1305"` nonce 12,
-  `"xchacha20-poly1305"` nonce 24; never reused under a key, tag appended), `blockEncrypt(algo, data,
-  key, iv)` / `blockDecrypt` (`"aes-ecb-nopad"` / `-pkcs7`, `"aes-cbc-*"`,
-  `"aes-ctr"`, `"aes-cfb"`; no MAC, interop only), `sign(algo, msg, priv)` /
-  `verify(algo, msg, sig, pub)` (`"ed25519"`, `"rsa-pkcs1-sha256"`..,
-  `"rsa-pss-sha256"`.. (salt = hash length), `"ecdsa-sha256"`.. JOSE R||S;
-  `"rsa-sha*"` deprecated), `keypair(algo) -> Keypair{public, private}` /
-  `publicKey(algo, priv)` (`"ed25519"` / `"x25519"` / `"mlkem768"` raw bytes,
-  `"rsa2048"`.. / `"p256"`.. PEM), `agree("x25519", priv, peerPub)` (run through
-  HKDF), `encapsulate("mlkem768", pub)` / `decapsulate`, `wrap(algo,
-  plaintext, pub)` / `unwrap` (`"rsa-oaep-sha256"` / `-sha1`, `"nacl-sealedbox"`
-  with X25519 keys), `jwkPublic` /
-  `jwkToPem -> bytes` / `csr`. Weak names (`sha1` KDFs, `rsa-oaep-sha1`,
-  `aes-ecb-*`) are for interop, tagged "(weak)". `[full]`: RSA, ECDSA,
-  ML-KEM, JWK and CSR.
-- **`compress`** - `pack` / `unpack` for `"gzip"` / `"zlib"` / `"deflate"`
-  (level `"fast"` / `"default"` / `"best"`), streaming `compress.Stream`
-  (the same finalize / discard rules as `hash`).
-  `unpack(algo, b)` caps output at 256 MiB (kind `"limit"`); `unpackWith(algo,
-  b, UnpackOptions{maxBytes})` sets the cap. zlib / deflate refuse bytes after
-  the stream; gzip reads every member.
-- **`images`** - opaque immutable 8-bit RGBA `images.Image`. `decode(bytes)` /
-  `decodeWith(bytes, DecodeOptions{maxPixels})` (PNG / JPEG / GIF; 64 Mpx
-  default, 8 Mpx on `jennifer-tiny`, kind `"limit"`), `info(bytes)
-  -> Info{format, width, height}`, `encode("png" | "jpeg" | "gif", img[,
-  quality])`; `create(w, h[, color])` / `fromPixels(w, h, rgba)`; `width` /
-  `height` / `pixel(img, x, y) -> Color{r, g, b, a}` / `pixels(img)` (RGBA) /
-  `colorPixels` (RGB) / `alphaPixels`; `rgb` /
-  `hex("#rrggbb[aa]")` (a `Color{}` literal's omitted `a` is 0; `rgba`
-  deprecated: the literal);
-  `crop` / `resize(img, w, h[, "catmullrom" | "bilinear" | "nearest"])` (0 keeps
-  the aspect) / `fit` / `rotate` / `flip` / `grayscale` / `threshold` / `dither`
-  / `fill` / `draw(dst, src, x, y)`. No `setPixel`: edit `pixels` and use
-  `fromPixels`.
-- **`archive`** - tar / zip / tar.gz (`"tgz"` deprecated) over `bytes`: `pack` / `unpack` of `list
-  of Entry{name, data, mode, mtime}`. `unpack` refuses absolute names, `..`
-  and special files (`unpackWith(format, b, UnpackOptions{skipSpecial: true})` skips
-  them). Caps in options structs everywhere: `0` default, `math.MAX_INT` none,
-  negative throws.
-- **`encoding`** - `isAscii` / `lenBytes` / `lenRunes`; `toText` / `fromText`
-  with `hex` / `base32` / `base64` / `base64-url` / `ascii85` / `z85` /
-  `quoted-printable` / `uri-percent` / `uri-form` (base32 / base64 decode takes
-  only the canonical text: no line breaks, exact padding; hex either case;
-  quoted-printable refuses a `=` that is not `=XX` or a soft line break);
-  text <-> bytes is
-  `encode` / `decode(codec, ...)` only: `utf-8`, `utf-16` / `utf-32` (`le` / `be`
-  fixed order, no mark; plain: a BOM, big-endian without), `ascii`, `iso-8859-*`,
-  `windows-*`, `macintosh`, `ebcdic`; strict decode. Exact codec names. Bounded request parsers `parseForm(text)` /
-  `parseCookies(header)` / `parseMultipart(contentType, body)` (malformed
-  `"encoding"`, caps `"limit"`).
-- **`uuid`** - `v4()` (122 random bits, crypto-grade) / `v7()` (time-ordered,
-  not a secret), `parse` / `isValid` / `version`, `NIL`.
-- **`meta`** - `VERSION` / `BUILD` / `SYSMODDIR` / `CAPABILITIES`,
-  `hasCapability(name)` (`"net"` / `"exec"` / `"sql"`; another name throws);
-  `call(name, args...)` / `defined(name)` and
-  `callMain` / `definedMain` (resolve in the entry program, so a module can
-  call its host's handlers).
-- **`testing`** - `run(name)` (catches `exit`), `assertEqual` / ... /
-  `assertThrows` / `assertThrowsArgs(name, args, kind)` (kind `"assertion"`),
-  `results` / `reset`, `report` (`text` / `tap` / `junit`). `jennifer test`
+  (`"argon2id" "bcrypt" "scrypt"`)/`verifyPassword(pw, hash) -> bool` (`pw` is
+  `bytes`). `encrypt(algo, plaintext, key, nonce, aad)`/`decrypt` (`"aes-gcm"
+  "chacha20-poly1305"` nonce 12, `"xchacha20-poly1305"` 24; never reuse; tag
+  appended); `blockEncrypt(algo, data, key, iv)`/`blockDecrypt`
+  (`"aes-ecb-nopad"`/`-pkcs7`, `"aes-cbc-*"`, `"aes-ctr"`, `"aes-cfb"`; no
+  MAC, interop only); `sign(algo, msg, priv)`/`verify(algo, msg, sig, pub)`
+  (`"ed25519"`, `"rsa-pkcs1-sha256"`.., `"rsa-pss-sha256"`.., `"ecdsa-sha256"`..
+  JOSE R||S); `keypair(algo) -> Keypair{public, private}`/`publicKey(algo,
+  priv)` (`"ed25519" "x25519" "mlkem768"` raw bytes, `"rsa2048"`../`"p256"`..
+  PEM); `agree("x25519", priv, peerPub)`; `encapsulate("mlkem768", pub)`/
+  `decapsulate`; `wrap(algo, plaintext, pub)`/`unwrap` (`"rsa-oaep-sha256"`/
+  `-sha1`, `"nacl-sealedbox"`); `jwkPublic`/`jwkToPem -> bytes`/`csr`.
+  `[full]`: RSA, ECDSA, ML-KEM, JWK, CSR. Details (all algorithm names):
+  https://docs.jennifer-lang.dev/libraries/crypto.html
+- **`compress`** - `pack unpack` for `"gzip" "zlib" "deflate"` (level `"fast"
+  "default" "best"`), streaming `compress.Stream` (as `hash`). `unpack(algo, b)`
+  output cap 256 MiB (`"limit"`); `unpackWith(algo, b,
+  UnpackOptions{maxBytes})`. zlib/deflate refuse trailing bytes; gzip reads
+  every member.
+- **`images`** - opaque immutable 8-bit RGBA `images.Image`. `decode(bytes)`/
+  `decodeWith(bytes, DecodeOptions{maxPixels})` (PNG/JPEG/GIF; 64 Mpx, tiny 8
+  Mpx; `"limit"`), `info(bytes) -> Info{format, width, height}`, `encode("png" |
+  "jpeg" | "gif", img[, quality])`; `create(w, h[, color])`/`fromPixels(w, h,
+  rgba)`; `width height`/`pixel(img, x, y) -> Color{r, g, b, a}`/
+  `pixels(img)` (RGBA)/`colorPixels` (RGB)/`alphaPixels`; `rgb`/
+  `hex("#rrggbb[aa]")` (`Color{}` omitted `a` is 0); `crop`/`resize(img, w,
+  h[, "catmullrom" | "bilinear" | "nearest"])` (0 keeps aspect)/`fit rotate flip
+  grayscale threshold dither fill`/`draw(dst, src, x, y)`. No `setPixel`: edit
+  `pixels`, `fromPixels`.
+- **`archive`** - tar/zip/tar.gz over `bytes`: `pack unpack` of `list of
+  Entry{name, data, mode, mtime}`. `unpack` refuses absolute names, `..`,
+  special files (`unpackWith(format, b, UnpackOptions{skipSpecial: true})` skips
+  them).
+- **`encoding`** - `isAscii lenBytes lenRunes`; `toText fromText` with `hex
+  base32 base64 base64-url ascii85 z85 quoted-printable uri-percent
+  uri-form`(decode canonical only: no line breaks, exact padding, `=XX`; hex
+  either case); text <-> bytes only via `encode`/`decode(codec, ...)`:
+  `utf-8`, `utf-16 utf-32` (`le be` no mark; plain: BOM, else big-endian),
+  `ascii`, `iso-8859-*`, `windows-*`, `macintosh`, `ebcdic`; strict, exact
+  names. Request parsers `parseForm(text)`/`parseCookies(header)`/
+  `parseMultipart(contentType, body)` (malformed `"encoding"`, caps `"limit"`).
+- **`uuid`** - `v4()` (crypto-grade)/`v7()` (time-ordered, not secret), `parse
+  isValid version`, `NIL`.
+- **`meta`** - `VERSION BUILD SYSMODDIR CAPABILITIES`, `hasCapability(name)`
+  (`"net" "exec" "sql"`); `call(name, args...)`/`defined(name)`, `callMain
+  definedMain` (in the entry program: a module calls its host's handlers).
+- **`testing`** - `run(name)` (catches `exit`),
+  `assertEqual`/.../`assertThrows`/`assertThrowsArgs(name, args, kind)` (kind
+  `"assertion"`), `results reset`, `report` (`text tap junit`). `jennifer test`
   builds on it.
-- **`kv`** - in-process key/value store with TTL: `open()` / `openFile(path)` ->
-  `kv.Store`; `set(store, k, v, ttl)` / `add` / `get` / `has` / `keys(store[,
-  prefix])` / `delete` / `touch` / `incr(store, k, delta)` (signed delta; an
-  absent key starts at 0, created without TTL) / `close`; `setValue` / `getValue` share an opaque
-  value (a `json.Value`) without copying (in-memory only). A `Store` is a handle:
-  copies, `spawn`ed tasks and modules share one map (thread-safe, `incr` atomic),
-  the shared mutable state a `.j` module cannot hold. A malformed `openFile`
-  file is kind `"kv"`, as is a flush finding the file changed, deleted or
-  created by another writer since this store read or wrote it (nothing
-  written; reopen); a `<path>.lock` held past 15 s is `"timeout"`; misuse (a negative `ttl`, ...) is `"runtime"`.
-
-For exact signatures see the hosted
-[cheatsheet](https://jennifer-lang.dev/libraries/cheatsheet.html) or the
-[per-library pages](https://jennifer-lang.dev/libraries/index.html).
+- **`kv`** - in-process key/value store with TTL: `open()`/`openFile(path)` ->
+  `kv.Store`; `set(store, k, v, ttl)`/`add get has`/`keys(store[,
+  prefix])`/`delete touch`/`incr(store, k, delta)`/`close`; `setValue
+  getValue` share an opaque `json.Value` uncopied (in-memory only). A `Store` is
+  a handle: copies, `spawn`ed tasks and modules share one map (thread-safe,
+  `incr` atomic), the shared mutable state a `.j` module cannot hold. `"kv"`:
+  malformed file, or another writer changed it (nothing written; reopen);
+  `<path>.lock` held >15 s: `"timeout"`; misuse (negative `ttl`): `"runtime"`.
+  Details: https://docs.jennifer-lang.dev/libraries/kv.html
 
 ## Module library (Jennifer-coded, brought in with `import`)
 
-Distributable `.j` modules that ship with Jennifer: ordinary Jennifer source,
-distinct from the Go libraries above. They live in the system module dir, so
-`import "NAME.j";` resolves with no path (`import "./NAME.j" as NAME;` for a
-local copy); address them as `NAME.fn(...)` / `NAME.Struct`. Conventions for
-every entry below:
+Bundled `.j` modules (Jennifer source, unlike the Go libraries above) in the
+system module dir: `import "NAME.j";` (`import "./NAME.j" as NAME;` for a local
+copy), then `NAME.fn(...)` / `NAME.Struct`. Conventions for every entry:
 
-- **`[full]`** marks a module (or part) that needs the default (full)
-  `jennifer` binary: networking, `term`, `sql`, RSA / ECDSA. Everything else
-  also runs on the constrained `jennifer-tiny` build.
-- **Builders are value-semantic:** they return the updated value, so thread it
-  (`$f = feed.add($f, $e);`). Inside a function that is an in-place update;
-  at top level or in a `try` each call copies the whole value, so prefer the
-  bulk form (`addAll`, `setMany`, ...) where one exists.
-- **Errors** are `Error{kind: "<module>"}`, except in the protocol clients
-  `acme amqp graphql imap jsonrpc ldap mcp memcache mqtt ntp oauth pop redis
-  rest s3 smtp snmp soap webdav zmq`: each
-  throws one struct of its own for every error of its kind (`rest.HttpError`,
-  `smtp.SmtpError`, ...; `kind` + `message` + the server's status / codes as
-  fields, see its docs). Read fields only after matching `kind`; a param typed
-  `Error` does not accept them. Also `ical.IcalError`, `vcard.VcardError`,
-  `web.WebError`.
-- **Strict:** malformed replies, files and options throw (no silent default
-  or clamp). Credentials need TLS unless opted in: `allowInsecureAuth`
-  (`imap` `pop` `ldap` `smtp` Options), `allowInsecureHttp` (`graphql`
-  `jsonrpc` `soap` `mcp` `s3` `webdav` clients, `acme.connectWith`).
-  Bytes APIs for 8-bit mail: `imap.fetchBytes` / `pop.retrieveBytes`.
-- Names that are keywords are avoided: `listObjects` / `readDir`, not `list`.
+- **`[full]`**: module (or part) needing the default (full) `jennifer` binary:
+  networking, `term`, `sql`, RSA/ECDSA. The rest also runs on `jennifer-tiny`.
+- **Builders are value-semantic:** they return the updated value; thread it (`$f
+  = feed.add($f, $e);`). In a function that updates in place; at top level or in
+  a `try` each call copies the whole value, so prefer bulk forms (`addAll`,
+  `setMany`, ...).
+- **Errors** are `Error{kind: "<module>"}`, except protocol clients `acme amqp
+  graphql imap jsonrpc ldap mcp memcache mqtt ntp oauth pop redis rest s3 smtp
+  snmp soap webdav zmq`: each throws one struct of its own for every error of
+  its kind (`rest.HttpError`, `smtp.SmtpError`, ...; `kind` + `message` + the
+  server's status/codes as fields). Read fields only after matching `kind`; a
+  param typed `Error` does not accept them. Also `ical.IcalError`,
+  `vcard.VcardError`, `web.WebError`.
+- **Strict:** malformed replies, files and options throw (no silent default or
+  clamp). Credentials need TLS unless opted in: `allowInsecureAuth` (`imap`
+  `pop` `ldap` `smtp` Options), `allowInsecureHttp` (`graphql` `jsonrpc` `soap`
+  `mcp` `s3` `webdav` clients, `acme.connectWith`). 8-bit mail as bytes:
+  `imap.fetchBytes pop.retrieveBytes`.
+- Keyword names avoided: `listObjects readDir`, not `list`.
 
-- **`acme`** `[full]` - ACME (RFC 8555) client for Let's Encrypt and compatible
-  CAs: `connect(directoryUrl, accountKey)` -> `register(client, email)` ->
-  `order(client, domains)` -> `authorization` + `challenge(kind, authz)` ->
-  HTTP-01 `keyAuthorization(client, token)` / DNS-01 `dnsRecord(client, token)`
-  -> `accept` + `pollAuthorization` -> `finalize(client, order, csr, ...)` (a
-  `crypto.csr`) -> `downloadCertificate`. JWS `RS256` / `ES256`. Test against a
-  staging endpoint first.
+- **`acme`** `[full]` - ACME (RFC 8555) client: `connect(directoryUrl,
+  accountKey)` -> `register(client, email)` -> `order(client, domains)` ->
+  `authorization` + `challenge(kind, authz)` -> HTTP-01
+  `keyAuthorization(client, token)`/DNS-01 `dnsRecord(client, token)` ->
+  `accept` + `pollAuthorization` -> `finalize(client, order, csr, ...)`
+  (`crypto.csr`) -> `downloadCertificate`.JWS `RS256 ES256`.
 - **`amqp`** `[full]` - AMQP 0-9-1 (RabbitMQ). `connect(amqp.options(host, user,
-  password))` (`withPort` / `withVhost`) -> `Conn` (bad credentials: `AmqpError`
-  scope `"connection"`, `replyCode` 403); `declareQueue(c, name, durable) ->
-  QueueInfo{name, messageCount, consumerCount}` / `declareQuorumQueue` /
-  `declareExchange` / `bindQueue`; `publish(c, exchange, routingKey, body)` /
-  `publishText` / `publishWith(..., Properties)`; `get(c, queue, autoAck) ->
-  Message{empty, deliveryTag, exchange, routingKey, body}` (loop until `empty`);
-  consumer: `qos(c, prefetchCount)` (before `consume`; 0 = no limit), blocking
-  `receiveDelivery`; `ack` / `nack`; confirms `confirmSelect` / `waitConfirm`
-  (once per publish, oldest first; batching is fine, `multiple` acks counted);
-  `publishMandatory(c, exchange, routingKey, body, props)`: an unroutable message
-  makes its `waitConfirm` throw `AmqpError` scope `"return"`, `replyCode` 312;
-  `close` (discards unread confirms). One channel, SASL PLAIN,
-  `Options.security` a `transport.Security` (no `Starttls`).
-- **`ansi`** - terminal styling as string wrappers: `color(s, name)` /
-  `bgColor` / `style(s, name)` (bold / dim / italic / underline / reverse) /
-  `color256` / `bgColor256` / `rgbToColor256(r, g, b)` / `rgb` / `strip`, plus
-  shortcuts (`ansi.red(s)`, `ansi.bold(s)`); wrappers nest. Off unless a TTY;
-  `NO_COLOR` disables, `FORCE_COLOR` forces.
-- **`args`** - declarative CLI parser over `os.ARGS`: `parser(prog, help) -> Parser` then
-  `flag` / `intFlag` / `floatFlag` / `boolFlag` (long, short, default, help),
-  `countFlag` (`-vvv`), `listFlag` (repeatable), `positional` /
-  `positionalOpt` / `positionalList` / `positionalList1` / `positionalN`,
-  `required(p)` / `choices(p, allowed)`, `command(p, name, help, sub)`,
-  `version(p, ver)`. `parse($p, os.ARGS) -> Result`, read with `asString` /
-  `asInt` / `asFloat` / `asBool` / `asList` / `count` / `has` (+ `$r.command`).
-  `-h` / `--help` / `--version` set `$r.done` with `$r.helpText` to print; bad
-  input throws. `dispatch($r, handlers)` runs the chosen subcommand's `func(r as
-  Result)` from a `map of string to func`.
-- **`barcode`** - barcodes as images (`label` emits printer commands instead).
-  `encode(symbology, data, opts) -> Symbol`: `"qr"` (`opts.ecLevel` L/M/Q/H),
-  `"datamatrix"`, `"code128"` / `"code93"` / `"ean13"` / `"ean8"` / `"upca"` /
-  `"upce"` / `"itf"` / `"code39"` / `"gs1-128"`. Render `svg(sym, opts)` /
-  `png(sym, opts) -> bytes` / `terminal(sym)` (2D) / `matrix(sym) -> list of list
-  of bool`; `defaults()` -> `Options` (scale / height / quiet / ecLevel / colours
-  / humanReadable).
-- **`bloom`** - Bloom filter of strings: `new(size, hashes)` /
-  `optimal(n, fpr)`, `add` / `addAll`, `mightContain(f, item)` (no false
-  negatives), `serialize` / `deserialize`, `union` / `merge` (same shape).
-- **`cron`** - cron expressions, a pure calculator (no clock): `parse(expr) ->
-  Schedule`, `matches(schedule, t)`, `next(schedule, after) -> time.Time`. Five
-  fields with `*` `,` `-` `/n`, month / day names, `@daily` / `@hourly` / ...
-  macros. Scheduling is your own `spawn` + `time.sleep` loop.
-- **`csv`** - RFC 4180, strict: `parse(s)` / `format(rows)`, `parseWith` /
-  `formatWith` (any one-character delimiter), `toRecords` / `fromRecords`
-  (header-keyed maps), `formatSafe(rows)` (defuses spreadsheet formulas), a
-  `Dialect` (`dialect(delim)` -> `parseDialect` / `formatDialect`: delimiter,
-  quote, comment, trim, `width` 0 = as the first record / n / -1 = any),
-  streaming `reader` / `readRow` / `writer` / `writeRow` over an `fs.File`.
-  Malformed quoting, ragged records and mismatched record keys throw `csv`
-  errors with line and column; `format` joins records with CRLF.
+  password))` (`withPort withVhost`) -> `Conn`; `declareQueue(c, name, durable)
+  -> QueueInfo{name, messageCount, consumerCount}`/`declareQuorumQueue
+  declareExchange bindQueue`; `publish(c, exchange, routingKey, body)`/
+  `publishText`/`publishWith(..., Properties)`/`publishMandatory(c,
+  exchange, routingKey, body, props)`; `get(c, queue, autoAck) -> Message{empty,
+  deliveryTag, exchange, routingKey, body}` (loop until `empty`); `qos(c,
+  prefetchCount)` before `consume`, blocking `receiveDelivery`; `ack nack`;
+  `confirmSelect waitConfirm` (once per publish); `close`. `AmqpError`
+  scope/`replyCode`: `"connection"` 403 bad credentials, `"return"` 312
+  unroutable mandatory. `Options.security`: no `Starttls`. Details:
+  https://docs.jennifer-lang.dev/modules/amqp.html
+- **`ansi`** - string wrappers: `color(s, name)`/`bgColor`/`style(s, name)`
+  (bold/dim/italic/underline/reverse)/`color256 bgColor256`/`rgbToColor256(r,
+  g, b)`/`rgb strip`, shortcuts (`ansi.red(s)`, `ansi.bold(s)`); nest. Off
+  unless a TTY; `NO_COLOR FORCE_COLOR`.
+- **`args`** - CLI parser over `os.ARGS`: `parser(prog, help) -> Parser`, then
+  `flag intFlag floatFlag boolFlag` (long, short, default, help), `countFlag`
+  (`-vvv`), `listFlag`, `positional positionalOpt positionalList positionalList1
+  positionalN`, `required(p)`/`choices(p, allowed)`, `command(p, name, help,
+  sub)`, `version(p, ver)`. `parse($p, os.ARGS) -> Result`: `asString asInt
+  asFloat asBool asList count has`, `$r.command`; `-h`/`--help`/`--version`
+  set `$r.done` + `$r.helpText`; bad input throws. `dispatch($r, handlers)` runs
+  the subcommand's `func(r as Result)` from a `map of string to func`.
+- **`barcode`** - barcodes as images. `encode(symbology, data, opts) -> Symbol`:
+  `"qr"` (`opts.ecLevel` L/M/Q/H), `"datamatrix"`, `"code128" "code93" "ean13"
+  "ean8" "upca" "upce" "itf" "code39" "gs1-128"`. `svg(sym, opts)`/`png(sym,
+  opts) -> bytes`/`terminal(sym)` (2D)/`matrix(sym) -> list of list of bool`;
+  `defaults()` -> `Options` (`ecLevel`, scale, colours, ...).
+- **`bloom`** - Bloom filter of strings: `new(size, hashes)`/`optimal(n,
+  fpr)`, `add addAll`, `mightContain(f, item)` (no false negatives), `serialize
+  deserialize`, `union merge` (same shape).
+- **`cron`** - pure calculator: `parse(expr) -> Schedule`, `matches(schedule,
+  t)`, `next(schedule, after) -> time.Time`. Five fields, `*` `,` `-` `/n`,
+  month/day names, `@daily @hourly`/... Run your own `spawn` + `time.sleep`
+  loop.
+- **`csv`** - RFC 4180, strict: `parse(s)`/`format(rows)` (CRLF), `parseWith
+  formatWith` (one-char delimiter), `toRecords fromRecords` (header-keyed maps),
+  `formatSafe(rows)` (defuses formulas), `dialect(delim)` -> `Dialect` for
+  `parseDialect formatDialect` (quote, comment, trim, `width` 0 = first
+  record/n/-1 = any), streaming `reader readRow writer writeRow` over an
+  `fs.File`. Bad quoting, ragged records, mismatched keys throw `csv` with line
+  and column.
 - **`docblock`** - the `/** ... */` doc-comment format (summary, description,
-  `@param` / `@field` / `@return` / `@throws` / `@since` / `@deprecated` /
-  `@see` / `@example` / `@internal` / `@module`, types in `{...}`):
-  `parse(source) -> FileDoc` with `Diagnostic`s for drift / orphans.
-- **`doctree`** - the document tree `markdown` / `rst` / `myst` build, and its
-  renderers. A `Node` (`kind`, `children`, `attrs`) is walked with `typeOf` /
-  `children` / `text` / `level` / `attr` / `get` / `findAll` / `has`.
-  `render("html" | "xhtml" | "ansi", doc)`, `renderHtml(doc, HtmlOptions{
-  allowRawHtml, xhtml})`; `renderPdf(doc, opts) -> bytes` / `renderPdfDoc ->
-  pdf.Document` / `layoutPdf -> PdfResult{doc, missing}` with `pdfDefaults()`
-  -> `PdfOptions` (page size, standard-14 fonts, embedded faces `bodyFace` /
-  `boldFace` / `italicFace` / `monoFace` / `headingFace` (`pdf.LoadedFont`)
-  with `...Fallbacks` lists, metadata, `bookmarkLevel`, `headingStyles`,
-  `admonitionLabels`, `images`, `imageDpi`); a character no font of its role
-  has is drawn as `unencodable` and listed in `missing`
-  (`MissingGlyph{char, codepoint, role, pageNr, y, context}`); `pageBreak()`. Kinds beyond Markdown: `line_block` / `line`,
-  `footnote` / `citation` / `footnote_ref` / `citation_ref`, `def_desc`, `figure` / `caption` / `legend`, `topic`,
-  `rubric`, `container`, `span` / `cite` / `abbr` / `line_break` /
-  `html_inline`; `id` / `class` attrs reach the HTML, lists take `start` /
-  `enumtype`, tables `headerRows`, cells `colspan` / `rowspan`. PDF images: put
-  `pdf.loadImage` results in `PdfOptions.images` keyed by URL (a lone-image
-  paragraph is drawn; otherwise `[alt]` text).
-- **`dot`** - Graphviz DOT text: `digraph(name)` / `graph(name)`, `node` /
-  `nodeWith(g, id, attrs)`, `edge(g, src, dst)` / `edgeWith`, `graphAttr` /
-  `nodeAttr` / `edgeAttr`, `render(g)`. Layout is Graphviz's job.
-- **`dotenv`** - `.env` files: `parse(text)` / `read(path) -> map`, `load(path)`
+  `@param @field @return @throws @since @deprecated @see @example @internal
+  @module`, types in `{...}`): `parse(source) -> FileDoc` with `Diagnostic`s for
+  drift/orphans.
+- **`doctree`** - the document tree `markdown rst myst` build, and its
+  renderers. A `Node` (`kind`, `children`, `attrs`) is walked with `typeOf
+  children text level attr get findAll has`. `render("html" | "xhtml" | "ansi",
+  doc)`, `renderHtml(doc, HtmlOptions{ allowRawHtml, xhtml})`; `renderPdf(doc,
+  opts) -> bytes`/`renderPdfDoc -> pdf.Document`/`layoutPdf ->
+  PdfResult{doc, missing}`, `pdfDefaults()` -> `PdfOptions` (fonts, embedded
+  faces `bodyFace`/... as `pdf.LoadedFont`, `images` keyed by URL from
+  `pdf.loadImage`, metadata, ...); a char no font of its role has is drawn
+  `unencodable` and listed in `missing` (`MissingGlyph`); `pageBreak()`. Details
+  (also the node kinds `rst myst` add):
+  https://docs.jennifer-lang.dev/modules/doctree.html
+- **`dot`** - Graphviz DOT text: `digraph(name)`/`graph(name)`, `node`/
+  `nodeWith(g, id, attrs)`, `edge(g, src, dst)`/`edgeWith`, `graphAttr
+  nodeAttr edgeAttr`, `render(g)`.
+- **`dotenv`** - `.env` files: `parse(text)`/`read(path) -> map`, `load(path)`
   (also `os.setEnv`). Cascade `.env` -> `.env.local` -> `.env.<profile>` ->
-  `.env.<profile>.local`, a real env var always winning: `readCascade(dir,
-  profile)` / `resolve` / `loadCascade` (sets only unset keys) / `autoload(dir)`
-  (profile from `JENNIFER_ENV`). `#` comments, `export`, single / double
-  quotes (double: escapes, multi-line), backward `${VAR}` interpolation.
-- **`feed`** - RSS 2.0 and Atom 1.0. `Feed{title, link, updated, entries,
-  author, categories}` of `Entry` (+ `Enclosure{url, length, type}` for
-  podcasts); `feed(title, link)` / `entry(title, link)` / `add` / `addAll` /
-  `feedUpdated` / `entryId` / `entryPublished` / `entrySummary` /
-  `entryContent` / `entryAuthor` / `entryCategory` / `entryEnclosure` /
-  `hasEnclosure`; `build("rss" | "atom", f)` / `parse(text)` / `kind(text)`.
-  Safe on untrusted feeds.
-- **`flatdb`** - a crash-atomic JSON file store (small data, not a database).
-  `open(path) -> DB` (empty if absent) / `openWith(path, maxBytes)` /
-  `openString(text)` (read-only); JSON Pointer `get` / `getOr(db, ptr, fallback)` /
-  `has` / `keys` / `length` / `set` / `append` / `remove`; `$db = flatdb.save($db)`
-  (temp + fsync + rename; throws on a conflicting writer) / `saveWith(db, opts)`
-  (`SaveOptions{pretty, backup}` from `saveDefaults()`; backup = `<path>.bak`) /
-  `saveAs(db, path)`. Several writers: `update(path, transform)` runs a
-  locked read-modify-write (`func(db as DB) -> DB`, done well inside the 120 s
-  stale window), `updateWith(path, waitMs, transform)`; raw `lock` (5 s) /
-  `lockWith(path, waitMs)` / `unlock`.
-- **`font`** - TrueType / OpenType parser: `parse(b)` / `open(path) -> Font`;
-  `unitsPerEm` / `name` / `advance(f, cp)` / `kern(f, l, r)` / `ascender` /
-  `descender` / `lineGap` / `capHeight` / `xHeight`; `glyphPath(f, cp)` (SVG
-  `d`) / `glyph(f, cp) -> Glyph`. `glyf` and CFF outlines (incl. CID-keyed);
-  no shaping, `CFF2`, variable axes or hinting.
-- **`gpio`** - Deprecated (removed in 0.29.0): use the `gpio` library
-  (`gpio.open(path) -> gpio.Chip`). Linux sysfs GPIO, pin-keyed: `setup(pin, "in" | "out")` /
-  `write(pin, 0 | 1)` / `read(pin)` / `release(pin)`. A pin is the BCM number
-  on the Pi header chip (found by label; its sysfs base, 512+ since Linux 6.2,
-  is added); `useChip(label | GLOBAL | AUTO)` overrides. Root
-  `/sys/class/gpio`, overridable with `JENNIFER_GPIO_BASE`.
-- **`graphql`** `[full]` - `client(endpoint)`, `bearer` / `basic` / `header` /
-  `withCA` / `withSkipVerify` / `withTimeout` / `withRetries` / `withBackoff`;
-  `query(c, query, variables) -> json.Value` (data under `/data`; an `errors`
-  array, even on HTTP 200, throws). `tryQuery` returns the envelope for partial
-  data (`hasErrors` / `errorMessages` / `errorCodes`); `queryNamed` /
-  `tryQueryNamed` add `operationName`. Retries apply to queries, never
+  `.env.<profile>.local`, real env vars win: `readCascade(dir, profile)`/
+  `resolve loadCascade` (unset keys only)/`autoload(dir)` (profile from
+  `JENNIFER_ENV`).
+- **`feed`** - RSS 2.0/Atom 1.0. `Feed{title, link, updated, entries, author,
+  categories}` of `Entry` (+ `Enclosure{url, length, type}`); `feed(title,
+  link)`/`entry(title, link)`/`add addAll feedUpdated entryId entryPublished
+  entrySummary entryContent entryAuthor entryCategory entryEnclosure
+  hasEnclosure`; `build("rss" | "atom", f)`/`parse(text)`/`kind(text)`.
+- **`flatdb`** - crash-atomic JSON file store (small data). `open(path) -> DB`
+  (empty if absent)/`openWith(path, maxBytes)`/`openString(text)` (read-only);
+  JSON Pointer `get`/`getOr(db, ptr, fallback)`/`has keys length set append
+  remove`; `$db = flatdb.save($db)`(atomic; throws on a conflicting
+  writer)/`saveWith(db, opts)`(`SaveOptions{pretty, backup}` from
+  `saveDefaults()`; backup `<path>.bak`)/`saveAs(db, path)`. Several writers:
+  `update(path, transform)` (locked read-modify-write, `func(db as DB) -> DB`,
+  120 s stale window), `updateWith(path, waitMs, transform)`; raw `lock` (5
+  s)/`lockWith(path, waitMs)`/`unlock`.
+- **`font`** - TrueType/OpenType parser: `parse(b)`/`open(path) -> Font`;
+  `unitsPerEm name`/`advance(f, cp)`/`kern(f, l, r)`/`ascender descender
+  lineGap capHeight xHeight`; `glyphPath(f, cp)` (SVG `d`)/`glyph(f, cp) ->
+  Glyph`.`glyf`/CFF outlines; no shaping, `CFF2`, variable axes, hinting.
+- **`graphql`** `[full]` - `client(endpoint)`, `bearer basic header withCA
+  withSkipVerify withTimeout withRetries withBackoff`; `query(c, query,
+  variables) -> json.Value` (data under `/data`; an `errors` array throws, even
+  on 200). `tryQuery` returns the envelope (`hasErrors errorMessages
+  errorCodes`); `queryNamed tryQueryNamed` add `operationName`. Never retries
   mutations.
-- **`html`** - build and render escaped HTML5: `element(tag, attrs, children)` /
-  `text(s)` / `raw(s)` / `attr(n, v)` / `boolAttr(name)`, `render` /
-  `renderAll` / `renderXhtml` / `renderAllXhtml`; `escape(s)` (text and quoted
-  attributes); `safeUrl(url)` (http / https / mailto, else `"#"`: gate every
-  data-driven `href` / `src`). Tolerant `parse(src)` into the same `Node`,
-  queried with `get(node, sel)` / `findAll` / `has` (`/`-paths, `*`,
-  `name[k]`) + `attrOf` / `hasAttr`.
-- **`http`** `[full]` - HTTP/1.1 client; only `http://` / `https://` URLs.
-  `request(method, url, headers, body)` and `get` / `post(url, contentType,
-  body, headers)` / `put` / `patch` / `delete` / `head` / `options` ->
-  `Response{status, statusText, headers, body}` (headers lowercased;
-  `header(resp, name)`). Policy: `send(method, url, headers, body, Options{
-  timeoutMs, maxBytes, maxRedirects, maxRetries, backoffMs, tlsOptions,
-  allowCrossOriginRedirect, allowInsecureRedirect})` follows redirects,
-  retries 429 / 5xx (`Retry-After`: seconds or HTTP-date), keeps cookies;
-  `sendBytes(..., body as bytes, Options) -> BytesResponse` is its bytes twin,
-  `getBytes(url, headers)` the download shortcut. `timeoutMs` / `maxBytes`: 0
-  the default (30 s / 64 MiB), `math.MAX_INT` none, negative throws `"http"`;
-  `tlsOptions` is a `net.TLSOptions` (`caCert` replaces the system roots). A
-  transport failure is a `net.NetError` with `sent` / `replied` set; a reply
-  cut short is `"closed"`, a malformed one `"http"`. Keep-alive:
-  `connect(url, options) -> Session`, `exchange(s, method, path, headers,
-  body) -> Exchange{response, session}` (thread `$s = $x.session;`),
-  `close`. `basic(user, pass)`; Digest (RFC 7616): `sendDigest(method, url,
-  headers, body, options, user, password)` answers a 401 challenge,
-  `digestAuthorization(challenge, method, url, user, password, body)` builds
-  the header. Deprecated (removed in 0.29.0): `requestWith`, `requestTls`,
-  `requestWithTls`, `requestRawBody`, `requestRawBodyTls`, `requestBytes`,
-  `requestWithBytes`, `TlsOptions` / `Options.tls` (both set throws).
-- **`ical`** - iCalendar (RFC 5545): a `Calendar` of `Event` / `Todo`.
-  `calendar()`, `event(uid, start, end, summary)`, `describe` / `locate` / `withAllDay` / `withZone(ev, tzid)` /
-  `recur(ev, ical.rule(...))` / `addRdate` / `addExdate` / `withOrganizer` /
-  `addAttendee(ev, attendee(...))` / `addAlarm(ev, alarm(...))` / `add` /
-  `addTodo`; `occurrences(ev, max)` expands FREQ / INTERVAL / COUNT / UNTIL +
-  RDATE - EXDATE; `encode(cal)` / `parse(text)` round-trip.
-- **`idna`** - `toAscii(domain)` / `toUnicode` (Punycode, `münchen.de` <->
-  `xn--mnchen-3ya.de`) / `isAscii`; enforces label and domain lengths.
-- **`imap`** `[full]` - IMAP4rev1. `connect(opts) -> Session`; `folders(s,
-  pattern)`, `status(s, folder)`, `selectFolder`, `search(s, criteria)` ->
-  UIDs, `fetch(s, uid)` (raw) / `fetchMessage` (`mime.Part`) / `fetchPartial`;
-  `addFlags` / `removeFlags` / `flags` / `copy` / `move` / `append` /
-  `createFolder` / expunge; `logout`, `fetchAll(opts, folder)`. Messages are
-  addressed by stable UID. `criteria() -> Criteria` filters server-side (`subject` / `from`
-  / `to` / `text`, `since` / `before`, flags, size) and client-side
-  (`subjectRegex` / `hasAttachments`). IDLE: `idle(s)` -> `receiveNotification`
-  / `pollNotification` (`EXISTS` / `EXPUNGE` / `RECENT`) -> `done`.
-- **`ipnet`** - IPv4 / IPv6: `parseAddress(s) -> Address` (v4-mapped folds to
-  v4), `toString` (RFC 5952), `version` / `equal` / `unmap` / `next` / `prev` /
-  `compare`; `parse(cidr) -> Network`, `contains`, `netmask` / `broadcast`,
-  `networkString`, `hostCount`, `firstUsable` / `lastUsable`, `hosts` /
-  `split(net, prefix)` (capped 65536, kind `"limit"`), `aggregate`, `overlaps` / `subnetOf`;
-  `scope(addr) -> Scope` enum (`Global` / `Private` / `Loopback` /
-  `LinkLocal` / `Multicast` / `Unspecified` / `Reserved`) + `isGlobal` /
-  `isPrivate` / ... predicates.
-- **`jsonl`** - JSON Lines: `encode(records)` / `decode(text) -> list of
-  json.Value` (errors name the line), `readFile` / `writeFile` / `appendFile`,
-  streaming `openReader` / `hasMore` / `readRecord` / `closeReader` and
-  `writer` / `writeValue` / `closeWriter` over an `fs.File`.
-- **`jsonrpc`** `[full]` - JSON-RPC 2.0. `client(endpoint)` /
+- **`html`** - escaped HTML5: `element(tag, attrs, children)`/`text(s)`/
+  `raw(s)`/`attr(n, v)`/`boolAttr(name)`, `render renderAll renderXhtml
+  renderAllXhtml`; `escape(s)` (text, quoted attributes);
+  `safeUrl(url)`(http/https/mailto, else `"#"`; gate data-driven `href src`).
+  Tolerant `parse(src)` -> `Node`, `get(node, sel)`/`findAll has` (`/
+  `-paths, `*`, `name[k]`), `attrOf hasAttr`.
+- **`http`** `[full]` - HTTP/1.1 client; only `http://`/`https://` URLs.
+  `request(method, url, headers, body)`, `get`/`post(url, contentType, body,
+  headers)`/`put patch delete head options` -> `Response{status, statusText,
+  headers, body}` (headers lowercased; `header(resp, name)`). `send(method, url,
+  headers, body, Options{timeoutMs, maxBytes, maxRedirects, maxRetries,
+  backoffMs, tlsOptions, allowCrossOriginRedirect, allowInsecureRedirect})`
+  follows redirects, retries 429/5xx (`Retry-After`), keeps cookies;
+  `sendBytes(..., body as bytes, Options) -> BytesResponse`, `getBytes(url,
+  headers)`. `timeoutMs maxBytes` 0=30 s/64 MiB; `tlsOptions` a `net.TLSOptions`
+  (`caCert` replaces system roots). Transport failure: `net.NetError` (`sent
+  replied`); reply cut short `"closed"`, malformed `"http"`. Keep-alive:
+  `connect(url, options) -> Session`, `exchange(s, method, path, headers, body)
+  -> Exchange{response, session}` (thread `$s = $x.session;`), `close`.
+  `basic(user, pass)`; Digest `sendDigest(method, url, headers, body, options,
+  user, password)`, `digestAuthorization`. Details:
+  https://docs.jennifer-lang.dev/modules/http.html
+- **`ical`** - iCalendar (RFC 5545): `Calendar` of `Event Todo`. `calendar()`,
+  `event(uid, start, end, summary)`, `describe locate withAllDay`/
+  `withZone(ev, tzid)`/`recur(ev, ical.rule(...))`/`addRdate addExdate
+  withOrganizer`/`addAttendee(ev, attendee(...))`/`addAlarm(ev,
+  alarm(...))`/`add addTodo`; `occurrences(ev, max)`; `encode(cal)`/
+  `parse(text)`.
+- **`idna`** - `toAscii(domain)`/`toUnicode` (Punycode, `münchen.de` <->
+  `xn--mnchen-3ya.de`)/`isAscii`.
+- **`imap`** `[full]` - IMAP4rev1, messages by stable UID. `connect(opts) ->
+  Session`; `folders(s, pattern)`, `status(s, folder)`, `selectFolder`,
+  `search(s, criteria)` -> UIDs, `fetch(s, uid)` (raw)/`fetchMessage`
+  (`mime.Part`)/`fetchPartial`; `addFlags removeFlags flags copy move append
+  createFolder`/expunge; `logout`, `fetchAll(opts, folder)`. `criteria() ->
+  Criteria`: server-side `subject from to text`, `since before`, flags, size;
+  client-side `subjectRegex hasAttachments`. IDLE: `idle(s)` ->
+  `receiveNotification pollNotification` (`EXISTS EXPUNGE RECENT`) -> `done`.
+- **`ipnet`** - IPv4/IPv6: `parseAddress(s) -> Address` (v4-mapped folds to v4),
+  `toString` (RFC 5952), `version equal unmap next prev compare`; `parse(cidr)
+  -> Network`, `contains`, `netmask broadcast`, `networkString`, `hostCount`,
+  `firstUsable lastUsable`, `hosts`/`split(net, prefix)` (>65536: `"limit"`),
+  `aggregate`, `overlaps subnetOf`; `scope(addr) -> Scope` (`Global Private
+  Loopback LinkLocal Multicast Unspecified Reserved`), `isGlobal isPrivate`/....
+- **`jsonl`** - JSON Lines: `encode(records)`/`decode(text) -> list of
+  json.Value` (errors name the line), `readFile writeFile appendFile`, over an
+  `fs.File`: `openReader hasMore readRecord closeReader`, `writer writeValue
+  closeWriter`.
+- **`jsonrpc`** `[full]` - JSON-RPC 2.0. `client(endpoint)`/
   `clientWith(endpoint, headers)`, `call(c, method, params) -> json.Value`,
   `notify`. `handle(requestBody) -> replyBody` dispatches to top-level `func
-  NAME(params as json.Value)` (batches capped at 1000, notifications, reserved
-  error codes); transport-agnostic.
-- **`jwt`** - JWT (RFC 7519). `sign(alg, claims, key)` / `signWithKid`,
-  `verify(alg, token, key)`, `decode` / `header` (unverified: never authorize on
+  NAME(params as json.Value)` (batches <=1000, notifications, reserved error
+  codes); transport-agnostic.
+- **`jwt`** - JWT (RFC 7519). `sign(alg, claims, key)`/`signWithKid`,
+  `verify(alg, token, key)`, `decode header` (unverified: never authorize on
   them). Claims a `json.Value` object, `key` always `bytes`. `HS256/384/512`
-  (key >= 32 / 48 / 64 bytes: `crypto.randBytes(32)`), `RS*`, `ES*`, `EdDSA`. `verify` pins the expected
-  algorithm, checks `exp` / `nbf`, compares constant-time; rejections are kind
-  `"value"`. `verifyWith(alg, token, key, Policy{iss, aud, requireExp, leeway})` /
-  `verifyLeeway`; key by `kid`: `verifyWithKeys(alg, token, keysByKid)` /
-  `verifyJwks(alg, token, jwksJson)` / `jwksKeys` (convert once), with
-  `verifyWithKeysWith` / `verifyJwksWith` taking a `Policy`. For OIDC / CI
-  tokens use a `Policy`: without one `iss` / `aud` are unchecked and a missing
-  `exp` passes. An `ES*` key must be on the alg's curve; `leeway` is 0..86400.
-  `RS*` / `ES*` are `[full]`.
-- **`kvstore`** `[full]` - one key/value API over selectable backends with
-  per-key TTL: `Store` enum from `memcacheStore(mc)` / `redisStore(rc)` /
-  `inProcessStore()` / `fileStore(path)` (it imports `memcache` and `redis`,
-  hence `[full]`); `set(store, key, value, ttlSec)` / `get`
-  / `delete` / `touch` / `incrWindow`. `ttlSec <= 0` means no expiry. Backs
-  `session` and `ratelimit`.
+  (key >= 32/48/64 bytes: `crypto.randBytes(32)`), `RS*`, `ES*` (key on the
+  alg's curve), `EdDSA`; `RS* ES*` `[full]`. `verify` pins the algorithm, checks
+  `exp nbf`, constant-time; rejections kind `"value"`. `verifyWith(alg, token,
+  key, Policy{iss, aud, requireExp, leeway})`/`verifyLeeway`; by `kid`:
+  `verifyWithKeys(alg, token, keysByKid)`/`verifyJwks(alg, token, jwksJson)`/
+  `jwksKeys` (convert once), Policy forms `verifyWithKeysWith verifyJwksWith`.
+  OIDC/CI tokens need a `Policy`: else `iss aud` are unchecked and a missing
+  `exp` passes. Details: https://docs.jennifer-lang.dev/modules/jwt.html
+- **`kvstore`** `[full]` - one key/value API over backends, per-key TTL: `Store`
+  enum from `memcacheStore(mc)`/`redisStore(rc)`/`inProcessStore()`/
+  `fileStore(path)` (imports `memcache` and `redis`, hence `[full]`);
+  `set(store, key, value, ttlSec)`/`get delete touch incrWindow`. `ttlSec <=
+  0` = no expiry. Backs `session` and `ratelimit`.
 - **`label`** - label printing. `new(w, h)` in mm, then `text(label, x, y,
-  TextOptions{height, points, rotation, bold}, content)` / `barcode(label, type,
+  TextOptions{height, points, rotation, bold}, content)`/`barcode(label, type,
   x, y, BarcodeOptions{height, moduleWidth, ratio, checkDigit, errorLevel,
-  hideText}, data)` (code128 / ean13 / ean8 / itf / code39 /
-  gs1-128 / datamatrix / qr) / `box` / `image(label, x, y, name)` / `quantity`.
-  `render(label, device)` with `zpl(dpi)` (Zebra) or `cab()` / `cabWith(
-  CabSetup)`; `send(host, port, rendered)` `[full]` writes to port 9100.
+  hideText}, data)`/`box`/`image(label, x, y, name)`/`quantity`.
+  `render(label, device)` with `zpl(dpi)` (Zebra) or `cab()`/
+  `cabWith(CabSetup)`; `send(host, port, rendered)` `[full]` (port 9100).
 - **`ldap`** `[full]` - LDAP v3 client and server. `connect(address, security)
-  -> Conn` / `connectWith(address, security, net.TLSOptions)` (`caCert` for a
-  private CA), `bind(c, dn, password)` (a DN with an empty password is refused) / `bindSasl(c, algo, user, password) ->
+  -> Conn`/`connectWith(address, security, net.TLSOptions)`, `bind(c, dn,
+  password)` (empty password refused)/`bindSasl(c, algo, user, password) ->
   Result{code, matchedDn, message}`, `search(c, baseDn, scope, filter, attrs)`
-  (`SCOPE_BASE` / `SCOPE_ONE` / `SCOPE_SUB`) / `searchPaged` -> `list of Entry`
-  (`values` / `firstValue`). Filters: `parseFilter("(&(a=b)(c=*))")` or
-  `equals` / `present` / `substrings` / `allOf` / `anyOf` / `negate` / ...;
-  escape values with `escapeFilterValue`. Writes `add` / `modify` (`change`,
-  `MOD_ADD` / `MOD_DELETE` / `MOD_REPLACE`) / `delete` / `modifyDn` /
-  `passwordModify`; `unbind` / `close`. Server: `directory(entries)` /
-  `openDirectory(path)`, `entry` / `group` / `password`, `addEntry` /
-  `modifyEntry` / `getEntry`, `serve(dir, address)`.
-- **`log`** - leveled structured logging. `new(format, level) -> Logger` (stdout) /
-  `toStderr` / `toFile(format, level, path)` / `toSyslog(level, address, app)` `[full]`;
-  levels `debug` < `info` < `warn` < `error`, formats `text` / `logfmt` /
-  `json`. `debug(logger, message, fields)` / `info` / `warn` / `error` /
-  `at(logger, level, ...)`; `with(logger, fields)` adds persistent fields;
-  `fatal` logs and exits 1.
-- **`markdown`** - CommonMark 0.31.2 reader (644 / 652 spec examples) plus GFM
-  tables, task lists, `~~strike~~`, footnotes, `~sub~` / `^sup^` /
-  `==mark==`, definition lists, GitHub alerts (`admonition` nodes), `{#id
-  .class}` attributes. `parse(md) -> doctree.Node` (walk and render with
-  `doctree.*`; `markdown.render` / `renderPdf` do not exist). Shortcuts:
-  `toHtml(md)` (raw HTML escaped; `toHtmlWith(md, opts)` with `allowRawHtml`
-  for trusted input), `toXhtml`, `toAnsi`, `toPdf` / `toPdfWith(md,
-  doctree.PdfOptions)`. Authoring: `header` / `style` / `link` / `bullets` /
-  `numbered` / `codeBlock` / `table`, `tablePretty`.
+  (`SCOPE_BASE SCOPE_ONE SCOPE_SUB`)/`searchPaged` -> `list of Entry` (`values
+  firstValue`); filters `parseFilter("(&(a=b)(c=*))")` or `equals present
+  substrings allOf anyOf negate`/..., values via `escapeFilterValue`; `add
+  modify` (`change`, `MOD_ADD MOD_DELETE MOD_REPLACE`)/`delete modifyDn
+  passwordModify`; `unbind close`. Server: `directory(entries)`/
+  `openDirectory(path)`, `entry group password`, `addEntry modifyEntry
+  getEntry`, `serve(dir, address)`. Details:
+  https://docs.jennifer-lang.dev/modules/ldap.html
+- **`log`** - leveled structured logging: `new(format, level) -> Logger`
+  (stdout)/`toStderr`/`toFile(format, level, path)`/`toSyslog(level,
+  address, app)` `[full]`; levels `debug` < `info` < `warn` < `error`, formats
+  `text logfmt json`. `debug(logger, message, fields)`/`info warn error`/
+  `at(logger, level, ...)`; `with(logger, fields)`; `fatal` exits 1.
+- **`markdown`** - CommonMark 0.31.2 + GFM tables, task lists, `~~strike~~`,
+  footnotes, `~sub~ ^sup^`/`==mark==`, definition lists, GitHub alerts
+  (`admonition` nodes), `{#id .class}` attributes. `parse(md) -> doctree.Node`
+  (walk and render with `doctree.*`; no `markdown.render renderPdf`). Shortcuts:
+  `toHtml(md)` (raw HTML escaped; `toHtmlWith(md, opts)` with `allowRawHtml` for
+  trusted input), `toXhtml`, `toAnsi`, `toPdf`/`toPdfWith(md,
+  doctree.PdfOptions)`. Authoring: `header style link bullets numbered codeBlock
+  table`, `tablePretty`.
 - **`mcp`** `[full]` - Model Context Protocol (stateless JSON-RPC). Server:
-  `server(name, version)`, `addTool(s, name, desc, inputSchema, handler)` /
-  `addResource` / `addPrompt` (handlers are top-level `func NAME(arg as
-  json.Value)`), schemas via `schema()` + `property(...)`; `handle(server,
-  body) -> reply` (only registered handlers run), `serveStdio(server)`. Client:
-  `connect(endpoint)` / `connectWith`, `initialize` / `listTools` /
-  `callTool(c, name, args)` / `listResources` / `readResource` / `listPrompts`
-  / `getPrompt`. No SSE / sessions.
+  `server(name, version)`, `addTool(s, name, desc, inputSchema, handler)`/
+  `addResource addPrompt` (handlers top-level `func NAME(arg as json.Value)`),
+  `schema()` + `property(...)`; `handle(server, body) -> reply`,
+  `serveStdio(server)`. Client: `connect(endpoint)`/`connectWith`, `initialize
+  listTools`/`callTool(c, name, args)`/`listResources readResource
+  listPrompts getPrompt`. No SSE/sessions.
 - **`memcache`** `[full]` - memcached text protocol. `connect(opts) -> Session`;
-  `set(s, key, value, exptime)` / `add` / `get` (`""` if absent) / `delete` /
-  `incr` / `decr` (`-1` if absent) / `touch` / `quit`; `setBytes` /
-  `getBytes`; `getMulti(s, keys)`; `gets -> Item{value, cas, found}` + `cas(...,
-  casId)` -> `"stored"` / `"exists"` / `"not_found"`.
-- **`mime`** - MIME messages. Build `text(contentType, body)` / `attachment` /
-  `attachmentBytes(filename, contentType, data)` / `multipart(subtype,
-  boundary, parts)` / `withHeader`, then `encode(part)`; `parse(text)`, read with
-  `headerValue` / `body` (charset-decoded) / `parts` / `contentType` /
-  `address`, take apart with `walk` / `attachments` / `textBodies` /
-  `findParts(part, mediaType)` + `data` / `filename` / `disposition` /
-  `isAttachment`. RFC 2231 filenames and RFC 2047 words (`encodeWord` /
-  `decodeWord`) round-trip.
-- **`mqtt`** `[full]` - MQTT 3.1.1 (`mqtts` = TLS). `connect(opts) -> Client`, `subscribe` /
-  `publish(c, topic, message)` / `publishBytes` (QoS 0), `publishQos1` /
-  `subscribeQos1`, retained messages, Last-Will via `connectWith`, blocking
-  `receive(c) -> Message{topic, payload}`, `poll(c, timeoutMs)` (0 or 1),
-  `ping` / `disconnect` / `reconnect`. A message that arrives while
-  `publishQos1` / `subscribe` wait for their ack is queued on the `Client`
-  (shared by its copies; `receive` / `poll` return it first; over 1000: `"limit"`).
-- **`multipart`** - `multipart/form-data`: `field(name, value)` / `file(name,
-  filename, contentType, data)` -> `Part`; `build(parts)` / `buildWith(parts,
+  `set(s, key, value, exptime)`/`add get` (`""` if absent)/`delete incr decr`
+  (`-1` if absent)/`touch quit`; `setBytes getBytes`; `getMulti(s, keys)`; `gets
+  -> Item{value, cas, found}` + `cas(..., casId)` -> `"stored" "exists"
+  "not_found"`.
+- **`mime`** - MIME messages. Build `text(contentType, body)`/`attachment`/
+  `attachmentBytes(filename, contentType, data)`/`multipart(subtype, boundary,
+  parts)`/`withHeader`, `encode(part)`; `parse(text)`, `headerValue body`
+  (charset-decoded)/`parts contentType address`, `walk attachments textBodies`/
+  `findParts(part, mediaType)`, `data filename disposition isAttachment`. RFC
+  2231/2047 (`encodeWord decodeWord`) round-trip.
+- **`mqtt`** `[full]` - MQTT 3.1.1 (`mqtts` = TLS). `connect(opts) -> Client`,
+  `subscribe`/`publish(c, topic, message)`/`publishBytes` (QoS 0),
+  `publishQos1 subscribeQos1`, retained, Last-Will via `connectWith`, blocking
+  `receive(c) -> Message{topic, payload}`, `poll(c, timeoutMs)` (0 or 1), `ping
+  disconnect reconnect`. Messages arriving in an ack wait queue on the
+  `Client` (shared, returned first; >1000 or 64 MiB: `"limit"`).
+- **`multipart`** - `multipart/form-data`: `field(name, value)`/`file(name,
+  filename, contentType, data)` -> `Part`; `build(parts)`/`buildWith(parts,
   boundary)` -> `Built{contentType, body}`; `parse(contentType, body) -> list of
-  Part` (over 1000 parts, a 16 KiB part header or 1 KiB name: `"limit"`), `text(part)` / `isFile(part)`. Bodies are `bytes`.
-- **`myst`** - MyST Markdown (Sphinx / Jupyter Book) on top of `markdown`:
-  directives in ```` ```{name} ```` or `:::{name}` fences (options as `:key:`
-  lines or a `---` block); roles (`{sub}`, `{abbr}`, `{kbd}`, `{math}`,
-  `{pep}`, `{rfc}`); `(label)=` targets with `{ref}` / `{numref}` / `{eq}` /
-  `{doc}`; `%` comments; `+++`; `frontMatter(src)`; `$x$` / `$$...$$ (label)`.
-  Directives: admonitions, `code-block`, `math`, `image`, `figure`, `topic` /
-  `sidebar`, `rubric`, quotes, `container`, `table`, `list-table`,
-  `csv-table` (over 20,000 cells: kind `"limit"`), `raw` (escaped unless
-  `allowRawHtml`), `contents`, `eval-rst`.
-  `parse` / `parseWith(src, Options{strict, allowRawHtml, noDollarMath,
-  noColonFence})`, `toHtml` / `toHtmlWith` / `toXhtml` / `toAnsi`, `check(src) ->
-  list of Diagnostic`. Write MyST as a raw `'...'` string: cooked strings
-  interpolate `{...}`.
-- **`ntp`** `[full]` - SNTP client: `query(host)` (port 123, 5 s) /
-  `queryWith(address, timeoutMs)` -> `Result{serverTime, offset, delay}`.
-  Measures only; does not set the clock. No reply is kind `"timeout"`.
+  Part` (>1000 parts, 16 KiB part header or 1 KiB name: `"limit"`),
+  `text(part)`/`isFile(part)`. Bodies are `bytes`.
+- **`myst`** - MyST Markdown on `markdown`: directives in ```` ```{name} ```` or `:::{name}`
+  fences (options as `:key:` lines or a `---` block), roles (`{sub}`, `{abbr}`,
+  `{kbd}`, `{math}`, `{pep}`, `{rfc}`), `(label)=` targets with `{ref}`/
+  `{numref}`/`{eq}`/`{doc}`, `%` comments, `+++`, `frontMatter(src)`,
+  `$x$`/`$$...$$ (label)`; Sphinx directives (`raw` escaped unless
+  `allowRawHtml`, `csv-table` >20,000 cells `"limit"`, `eval-rst`). `parse`/
+  `parseWith(src, Options{strict, allowRawHtml, noDollarMath, noColonFence})`,
+  `toHtml toHtmlWith toXhtml toAnsi`, `check(src) -> list of Diagnostic`. Write
+  MyST as raw `'...'` (cooked strings interpolate `{...}`). Details:
+  https://docs.jennifer-lang.dev/modules/myst.html
+- **`ntp`** `[full]` - SNTP client: `query(host)` (port 123, 5
+  s)/`queryWith(address, timeoutMs)` -> `Result{serverTime, offset,
+  delay}`.Never sets the clock. No reply: `"timeout"`.
 - **`oauth`** `[full]` - OAuth2 -> `Token`: `clientCredentials[Jwt]`,
-  `clientAssertion`, `refresh`, `deviceStart` -> `deviceWait` / one
-  `devicePoll`, PKCE `authorize[With]` -> `awaitCode` / `codeFromRedirect` ->
-  `exchangeCode[With]`, `jwtBearer(cfg, jwtAssertion(...))`,
-  `discover[Metadata][Tls](issuer, ...)`; `Config.tls` (`http.TlsOptions`,
-  private CA); presets: `@jennifer/oauthext`.
-  `isExpired`, `save`/`load` (0600). Feeds `sasl`.
+  `clientAssertion`, `refresh`, `deviceStart` -> `deviceWait devicePoll`, PKCE
+  `authorize[With]` -> `awaitCode codeFromRedirect` -> `exchangeCode[With]`,
+  `jwtBearer(cfg, jwtAssertion(...))`, `discover[Metadata][Tls](issuer, ...)`;
+  `Config.tls` (`http.TlsOptions`, private CA); `isExpired`, `save`/`load`
+  (0600). Presets: `@jennifer/oauthext`. Feeds `sasl`.
 - **`orm`** `[full]` - data mapper over `sql` (structs have no methods). Schema:
-  `schema(table, pk, dialect)` + `column(s, name, kind)` (`Dialect.Mysql` /
-  `Postgres`; `ColumnKind.Int` / `String` / `Float` / `Bool` / `Bytes`), with
-  `notNull` / `unique` / `autoIncrement` / `withDefault`. CRUD on a `Session`
-  (`session(conn)` / `transaction(tx)`): `insert` / `find` / `update` /
-  `delete` / `all`; records are `map of string to string`. Queries:
-  `from($schema)` -> `select` / `count` / `aggregate` -> `where` / `orWhere` /
-  `whereIn` / `whereNotIn` / `whereNull` / `whereBetween` -> `join` /
-  `leftJoin` / `rightJoin` -> `groupBy` + `having` -> `orderBy` / `limit` /
-  `offset` / `page` -> `toSql($q) -> Rendered{sql, params}`; identifiers and
-  operators are allowlisted. DDL `createTable` / `dropTable` / `addColumn` /
-  `createIndex` / `addForeignKey`; relations `belongsTo` / `oneToOne` / `oneToMany`
-  / `manyToMany` + `joinRelation`, eager `with` + `load -> Result` (`rows` /
-  `related` / `relatedOne`); `upsert` / `insertMany` / `insertReturning` /
-  `updateWhere` / `deleteWhere` / `save`, `first` / `exists` / `findBy` /
-  `pluck`.
+  `schema(table, pk, dialect)` + `column(s, name, kind)` (`Dialect.Mysql
+  Postgres`; `ColumnKind.Int String Float Bool Bytes`), with `notNull unique
+  autoIncrement withDefault`. CRUD on a `Session` (`session(conn)`/
+  `transaction(tx)`): `insert find update delete all`; records are `map of
+  string to string`. Queries: `from($schema)` -> `select count aggregate` ->
+  `where orWhere whereIn whereNotIn whereNull whereBetween` -> `join leftJoin
+  rightJoin` -> `groupBy` + `having` -> `orderBy limit offset page` ->
+  `toSql($q) -> Rendered{sql, params}`; identifiers and operators allowlisted.
+  DDL `createTable dropTable addColumn createIndex addForeignKey`; relations
+  `belongsTo oneToOne oneToMany manyToMany` + `joinRelation`, eager `with` +
+  `load -> Result` (`rows related relatedOne`); `upsert insertMany
+  insertReturning updateWhere deleteWhere save`, `first exists findBy pluck`.
+  Details: https://docs.jennifer-lang.dev/modules/orm.html
 - **`password`** - `schema()` (16 chars, four classes) with `withLength(s, lo,
-  hi)` / `withClasses` / `withMinimums` / `withSymbolSet` /
-  `withoutAmbiguous`; `generate(schema)` (crypto-grade, length <= 4096),
-  `validate(schema, pw) -> Report{valid, reasons}`, `complexity(pw) ->
-  Strength{length, classes, poolSize, entropy, label}`.
-- **`pdf`** - PDF generation. `document()`, `page(w, h)`, `text(pg, x, y, font,
-  size, str)` / `line` / `rect(pg, x, y, w, h, filled)` / `color(pg, r, g, b)`,
-  `addPage`, `render(doc) -> bytes` (byte-identical, no timestamp); `info(doc,
-  key, value)` + `pdfDate(t)`, `bookmark(doc, page, y, title, level)`; batch
-  forms `bookmarks(doc, list of OutlineEntry)` / `addImages` / `addFonts` /
-  `addPages` (one module call, not one per item).
-  Standard-14 fonts; points, origin bottom-left. Non-Latin text: `loadFont` /
-  `addFont` / `textUnicode` (TrueType only); `textGlyphs` / `DrawOp.Glyphs`
-  draw glyph ids already mapped. Images: `loadImage` / `addImage` /
-  `drawImage` (PNG, JPEG, GIF), `imageFrom(name, images.Image)`. Layout:
-  `measureText` / `measureTextUnicode`, `wrapText`, `textBlock(pg, x, y, width,
-  font, size, leading, str, align)` / `textBlockUnicode` (left / right /
-  center / justify).
+  hi)`/`withClasses withMinimums withSymbolSet withoutAmbiguous`;
+  `generate(schema)` (crypto-grade, length <= 4096), `validate(schema, pw) ->
+  Report{valid, reasons}`, `complexity(pw) -> Strength{length, classes,
+  poolSize, entropy, label}`.
+- **`pdf`** - PDF generation; points, origin bottom-left. `document()`, `page(w,
+  h)`, `text(pg, x, y, font, size, str)` (standard-14 fonts)/`line`/`rect(pg,
+  x, y, w, h, filled)`/`color(pg, r, g, b)`, `addPage`, `render(doc) ->
+  bytes`; `info(doc, key, value)` + `pdfDate(t)`, `bookmark(doc, page, y, title,
+  level)`; batch `bookmarks(doc, list of OutlineEntry)`/`addImages addFonts
+  addPages`. Non-Latin: `loadFont addFont textUnicode` (TrueType); `textGlyphs
+  DrawOp.Glyphs`. Images: `loadImage addImage drawImage` (PNG, JPEG, GIF),
+  `imageFrom(name, images.Image)`. Layout: `measureText measureTextUnicode`,
+  `wrapText`, `textBlock(pg, x, y, width, font, size, leading, str, align)`/
+  `textBlockUnicode` (left/right/center/justify). Details:
+  https://docs.jennifer-lang.dev/modules/pdf.html
 - **`plot`** - SVG charts. `chart(series, opts)` over `series(name, xs, ys)`
-  (`mark` line / points / both / area, `dash`, `yErr`, `shape`); wrappers `line`
-  / `scatter` / `bar(labels, values, opts)` / `histogram(data, bins, opts)` /
-  `bars` (grouped / stacked). `defaults() -> Options`: size, title, `xLabel` / `yLabel`,
-  colours, fonts, margins, `legendPos`, `xLog` / `yLog`, `xDate` /
-  `dateFormat`, tooltips; `hline` / `vline` reference lines; `floats(ints)`;
+  (`mark` line/points/both/area, `dash`, `yErr`, `shape`); `line scatter`/
+  `bar(labels, values, opts)`/`histogram(data, bins, opts)`/`bars`
+  (grouped/stacked). `defaults() -> Options` (`xLabel yLabel`, `legendPos`,
+  `xLog yLog`, `xDate dateFormat`, ...); `hline vline`; `floats(ints)`;
   `save($svg, path)`.
-- **`pop`** `[full]` - POP3: `connect(opts) -> Session`, `stat` / `count` /
-  `sizes` / `retrieve(s, n)` / `deleteMessage` / `top(s, n, lines)` / `reset` /
-  `noop` / `quit`, `uidl` / `uidlOne` (stable ids), `fetchAll(opts)`. Auth per
-  `Options.auth`: USER/PASS, APOP, XOAUTH2, CRAM-MD5, SCRAM-*, `"auto"`.
-- **`ratelimit`** `[full]` - `fixedWindow(store, limit, window)` / `slidingWindow` ->
-  `Limiter` over a `kvstore.Store`; `check(l, key) -> Result{allowed,
-  remaining, retryAfter, resetSeconds}` (records) / `peek` (does not).
-- **`redis`** `[full]` - RESP2. `connect(opts) -> Session`; `get` / `set` / `del`
-  / `exists` / `incr` / `decr` / `ping`, `setBytes` / `getBytes`, hashes
-  `hset` / `hget` / `hgetAll` / `hdel`, lists `lpush` / `rpush` / `lrange` /
-  `llen` / `lpop`, sets `sadd` / `srem` / `smembers` / `sismember` / `scard`;
-  `command(s, args) -> Reply{kind, str, num, items}`; pub/sub `subscribe` /
-  `psubscribe` / `unsubscribe` / `punsubscribe` (each returns once the server
-  confirmed; messages read meanwhile stay queued) / `publish` / `receiveMessage`; `pipeline`, `multi` / `exec` /
-  `discard`; `scan` (use it, not `keys`, in production). `-ERR` throws.
-- **`resque`** `[full]` - Resque-compatible jobs on Redis: `enqueue(s, queue,
-  class, args)`, `reserve(s, queues) -> Job{queue, class, args}` (empty `class`
-  when drained) / `reserveBlocking(s, queues, timeoutSec)`, `queueLength` /
-  `queues` / `size` / `fail`. The dispatch loop is yours.
-- **`rest`** `[full]` - REST over `http` + `json`: `client(baseUrl)` with
-  `bearer` / `basic` / `withHeader` / `withTimeout` / `withRedirects` /
-  `withRetries` / `withBackoff` / `withCA` / `withSkipVerify`; `get(c, path, query)`
-  / `post(c, path, contentType, body)` / `put` / `patch` / `delete` ->
-  `Response`; `getJson` / `postJson` / `putJson` / `patchJson`; `paginate(c,
-  path, query, maxPages)` (Link `rel="next"`, same origin only) /
-  `paginateCursor`. Path values are not escaped: `uri.encode` each segment.
-- **`ringbuffer`** - bounded FIFO of strings that overwrites the oldest:
-  `new(capacity)`, `push` / `pop` (O(1)), `first` / `last` / `size` /
-  `capacity` / `isEmpty` / `isFull` / `toList` (oldest first). Read `first`
-  before `pop`.
-- **`rst`** - reStructuredText into a `doctree.Node`: sections, all list kinds,
-  literal / doctest blocks, quotes, line blocks, transitions, docinfo, grid and
-  simple tables (spans), roles, references and targets, footnotes, citations,
-  substitutions. Directives: admonitions, `code` / `code-block`, `math`,
-  `image`, `figure`, `topic` / `sidebar`, `rubric`, quotes, `container`,
-  `class`, `raw`, `contents`, `list-table`, `csv-table` (`:class:` / `:name:`
-  on each). `parse` / `parseWith(src, Options{...})`, `toHtml` / `toHtmlWith` /
-  `toXhtml` / `toAnsi`, `title(doc)`, `docinfo(doc)`; lenient: `check(src) ->
-  list of Diagnostic{severity, line, message}`, `Options{strict: true}` throws the first. A substitution expanding past the
-  node budget is kind `"limit"`. No file I/O
-  (`include` refused).
-- **`s3`** `[full]` - S3-compatible storage (AWS / MinIO / R2 / B2), SigV4, path-style.
-  `connect(endpoint, region, accessKey, secretKey)`; `get` / `put` / `delete` /
-  `head` / `copy` / `listObjects` (+ `objectKeys(xml)`, `isTruncated` /
-  `nextContinuationToken` / `listObjectsFrom`) -> `http.Response`; `getBytes` /
-  `putBytes`, `putWith` / `putBytesWith(..., contentType, metadata)`;
-  multipart `createMultipartUpload` / `uploadPart` /
-  `completeMultipartUpload` / `abortMultipartUpload`; `errorOf(resp)` ->
-  `S3Error` (`code`, `requestId`); `presign(client, method, bucket, key,
-  expiresSeconds)`. Bucket names are validated and an empty key is refused.
-- **`sasl`** - mail auth mechanisms: `plain(user, pass)` / `loginUser` /
-  `loginPass` / `bearer(user, token)` (XOAUTH2), `cram(user, pass, challenge)`,
-  SCRAM-SHA-1 / -256 `scramStart(algo, user)` -> `scramClientFirst` ->
-  `scramClientFinal` -> `scramFinalToken` -> `scramVerify`;
-  `negotiate(advertised)` picks the strongest. SCRAM: iterations 4096..1000000,
-  `m=` refused, no SASLprep.
-- **`screen`** - terminal UIs. Output (both binaries): a cell `Buffer`
-  (`newScreen(rows, cols)`) drawn with `text` / `textColor` / `box` / `fill` /
-  `hline` / `vline` / `set`, batch with `setMany(buf, list of Plot{x, y,
-  cell})` / `textMany(buf, list of Span{x, y, text, color})`; ANSI builders
-  `clear` / `moveTo(x, y)` / `hideCursor` / `enterAlt` / ...; `render(buf)` /
-  `diff(old, new)`. Input `[full]` (`term`): `decodeKey(seq) -> Key{name,
-  char}`, `nextKey` / `begin` / `end` / `size`; non-blocking
-  `startInput() -> Input` + `hasKey` / `pollKey` / `waitKey`. 0-based, clipped;
-  single-width cell text only; control characters are written as spaces.
-- **`semver`** - SemVer 2.0.0: `parse` / `isValid` / `toString`, `compare` /
-  `lt` / `eq` / `gt` / ... / `diff`, `isStable` / `isPrerelease`, `incMajor` /
-  `incMinor` / `incPatch`, `sort` / `rsort`, `coerce` / `clean`; ranges
-  `satisfies(version, range)` (`^`, `~`, comparators, `||`, hyphen, x-ranges),
-  `maxSatisfying` / `minSatisfying`, `minVersion`, `validRange`, `intersects` /
-  `subset` / `gtr` / `ltr` / `outside` / `simplifyRange`.
-- **`session`** `[full]` - server-side sessions over a `kvstore.Store`: a `json.Value`
-  under `sess:ID` with a sliding TTL. `create(store, ttlSec) -> id`, `load` (empty
-  object if absent), `save(store, id, data, ttlSec) -> bool` (false once destroyed /
-  rotated / expired; never adopts a client-sent id), `touch`, `destroy`,
-  `exists`, `rotate(store, id, ttlSec)` (call on login / logout). `ttlSec` >= 1.
-- **`smtp`** `[full]` - `send(opts, from, recipients, message)` (EHLO, STARTTLS /
-  TLS via `Options.security`, auth per `Options.auth`: PLAIN / LOGIN / XOAUTH2 /
-  CRAM-MD5 / SCRAM-*, MAIL / RCPT / DATA); `message` from `mime`. Cleartext auth
-  refused unless `allowInsecureAuth`. Several messages: `open(opts) ->
-  Session`, `sendOn(s, from, recipients, message)`, `close`.
-- **`snmp`** `[full]` - SNMP v1 / v2c client and agent. `client(host,
-  community)` / `clientWith(address, community, version, timeoutMs, retries)`;
-  `get(c, oids)` / `getNext` / `set(c, varbinds)` / `walk(c, rootOid)` -> `list
-  of Varbind{oid, type, value, number}` (`integer` / `octetString` / `oid` /
-  `counter32` / `gauge32` / `timeTicks` / `counter64` / ...). Agent: `agent(community, version,
-  bindings)`, `serve(a, address)` / `serveOn(a, socket, stop)`; `intVar` /
-  `stringVar` / `oidVar` / `varbind`; `VERSION1` / `VERSION2C`. No v3 / traps.
-  No answer after the retries is kind `"timeout"`.
-- **`soap`** `[full]` - SOAP 1.1 / 1.2 over HTTP. `connect(endpoint)` ->
-  `Client` (`withVersion(c, "1.2")` / `withBasicAuth` / `withToken` /
-  `withDigestAuth` / `withHeader` / `withSoapHeader(c, block)` / `withCA` /
-  `withMaxBytes`);
-  `call(c, action, body as xml.Value) -> xml.Value` (first Body child; a fault
-  throws) / `send -> Reply{status, envelope, isFault, fault}`; `operation(ns,
-  name, params, qualified)` builds, `values(node)` reads. Server: `handle(body,
-  action, handler)` / `handleWith(..., understood)` -> `Response{status,
-  contentType, body}`, `handler(req as Request{version, action, headers,
-  body})` returns the result element, `senderFault(reason)` for a Client
-  fault; `requestAction(contentType, soapAction)`. Codec: `envelope(version,
-  headers, body)` / `parse -> Envelope` / `parseFault -> Fault{code, subcode,
-  reason, actor, detail}` / `faultEnvelope`. No WSDL.
-- **`sqlmigrate`** `[full]` - schema migrations over `sql`: `Migration{version,
-  description, up, down}` (DDL strings); `migrate(conn, migrations)` (lexical
-  version order, one transaction each, tracked in `schema_migrations`),
-  `rollbackMigrations(conn, migrations, steps)`, `migrationStatus`. The list is
-  validated before anything runs.
-- **`tengine`** - Go `text/template` subset over a `json.Value`: `newSet()`,
-  `add(set, name, src)`, `render(set, entry, data)`. `.a.b` / `$` / `$var`;
-  `if` / `else if` / `else` (`eq` / `ne` / `lt` / `and` / `or` / `not`), `range`
-  / `with` (+ `else`), `{{ $x := ... }}`, `template` / `block`, comments, `{{-
-  -}}`; pipes `upper` / `lower` / `title` / `trim` / `html` / `urlize` /
-  `default` / `truncate` / `join` / `len` / `printf`. Not auto-escaped: pipe
-  HTML output through `html`. Nesting and output (10 MiB) are capped.
-- **`totp`** - RFC 6238 codes: `generate(secret, opts)` / `verify(secret,
-  code, opts)` (+/-1 step) / `generateAt` / `verifyAt` / `verifyWindow`;
-  `uri(issuer, account, secret, opts)` (`otpauth://`); `generateSecret()` /
-  `generateSecretN(n)` (n >= 10); `hotp(secret, counter)`. Zero `Options` = 6 digits, 30
-  s, SHA-1; else set `digits` / `periodSec` / `algorithm`. Secrets must decode to >= 10 bytes. Replay protection and rate
-  limiting are the caller's job.
-- **`transport`** - `Security { None, Tls, Starttls }`, the `security` field
-  of every socket client's `Options` (`smtp.Options{security:
-  transport.Security.Starttls, ...}`); `encrypted(s)`. `redis` / `amqp` /
-  `mqtt` reject `Starttls`.
-- **`uri`** - RFC 3986: `parse(raw) -> Uri{scheme, user, host, port, path,
-  query, fragment}` (splits, does not validate) / `build(u)`; `encode` /
-  `decode` (`%20`), `encodeForm` / `decodeForm` (`+`); `buildQuery(map)` /
-  `parseQuery(q)`; `resolve(base, ref)`. Bad `%` escapes throw; `parseQuery` over 10000 pairs is `"limit"`.
-- **`validate`** - rules over a `map of string to string`: `required` /
-  `integer` / `number` / `boolean` / `min(n)` / `max(n)` / `minLen` / `maxLen` /
-  `pattern(re)` (anchor it yourself) / `email` / `url` / `datetime(format)` /
-  `oneOf` / `noneOf` / `password(schema)` / `custom(fn, msg)` /
-  `withMessage(r, m)`, in a `map of string to list of Rule`. `check(data,
-  rules) -> list of Failure{field, rule, param, message}`, `ok`, `messages` /
-  `byField`, `localize(errs, templates)`, `checkValue(field, value, rules)`;
-  `ensure` / `ensureValue` throw kind `"validation"`. Absent / blank fields
-  pass every rule but `required`.
-- **`vcard`** - vCard 4.0: `card(formattedName)`, `withName(c, family, given)`
-  / `withFullName` / `withNickname` / `withOrg(c, org, title)` / `addEmail` /
-  `addEmailTyped` / `addPhoneTyped` / `addAddress(c, address(...))` /
-  `withBday` / `withPhoto` / `addCategory` / `withUrl` / `withNote`;
-  `encode(c)` / `encodeAll(cards)` / `parse(text) -> list of Card`.
-- **`web`** `[full]` - HTTP framework over `httpd`. Routes take handler `func`
-  values: `get($app, "/users/:id", showUser)` / `post` / `put` / `patch` /
-  `delete` / `route` (`:param`, trailing `*rest`); `before` middleware,
-  `notFound`, `onError` (a throw becomes a logged 500; a `WebError{kind: "web",
-  message, status}` its 4xx status, a `"limit"` 413, or 500 when it is the
-  request's `allocBudget($app, bytes)`, a per-request
-  `task.setAllocBudget`); HEAD is served by GET.
-  Handlers are `func name(ctx as web.Context)` and run concurrently: never let
-  two write one top-level `def`. Context: `param` / `query` / `rawQuery` /
-  `method` / `path` / `header` / `body` / `bodyJson` / `form` / `formValue` /
-  `multipartForm` (a malformed body throws a 400 `WebError`) / `remoteAddr` / `remoteHost`; replies `text` / `html` / `sendJson` /
-  `redirect` / `respond` / `setHeader` / `serveFile` / `serveDir` / `sendGzip`;
-  `isOpen(ctx)`. Cookies `cookie` / `setCookie` + `CookieOptions`; sessions
-  `sessionId` / `renewSession`; `cors` + `CorsOptions`; `etag`; `basicAuth -> BasicCredentials` /
-  `bearerToken`; CSRF `csrfToken` / `csrfCheck` (non-empty secret; one token
-  per request); `mount($app, prefix, sub)` / `joinRoute`. `run($app, addr)` /
-  `serveOn`; `jennifer serve app.j [--watch]`.
-- **`webapi`** `[full]` - JSON-API layer over `web`. Builder `new() -> Api` / `mount(a,
-  version, path)` / `alias` / `deprecate(a, v, sunset)` / `deprecatedSince(a,
-  v, date)` (`Sunset` / `Deprecation` headers) / `authenticator(a, fn)` /
-  `limiter(a, fn)` / `limitKey(a, fn)` / `get` / `post` / ... with a `Spec{auth
-  (Auth.None / Auth.Bearer), scopes, rules (validate), rateLimit, produces
-  (Produces.Json / Html / Negotiate)}` (`public()` = zero) / `install(a, app,
-  guard)`. Wire the guard with a shim: `func apiGuard(ctx) { return
-  webapi.guard($api, $ctx); }`; `install` makes it every route's handler. It
-  authenticates, rate-limits (429 + `Retry-After`, rejected requests count),
-  then 401 / 400 paging / 403 / 422, then runs the handler; a handler throw is
-  a 500 envelope, rethrown to `web.onError`. `identity` reuses the guard's
-  lookup; `evaluate(spec,
-  identity, data)` is the pure core. Read checked input only through
-  `validated(a, ctx)`. Also `fail` / `notFound` / `denied` / `unauthorized`,
-  `queryData` / `jsonData` / `identity`, `wants` / `negotiate(ctx, offered)`,
-  `page` / `sendPage`, `discovery`.
-- **`webdav`** `[full]` - WebDAV client (Nextcloud, ownCloud, Apache, nginx,
-  NAS). `connect(url)` (paths relative to it) + `withBasicAuth` / `withToken` /
-  `withHeader` / `withCA`; `readDir` / `walk` / `stat` / `exists` ->
-  `Resource{href, path, name, isDir, size, modified, etag, contentType,
-  quotaUsed, quotaAvailable, props}`; `get(c, path, maxBytes) -> bytes`,
-  `put(c, path, data) -> etag`, `putWith(..., PutOptions{contentType, ifMatch,
-  onlyIfNew})`, `mkdir` / `mkdirAll` / `delete` / `move(c, src, dst,
-  overwrite)` / `copy`; any property by Clark name (`clark(ns, local)`) via
-  `propfind(c, path, depth, props)` / `proppatch`; codec `parseMultistatus` /
-  `multistatus`.
-- **`webhook`** `[full]` - HMAC webhooks: `sign(payload, secret)` (`sha256=` hex, the
-  GitHub header) / `verify(payload, signature, secret)`; timestamped
-  `stripeSign` / `stripeVerify`, `slackSign` / `slackVerify`,
-  `timestampedSign` / `timestampedVerify` (reject stale timestamps). Sign the
-  raw body. An empty secret throws. `send(url, payload, secret)`.
-- **`websocket`** `[full]` - RFC 6455 client: `connect(url)` /
-  `connectWith(url, timeoutMs)` / `connectOptions(url, Options{timeoutMs,
-  headers, protocols, caCert, skipVerify})` -> `Conn` (`Conn.protocol`);
-  `send(c, text)` / `sendBytes`, `receive(c) -> Message{kind, text, data}` (kind
-  text / binary / close / pong; pings answered, fragments joined), `ping` /
+- **`pop`** `[full]` - POP3: `connect(opts) -> Session`, `stat count sizes`/
+  `retrieve(s, n)`/`deleteMessage`/`top(s, n, lines)`/`reset noop quit`,
+  `uidl uidlOne` (stable ids), `fetchAll(opts)`. Auth per `Options.auth`:
+  USER/PASS, APOP, XOAUTH2, CRAM-MD5, SCRAM-*, `"auto"`.
+- **`ratelimit`** `[full]` - `fixedWindow(store, limit, window)`/
+  `slidingWindow` -> `Limiter` over a `kvstore.Store`; `check(l, key) ->
+  Result{allowed, remaining, retryAfter, resetSeconds}` (records)/`peek` (does
+  not).
+- **`redis`** `[full]` - RESP2. `connect(opts) -> Session`; `get set del exists
+  incr decr ping`, `setBytes getBytes`, `hset hget hgetAll hdel`, `lpush rpush
+  lrange llen lpop`, `sadd srem smembers sismember scard`; `command(s, args) ->
+  Reply{kind, str, num, items}`; `subscribe psubscribe unsubscribe punsubscribe`
+  (return once confirmed; messages meanwhile stay queued)/`publish
+  receiveMessage`; `pipeline`, `multi exec discard`; `scan` (not `keys`). `-ERR`
+  throws.
+- **`resque`** `[full]` - Resque jobs on Redis: `enqueue(s, queue, class,
+  args)`, `reserve(s, queues) -> Job{queue, class, args}` (empty `class` when
+  drained)/`reserveBlocking(s, queues, timeoutSec)`, `queueLength queues size
+  fail`.
+- **`rest`** `[full]` - REST over `http` + `json`: `client(baseUrl)` + `bearer
+  basic withHeader withTimeout withRedirects withRetries withBackoff withCA
+  withSkipVerify`; `get(c, path, query)`/`post(c, path, contentType, body)`/
+  `put patch delete` -> `Response`; `getJson postJson putJson patchJson`;
+  `paginate(c, path, query, maxPages)` (Link `rel="next"`, same
+  origin)/`paginateCursor`. Paths are not escaped: `uri.encode` each segment.
+- **`ringbuffer`** - bounded string FIFO, overwrites the oldest:
+  `new(capacity)`, `push pop` (O(1)), `first last size capacity isEmpty isFull
+  toList` (oldest first). Read `first` before `pop`.
+- **`rst`** - reStructuredText into a `doctree.Node`: the full body syntax
+  (grid/simple tables with spans, footnotes, citations, substitutions, docinfo)
+  and standard directives (`code-block`, `figure`, `raw`, `list-table`,
+  `csv-table`, `contents`, ...). `parse`/`parseWith(src, Options{...})`,
+  `toHtml toHtmlWith toXhtml toAnsi`, `title(doc)`, `docinfo(doc)`; lenient:
+  `check(src) -> list of Diagnostic{severity, line, message}`, `Options{strict:
+  true}` throws the first. Substitution past the node budget: `"limit"`. No file
+  I/O (`include` refused). Details:
+  https://docs.jennifer-lang.dev/modules/rst.html
+- **`s3`** `[full]` - S3-compatible, SigV4, path-style. `connect(endpoint,
+  region, accessKey, secretKey)`; `get put delete head copy listObjects` (+
+  `objectKeys(xml)`, `isTruncated nextContinuationToken listObjectsFrom`) ->
+  `http.Response`; `getBytes putBytes`, `putWith`/`putBytesWith(...,
+  contentType, metadata)`; `createMultipartUpload uploadPart
+  completeMultipartUpload abortMultipartUpload`; `errorOf(resp)` -> `S3Error`
+  (`code`, `requestId`); `presign(client, method, bucket, key, expiresSeconds)`.
+- **`sasl`** - mail auth: `plain(user, pass)`/`loginUser loginPass`/
+  `bearer(user, token)` (XOAUTH2), `cram(user, pass, challenge)`,
+  SCRAM-SHA-1/-256 `scramStart(algo, user)` -> `scramClientFirst` ->
+  `scramClientFinal` -> `scramFinalToken` -> `scramVerify` (iterations
+  4096..1000000, `m=` refused, no SASLprep); `negotiate(advertised)` picks the
+  strongest.
+- **`screen`** - terminal UIs. Output (both binaries): cell `Buffer`
+  (`newScreen(rows, cols)`), `text textColor box fill hline vline set`, batch
+  `setMany(buf, list of Plot{x, y, cell})`/`textMany(buf, list of Span{x, y,
+  text, color})`; ANSI `clear`/`moveTo(x, y)`/`hideCursor enterAlt`/...;
+  `render(buf)`/`diff(old, new)`. Input `[full]` (`term`): `decodeKey(seq) ->
+  Key{name, char}`, `nextKey begin end size`; non-blocking `startInput() ->
+  Input` + `hasKey pollKey waitKey`. 0-based, clipped; single-width text;
+  control chars drawn as spaces.
+- **`semver`** - SemVer 2.0.0: `parse isValid toString`, `compare lt eq
+  gt`/.../`diff`, `isStable isPrerelease`, `incMajor incMinor incPatch`, `sort
+  rsort`, `coerce clean`; ranges `satisfies(version, range)` (`^`, `~`,
+  comparators, `||`, hyphen, x-ranges), `maxSatisfying minSatisfying`,
+  `minVersion`, `validRange`, `intersects subset gtr ltr outside simplifyRange`.
+- **`session`** `[full]` - server-side sessions over a `kvstore.Store`
+  (`json.Value` under `sess:ID`, sliding TTL): `create(store, ttlSec) -> id`,
+  `load` (empty object if absent), `save(store, id, data, ttlSec) -> bool`
+  (false once destroyed/rotated/expired; never adopts a client-sent id),
+  `touch`, `destroy`, `exists`, `rotate(store, id, ttlSec)` (on login/logout).
+  `ttlSec` >= 1.
+- **`smtp`** `[full]` - `send(opts, from, recipients, message)` (STARTTLS/TLS
+  via `Options.security`, auth via `Options.auth`:
+  PLAIN/LOGIN/XOAUTH2/CRAM-MD5/SCRAM-*); `message` from `mime`. Several
+  messages: `open(opts) -> Session`, `sendOn(s, from, recipients, message)`,
   `close`.
-- **`zmq`** `[full]` - ZeroMQ (ZMTP 3.1) without libzmq; one socket is one TCP
-  connection to one peer. `connect(kind, "host:port")` / `connectWith(kind,
-  address, Options{mechanism, username, password, identity, timeoutMs,
-  maxMessageBytes})` (`defaultOptions()`), or `listen` / `listenWith` ->
-  `Listener` + `accept(l)` per peer. Kinds `PAIR`, `PUB` / `SUB`, `REQ` /
-  `REP`, `DEALER` / `ROUTER`, `PUSH` / `PULL`. `send(sock, frames)` /
-  `sendText`, `receive -> Message{frames, envelope}`, `poll(sock, timeoutMs)`,
-  `text(msg)`, `reply(sock, request, frames)`; `$s = zmq.subscribe($s,
-  prefix)` (SUB gets nothing until subscribed). NULL or PLAIN (needs a
-  password); no CURVE, ipc, inproc or reconnect. Oversize is kind `"limit"`.
-- **Moved to decks in 0.28.0** - `discord`, `gotify`, `influxdb`,
-  `mactelnet`, `mikrotik`, `prometheus`, `slack`, `statsd` and `telegram` are
-  `@jennifer` decks, no longer bundled (see [Decks](#decks-packages)): `jvc
-  add "@jennifer/NAME" ...`, then `import "@jennifer/NAME/" as NAME;`.
-
-Full per-module reference: the hosted
-[module docs](https://jennifer-lang.dev/modules/index.html).
+- **`snmp`** `[full]` - SNMP v1/v2c client and agent. `client(host,
+  community)`/`clientWith(address, community, version, timeoutMs, retries)`;
+  `get(c, oids)`/`getNext`/`set(c, varbinds)`/`walk(c, rootOid)` -> `list
+  of Varbind{oid, type, value, number}` (`integer octetString oid counter32
+  gauge32 timeTicks counter64`/...). Agent: `agent(community, version,
+  bindings)`, `serve(a, address)`/`serveOn(a, socket, stop)`; `intVar
+  stringVar oidVar varbind`; `VERSION1 VERSION2C`. No v3/traps. No answer:
+  `"timeout"`.
+- **`soap`** `[full]` - SOAP 1.1/1.2 over HTTP. `connect(endpoint)` -> `Client`
+  (`withVersion(c, "1.2")`/`withBasicAuth withToken withDigestAuth
+  withHeader`/`withSoapHeader(c, block)`/`withCA withMaxBytes`); `call(c,
+  action, body as xml.Value) -> xml.Value` (first Body child; a fault
+  throws)/`send -> Reply{status, envelope, isFault, fault}`; `operation(ns,
+  name, params, qualified)`, `values(node)`. Server: `handle(body, action,
+  handler)`/`handleWith(..., understood)` -> `Response{status, contentType,
+  body}`, `handler(req as Request{version, action, headers, body})` returns the
+  result element, `senderFault(reason)`, `requestAction(contentType,
+  soapAction)`; codec `envelope parse`/`parseFault -> Fault`/
+  `faultEnvelope`. Details: https://docs.jennifer-lang.dev/modules/soap.html
+- **`sqlmigrate`** `[full]` - `Migration{version, description, up, down}` (DDL
+  strings); `migrate(conn, migrations)` (lexical version order, one transaction
+  each, tracked in `schema_migrations`), `rollbackMigrations(conn, migrations,
+  steps)`, `migrationStatus`.
+- **`tengine`** - Go `text/template` subset over a `json.Value`: `newSet()`,
+  `add(set, name, src)`, `render(set, entry, data)`. `.a.b`/`$`/`$var`;
+  `if`/`else if`/`else` (`eq ne lt and or not`), `range with` (+ `else`),
+  `{{ $x := ... }}`, `template block`, comments, `{{- -}}`; pipes `upper lower
+  title trim html urlize default truncate join len printf`. Not auto-escaped:
+  pipe HTML through `html`.
+- **`totp`** - RFC 6238: `generate(secret, opts)`/`verify(secret, code, opts)`
+  (+/-1 step)/`generateAt verifyAt verifyWindow`; `uri(issuer, account, secret,
+  opts)` (`otpauth://`); `generateSecret()`/`generateSecretN(n)` (n >= 10);
+  `hotp(secret, counter)`. Zero `Options` = 6 digits, 30 s, SHA-1 (`digits
+  periodSec algorithm`). Secrets >= 10 bytes.
+- **`transport`** - `Security { None, Tls, Starttls }`, the `security` field of
+  every socket client's `Options` (`smtp.Options{security:
+  transport.Security.Starttls, ...}`); `encrypted(s)`. `redis amqp mqtt` reject
+  `Starttls`.
+- **`uri`** - RFC 3986: `parse(raw) -> Uri{scheme, user, host, port, path,
+  query, fragment}` (splits, does not validate)/`build(u)`; `encode decode`
+  (`%20`), `encodeForm decodeForm` (`+`); `buildQuery(map)`/`parseQuery(q)`
+  (>10000 pairs: `"limit"`); `resolve(base, ref)`. Bad `%` escapes throw.
+- **`validate`** - rules over a `map of string to string`: `required integer
+  number boolean`/`min(n)`/`max(n)`/`minLen maxLen`/`pattern(re)`
+  (anchor it)/`email url`/`datetime(format)`/`oneOf noneOf`/
+  `password(schema)`/`custom(fn, msg)`/`withMessage(r, m)`, in a `map of
+  string to list of Rule`. `check(data, rules) -> list of Failure{field, rule,
+  param, message}`, `ok`, `messages byField`, `localize(errs, templates)`,
+  `checkValue(field, value, rules)`; `ensure ensureValue` throw `"validation"`.
+  Absent/blank fields pass all but `required`.
+- **`vcard`** - vCard 4.0: `card(formattedName)`, `withName(c, family, given)`/
+  `withFullName withNickname`/`withOrg(c, org, title)`/`addEmail
+  addEmailTyped addPhoneTyped`/`addAddress(c, address(...))`/`withBday
+  withPhoto addCategory withUrl withNote`; `encode(c)`/`encodeAll(cards)`/
+  `parse(text) -> list of Card`.
+- **`web`** `[full]` - HTTP framework over `httpd`. Routes take handler `func`
+  values: `get($app, "/users/:id", showUser)`/`post put patch delete route`
+  (`:param`, trailing `*rest`; HEAD served by GET); `before` middleware,
+  `notFound`, `onError onServerError` (not for 4xx). A throw is a logged 500; a
+  `WebError{kind, message, status}` its 4xx (400 malformed body, `"limit"` 413
+  past a body cap); 500 once the request's `allocBudget($app, bytes)`
+  (per-request `task.setAllocBudget`) is spent. Handlers `func name(ctx as
+  web.Context)` run concurrently: never let two write one top-level `def`.
+  Context: `param query rawQuery method path header body bodyJson form formValue
+  multipartForm remoteAddr remoteHost`; replies `text html sendJson redirect
+  respond setHeader serveFile serveDir sendGzip`; `isOpen(ctx)`. `cookie
+  setCookie` + `CookieOptions`; `sessionId renewSession`; `cors` +
+  `CorsOptions`; `etag`; `basicAuth -> BasicCredentials`/`bearerToken`;
+  `csrfToken csrfCheck`(non-empty secret); `mount($app, prefix, sub)`/
+  `joinRoute`. `run($app, addr)`/`serveOn`; `jennifer serve app.j [--watch]`.
+  Details: https://docs.jennifer-lang.dev/modules/web.html
+- **`webapi`** `[full]` - JSON-API layer over `web`. `new() -> Api`/`mount(a,
+  version, path)`/`alias`/`deprecate(a, v, sunset)`/`deprecatedSince(a, v,
+  date)` (`Sunset Deprecation` headers)/`authenticator(a, fn)`/`limiter(a,
+  fn)`/`limitKey(a, fn)`/`get post`/... with a `Spec{auth (Auth.None /
+  Auth.Bearer), scopes, rules (validate), rateLimit, produces (Produces.Json /
+  Html / Negotiate)}` (`public()` = zero)/`install(a, app, guard)`. Guard shim:
+  `func apiGuard(ctx) { return webapi.guard($api, $ctx); }`; `install` makes it
+  every route's handler (auth, rate limit 429 + `Retry-After`, 401/400/403/422,
+  handler; a handler throw is a 500 envelope rethrown to `web.onError`). Read
+  checked input only via `validated(a, ctx)`; pure core `evaluate(spec,
+  identity, data)`. Also `fail notFound denied unauthorized`, `queryData
+  jsonData identity`, `wants`/`negotiate(ctx, offered)`, `page sendPage`,
+  `discovery`. Details: https://docs.jennifer-lang.dev/modules/webapi.html
+- **`webdav`** `[full]` - WebDAV client. `connect(url)` (paths relative to it) +
+  `withBasicAuth withToken withHeader withCA`; `readDir walk stat exists` ->
+  `Resource{href, path, name, isDir, size, modified, etag, contentType,
+  quotaUsed, quotaAvailable, props}`; `get(c, path, maxBytes) -> bytes` (0=64
+  MiB), `put(c, path, data) -> etag`, `putWith(..., PutOptions{contentType,
+  ifMatch, onlyIfNew})`, `mkdir mkdirAll delete`/`move(c, src, dst,
+  overwrite)`/`copy`; Clark-name properties (`clark(ns, local)`) via
+  `propfind(c, path, depth, props)`/`proppatch`; `parseMultistatus
+  multistatus`.
+- **`webhook`** `[full]` - HMAC: `sign(payload, secret)` (`sha256=` hex, the
+  GitHub header)/`verify(payload, signature, secret)`; `stripeSign
+  stripeVerify`, `slackSign slackVerify`, `timestampedSign timestampedVerify`
+  (reject stale). Sign the raw body; empty secret throws. `send(url, payload,
+  secret)`.
+- **`websocket`** `[full]` - RFC 6455 client: `connect(url)`/`connectWith(url,
+  timeoutMs)`/`connectOptions(url, Options{timeoutMs, headers, protocols,
+  caCert, skipVerify})` -> `Conn` (`Conn.protocol`); `send(c, text)`/
+  `sendBytes`, `receive(c) -> Message{kind, text, data}`
+  (text/binary/close/pong; pings answered, fragments joined), `ping close`.
+- **`zmq`** `[full]` - ZeroMQ (ZMTP 3.1) without libzmq;one socket per peer
+  connection. `connect(kind, "host:port")`/`connectWith(kind, address,
+  Options{mechanism, username, password, identity, timeoutMs, maxMessageBytes})`
+  (`defaultOptions()`), or `listen listenWith` -> `Listener` + `accept(l)` per
+  peer. Kinds `PAIR`, `PUB SUB`, `REQ REP`, `DEALER ROUTER`, `PUSH PULL`.
+  `send(sock, frames)`/`sendText`, `receive -> Message{frames, envelope}`,
+  `poll(sock, timeoutMs)`, `text(msg)`, `reply(sock, request, frames)`; `$s =
+  zmq.subscribe($s, prefix)` (SUB gets nothing until subscribed). NULL or PLAIN
+  (needs a password); no CURVE, ipc, inproc or reconnect. Oversize: `"limit"`.
+  Details: https://docs.jennifer-lang.dev/modules/zmq.html
+- **Decks since 0.28.0, no longer bundled** - `discord`, `gotify`, `influxdb`,
+  `mactelnet`, `mikrotik`, `prometheus`, `slack`, `statsd`, `telegram`: `jvc add
+  "@jennifer/NAME" ...`, `import "@jennifer/NAME/" as NAME;`
+  ([Decks](#decks-packages)).
 
 ## Two complete programs
 

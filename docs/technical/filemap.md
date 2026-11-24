@@ -91,7 +91,7 @@ described in [index.md](index.md#pipeline); this page is the file-level index.
 | `profiling.go` | The optional `Profiler` interface and `eagerCopy` hook. |
 | `diag_runtime_std.go` / `diag_runtime_tiny.go` | Runtime snapshot (goroutines, memory) for the `kill -USR1` diagnostics dump. |
 | `runecursor.go` | The rune cursor (M29.13): a 16-slot table keyed by a string's data pointer and length, so rune-position slices and `indexOf` resume their walk. |
-| `allocbudget.go` | The opt-in per-task allocation budget (M29.3): the counter on the goroutine's `CallChain`, the O(1) size estimate, the charge and the `"limit"` throw. |
+| `allocbudget.go` | The opt-in per-task allocation budget (M29.3): the counter on the goroutine's `CallChain`, the full size of an eager copy and the bounded estimate of a builtin result, the charge and the `"limit"` throw. |
 | `interpreter_test.go` | End-to-end interpreter tests. |
 | `ownership_test.go` | Value semantics on every path of the owned-result and moved-argument copy elisions, across a module boundary too. |
 | `interactive_test.go` | REPL `EvalInteractive` tests. |
@@ -195,7 +195,7 @@ described in [index.md](index.md#pipeline); this page is the file-level index.
 | File | Description |
 | ---- | ----------- |
 | `internal/limits/nesting_std.go` | `MaxNestingDepth = 1000` + `MaxCallDepth = 10000` (`!tinygo`): the recursive-descent nesting cap (language parser + json / toml / xml / yaml / asn1 decoders), also the cap on how deep a value the interpreter builds may nest, and the `evalCall` function-call-depth cap on the default binary; also `MaxCopyChainBytes`, `MaxDecodedNodes`, `MaxRangeElements`, `MaxChannelCapacity`, `MaxMatrixElements`, `MaxTokens`, `MaxSourceBytes` and `MaxAllocBytes` / `MaxStringBytes`. |
-| `internal/limits/nesting_tiny.go` | `MaxNestingDepth = 64` + `MaxCallDepth = 120` (`tinygo`): the same caps lowered to stay below `jennifer-tiny`'s fixed 4 MB stack; the other caps are lowered too. See [tinygo.md](tinygo.md). |
+| `internal/limits/nesting_tiny.go` | `MaxNestingDepth = 64` + `MaxCallDepth = 400` (`tinygo`): the same caps lowered to stay below `jennifer-tiny`'s fixed 4 MB stack; the other caps are lowered too. See [tinygo.md](tinygo.md). |
 | `internal/limits/caperror.go` | `CapError` / `Capf`: a reached cap as a Go error of kind `"limit"`, kept through `%w` wrapping. |
 | `internal/limits/size.go` | Overflow-checked `AddInt` / `MulInt` / `AddInt64` / `MulInt64`, saturating `LimitPlusOne`, and capped readers `ReadAll` / `ReadN` / `ReadDelim` that grow with the data (`TooLargeError`, `ErrTooLarge`). |
 | `internal/dnsconf/dnsconf.go`, `dnsconf_std.go`, `dnsconf_tiny.go`, `files.go`, `wire.go` | Resolver configuration (M29.5): picks resolv.conf / hosts (`JENNIFER_RESOLV_CONF` / `JENNIFER_HOSTS`, `<PREFIX>/etc`, `/etc`), the hint a failed lookup carries without one; `!tinygo` routes `net.DefaultResolver` through an in-process stub (hosts answers, forwarding to the chosen nameservers) and `Query` for `net.lookupWith`'s `dnsServers`. |
