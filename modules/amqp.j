@@ -341,8 +341,11 @@ func fail(msg as string) {
 }
 
 # checkFrameSize rejects a broker-declared frame size outside [0, MAX_FRAME_BYTES]
-# before it is used to size a read. Over the cap is the generic kind "limit".
-func checkFrameSize(n as int) {
+# before it is used to size a read, and once frame-max is negotiated (`frameMax`
+# over 8; 0 before Connection.Tune and when the broker sets no limit) a payload
+# over frameMax - 8 (the 7-byte header and the end octet count). Over either
+# is the generic kind "limit".
+func checkFrameSize(n as int, frameMax as int) {
     if ($n < 0) {
         fail("frame size out of range: {$n}");
     }
@@ -350,6 +353,12 @@ func checkFrameSize(n as int) {
         throw Error{
             kind: "limit",
             message: "amqp: frame size {$n} exceeds the cap of {MAX_FRAME_BYTES} bytes"
+        };
+    }
+    if ($frameMax > 8 and $n > $frameMax - 8) {
+        throw Error{
+            kind: "limit",
+            message: "amqp: frame size {$n} exceeds the negotiated frame-max of {$frameMax} bytes"
         };
     }
     return;
@@ -765,14 +774,14 @@ func writeMethod(
 
 # readFrame reads one framed unit off the socket. waitMs bounds the wait for its
 # first byte (0 = none, for a pushed delivery); the rest of the frame always
-# reads under READ_TIMEOUT_MS.
-func readFrame(socket as net.Conn, waitMs as int) {
+# reads under READ_TIMEOUT_MS. `frameMax` is the negotiated frame-max (0: none).
+func readFrame(socket as net.Conn, waitMs as int, frameMax as int) {
     def first as bytes init readN($socket, 1, $waitMs);
     def h as bytes init binary.concat($first, readN($socket, 6, READ_TIMEOUT_MS));
     def ftype as int init $h[0];
     def channel as int init readShort($h, 1);
     def size as int init readLong($h, 3);
-    checkFrameSize($size);
+    checkFrameSize($size, $frameMax);
     def payload as bytes;
     if ($size > 0) {
         $payload = readN($socket, $size, READ_TIMEOUT_MS);
@@ -787,8 +796,8 @@ func readFrame(socket as net.Conn, waitMs as int) {
 # readMethod reads a method frame and splits out its class / method / args. A
 # broker Connection.Close or Channel.Close (the way a broker reports an error:
 # access refused, queue not found, ...) is thrown with its reply code and text.
-func readMethod(socket as net.Conn, waitMs as int) {
-    def f as Frame init readFrame($socket, $waitMs);
+func readMethod(socket as net.Conn, waitMs as int, frameMax as int) {
+    def f as Frame init readFrame($socket, $waitMs, $frameMax);
     if (not ($f.ftype == FRAME_METHOD)) {
         fail("expected a method frame, got frame type {$f.ftype}");
     }
@@ -837,8 +846,13 @@ func brokerClosed(classId as int, args as bytes) {
 }
 
 # expectMethod reads a method frame and asserts its class / method.
-func expectMethod(socket as net.Conn, classId as int, methodId as int, what as string) {
-    def m as Method init readMethod($socket, READ_TIMEOUT_MS);
+func expectMethod(
+    socket as net.Conn,
+    frameMax as int,
+    classId as int,
+    methodId as int,
+    what as string) {
+    def m as Method init readMethod($socket, READ_TIMEOUT_MS, $frameMax);
     if (not ($m.classId == $classId and $m.methodId == $methodId)) {
         fail("expected " + $what + ", got class {$m.classId} method {$m.methodId}" +
             pendingHint($m));
@@ -862,7 +876,7 @@ func pendingHint(m as Method) {
 # following body frame(s), assembling the whole body. Shared by get (Basic.Get-Ok)
 # and receiveDelivery (Basic.Deliver).
 func readMessageBody(c as Conn) {
-    def hf as Frame init readFrame($c.socket, READ_TIMEOUT_MS);
+    def hf as Frame init readFrame($c.socket, READ_TIMEOUT_MS, $c.frameMax);
     if (not ($hf.ftype == FRAME_HEADER) or len($hf.payload) < 12) {
         fail("expected a content-header frame");
     }
@@ -880,7 +894,7 @@ func readMessageBody(c as Conn) {
     def pending as list of bytes init [];
     def got as int init 0;
     while ($got < $bodySize) {
-        def bf as Frame init readFrame($c.socket, READ_TIMEOUT_MS);
+        def bf as Frame init readFrame($c.socket, READ_TIMEOUT_MS, $c.frameMax);
         if (not ($bf.ftype == FRAME_BODY)) {
             fail("expected a body frame, got frame type {$bf.ftype}");
         }
@@ -956,7 +970,7 @@ func handshake(socket as net.Conn, opts as Options) {
     net.writeBytes($socket, $hdr);
 
     # Connection.Start (we ignore the server properties / mechanisms).
-    expectMethod($socket, CLS_CONNECTION, CONN_START, "Connection.Start");
+    expectMethod($socket, 0, CLS_CONNECTION, CONN_START, "Connection.Start");
 
     # Connection.Start-Ok: client-properties(table) mechanism response locale.
     def sok as bytes;
@@ -969,7 +983,7 @@ func handshake(socket as net.Conn, opts as Options) {
     # Connection.Tune: echo channel-max / frame-max, disable heartbeat. Bad
     # credentials get Connection.Close 403 ACCESS_REFUSED here instead
     # (readMethod throws it), as Start-Ok advertised authentication_failure_close.
-    def tune as Method init expectMethod($socket, CLS_CONNECTION, CONN_TUNE, "Connection.Tune");
+    def tune as Method init expectMethod($socket, 0, CLS_CONNECTION, CONN_TUNE, "Connection.Tune");
     def channelMax as int init readShort($tune.args, 0);
     def frameMax as int init readLong($tune.args, 2);
     def tok as bytes;
@@ -984,13 +998,13 @@ func handshake(socket as net.Conn, opts as Options) {
     $open = putShortStr($open, "");
     $open = putOctet($open, 0);
     writeMethod($socket, 0, CLS_CONNECTION, CONN_OPEN, $open);
-    expectMethod($socket, CLS_CONNECTION, CONN_OPENOK, "Connection.Open-Ok");
+    expectMethod($socket, $frameMax, CLS_CONNECTION, CONN_OPENOK, "Connection.Open-Ok");
 
     # Channel.Open on channel 1 (reserved shortstr).
     def cho as bytes;
     $cho = putShortStr($cho, "");
     writeMethod($socket, CHANNEL, CLS_CHANNEL, CH_OPEN, $cho);
-    expectMethod($socket, CLS_CHANNEL, CH_OPENOK, "Channel.Open-Ok");
+    expectMethod($socket, $frameMax, CLS_CHANNEL, CH_OPENOK, "Channel.Open-Ok");
     # Return the negotiated frame-max so publish can split large bodies (0 = no
     # limit).
     return $frameMax;
@@ -1078,7 +1092,12 @@ func declareQueueImpl(c as Conn, name as string, flags as int, table as bytes) {
     $args = putOctet($args, $flags);
     $args = appendBytes($args, $table); # arguments field-table
     writeMethod($c.socket, $c.channel, CLS_QUEUE, Q_DECLARE, $args);
-    def ok as Method init expectMethod($c.socket, CLS_QUEUE, Q_DECLAREOK, "Queue.Declare-Ok");
+    def ok as Method init expectMethod(
+        $c.socket,
+        $c.frameMax,
+        CLS_QUEUE,
+        Q_DECLAREOK,
+        "Queue.Declare-Ok");
     def qname as string init readShortStr($ok.args, 0);
     def off as int init 1 + byteLen($qname);
     def messageCount as int init readLong($ok.args, $off);
@@ -1097,7 +1116,7 @@ func declareQueueImpl(c as Conn, name as string, flags as int, table as bytes) {
 export func declareExchange(c as Conn, name as string, exType as string) {
     def args as bytes init encodeExchangeDeclare($name, $exType, true);
     writeMethod($c.socket, $c.channel, CLS_EXCHANGE, EX_DECLARE, $args);
-    expectMethod($c.socket, CLS_EXCHANGE, EX_DECLAREOK, "Exchange.Declare-Ok");
+    expectMethod($c.socket, $c.frameMax, CLS_EXCHANGE, EX_DECLAREOK, "Exchange.Declare-Ok");
 }
 
 /**
@@ -1113,7 +1132,7 @@ export func declareExchange(c as Conn, name as string, exType as string) {
 export func bindQueue(c as Conn, queue as string, exchange as string, routingKey as string) {
     def args as bytes init encodeQueueBind($queue, $exchange, $routingKey);
     writeMethod($c.socket, $c.channel, CLS_QUEUE, Q_BIND, $args);
-    expectMethod($c.socket, CLS_QUEUE, Q_BINDOK, "Queue.Bind-Ok");
+    expectMethod($c.socket, $c.frameMax, CLS_QUEUE, Q_BINDOK, "Queue.Bind-Ok");
 }
 
 /**
@@ -1234,7 +1253,7 @@ export func publishText(c as Conn, exchange as string, routingKey as string, tex
 export func confirmSelect(c as Conn) {
     def args as bytes init encodeConfirmSelect();
     writeMethod($c.socket, $c.channel, CLS_CONFIRM, CONFIRM_SELECT, $args);
-    expectMethod($c.socket, CLS_CONFIRM, CONFIRM_SELECTOK, "Confirm.Select-Ok");
+    expectMethod($c.socket, $c.frameMax, CLS_CONFIRM, CONFIRM_SELECTOK, "Confirm.Select-Ok");
     def st as ConfirmState init channel.recv($c.confirms);
     $st.on = true;
     channel.send($c.confirms, $st);
@@ -1304,7 +1323,7 @@ func confirmed(st as ConfirmState, tag as int) {
 # confirmStep reads one frame waitConfirm waits through - a Basic.Ack /
 # Basic.Nack, or a Basic.Return with its content - and records it.
 func confirmStep(c as Conn, st as ConfirmState) {
-    def m as Method init readMethod($c.socket, READ_TIMEOUT_MS);
+    def m as Method init readMethod($c.socket, READ_TIMEOUT_MS, $c.frameMax);
     if ($m.classId == CLS_BASIC and $m.methodId == B_RETURN) {
         def i as int init matchReturn($st, $m.args);
         readMessageBody($c);
@@ -1416,7 +1435,7 @@ export func get(c as Conn, queue as string, autoAck as bool) {
     $args = putOctet($args, $noAck);
     writeMethod($c.socket, $c.channel, CLS_BASIC, B_GET, $args);
 
-    def m as Method init readMethod($c.socket, READ_TIMEOUT_MS);
+    def m as Method init readMethod($c.socket, READ_TIMEOUT_MS, $c.frameMax);
     if ($m.classId == CLS_BASIC and $m.methodId == B_GETEMPTY) {
         return Message{
             empty: true,
@@ -1487,7 +1506,7 @@ export func qos(c as Conn, prefetchCount as int) {
         fail("qos: prefetch count {$prefetchCount} outside 0..{PREFETCH_MAX}");
     }
     writeMethod($c.socket, $c.channel, CLS_BASIC, B_QOS, encodeBasicQos($prefetchCount));
-    expectMethod($c.socket, CLS_BASIC, B_QOSOK, "Basic.Qos-Ok");
+    expectMethod($c.socket, $c.frameMax, CLS_BASIC, B_QOSOK, "Basic.Qos-Ok");
 }
 
 /**
@@ -1504,7 +1523,12 @@ export func qos(c as Conn, prefetchCount as int) {
 export func consume(c as Conn, queue as string, autoAck as bool) {
     def args as bytes init encodeBasicConsume($queue, "", $autoAck);
     writeMethod($c.socket, $c.channel, CLS_BASIC, B_CONSUME, $args);
-    def ok as Method init expectMethod($c.socket, CLS_BASIC, B_CONSUMEOK, "Basic.Consume-Ok");
+    def ok as Method init expectMethod(
+        $c.socket,
+        $c.frameMax,
+        CLS_BASIC,
+        B_CONSUMEOK,
+        "Basic.Consume-Ok");
     return readShortStr($ok.args, 0);
 }
 
@@ -1518,7 +1542,7 @@ export func consume(c as Conn, queue as string, autoAck as bool) {
  * @throws {AmqpError} kind "amqp" on a non-delivery frame or a dropped connection
  */
 export func receiveDelivery(c as Conn) {
-    def m as Method init readMethod($c.socket, 0);
+    def m as Method init readMethod($c.socket, 0, $c.frameMax);
     if (not ($m.classId == CLS_BASIC and $m.methodId == B_DELIVER)) {
         fail("expected Basic.Deliver, got class {$m.classId} method {$m.methodId}");
     }
@@ -1536,7 +1560,7 @@ export func receiveDelivery(c as Conn) {
 export func cancelConsume(c as Conn, consumerTag as string) {
     def args as bytes init encodeBasicCancel($consumerTag);
     writeMethod($c.socket, $c.channel, CLS_BASIC, B_CANCEL, $args);
-    expectMethod($c.socket, CLS_BASIC, B_CANCELOK, "Basic.Cancel-Ok");
+    expectMethod($c.socket, $c.frameMax, CLS_BASIC, B_CANCELOK, "Basic.Cancel-Ok");
 }
 
 /**
@@ -1559,7 +1583,7 @@ export func close(c as Conn) {
     writeMethod($c.socket, 0, CLS_CONNECTION, CONN_CLOSE, $args);
     def done as bool init false;
     while (not $done) {
-        def m as Method init readMethod($c.socket, READ_TIMEOUT_MS);
+        def m as Method init readMethod($c.socket, READ_TIMEOUT_MS, $c.frameMax);
         if ($m.classId == CLS_CONNECTION and $m.methodId == CONN_CLOSEOK) {
             $done = true;
         } elseif ($m.classId == CLS_BASIC and ($m.methodId == B_ACK or $m.methodId == B_NACK)) {

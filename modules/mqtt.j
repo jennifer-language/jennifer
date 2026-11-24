@@ -103,6 +103,7 @@ export def struct Subscription {
  * @field cleanSession {bool} the clean-session flag (false resumes the session)
  * @field subs {list of Subscription} the tracked subscriptions for reconnect
  * @field pending {channel of Message} messages that arrived while `publishQos1` or `subscribe` waited for an ack; `receive` / `poll` return them first
+ * @field pendingBytes {channel of int} one value: the payload bytes queued on `pending`
  */
 export def struct Client {
     conn as net.Conn,
@@ -110,7 +111,8 @@ export def struct Client {
     will as Will,
     cleanSession as bool,
     subs as list of Subscription,
-    pending as channel of Message
+    pending as channel of Message,
+    pendingBytes as channel of int
 };
 
 /**
@@ -496,8 +498,10 @@ func readPacketBody(conn as net.Conn, hb as int) {
 
 # MAX_PENDING caps the messages queued on a Client while publishQos1 /
 # subscribe wait for their ack (a broker flooding the wait would otherwise grow
-# the queue without bound).
+# the queue without bound), and MAX_PENDING_BYTES their payload bytes (1000
+# packets of up to 64 MiB each would be 64 GiB).
 def const MAX_PENDING as int init 1000;
+def const MAX_PENDING_BYTES as int init 67108864;
 
 # queuePublish acknowledges an incoming PUBLISH that arrived while a call waited
 # for an ack and queues its Message for the next receive / poll. A full queue
@@ -511,9 +515,30 @@ func queuePublish(client as Client, pkt as Packet) {
         };
     }
     def m as Message init parsePublish($pkt);
-    ackIfQos1($client, $pkt);
+    def queued as int init channel.recv($client.pendingBytes);
+    if ($queued + len($m.payload) > MAX_PENDING_BYTES) {
+        channel.send($client.pendingBytes, $queued);
+        throw Error{
+            kind: "limit",
+            message: "mqtt: over {MAX_PENDING_BYTES} payload bytes arrived while waiting for an ack"
+        };
+    }
+    try {
+        ackIfQos1($client, $pkt);
+    } catch (e) {
+        channel.send($client.pendingBytes, $queued);
+        throw $e;
+    }
     channel.send($client.pending, $m);
+    channel.send($client.pendingBytes, $queued + len($m.payload));
     return null;
+}
+
+# pendingCounter is a new pendingBytes channel holding 0.
+func pendingCounter() {
+    def c as channel of int init channel.make(1);
+    channel.send($c, 0);
+    return $c;
 }
 
 # takePending returns the oldest queued Message as a one-element list, or an
@@ -522,6 +547,8 @@ func takePending(client as Client) {
     def out as list of Message init [];
     if (channel.len($client.pending) > 0) {
         $out[] = channel.recv($client.pending);
+        def queued as int init channel.recv($client.pendingBytes);
+        channel.send($client.pendingBytes, $queued - len($out[0].payload));
     }
     return $out;
 }
@@ -614,7 +641,8 @@ export func connectWith(opts as Options, will as Will, cleanSession as bool) {
         will: $will,
         cleanSession: $cleanSession,
         subs: $subs,
-        pending: $pending
+        pending: $pending,
+        pendingBytes: pendingCounter()
     };
 }
 
@@ -645,6 +673,8 @@ export func reconnect(client as Client) {
     while (channel.len($client.pending) > 0) {
         channel.send($out.pending, channel.recv($client.pending));
     }
+    channel.recv($out.pendingBytes);
+    channel.send($out.pendingBytes, channel.recv($client.pendingBytes));
     for (def s in $subs) {
         if ($s.qos > 0) {
             $out = subscribeQos1($out, $s.topic);

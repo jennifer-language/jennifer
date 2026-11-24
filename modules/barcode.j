@@ -95,7 +95,13 @@ func fail(msg as string) {
 # `scale` / `quiet` cannot build a gigapixel raster or SVG; `checkDim` refuses a
 # value outside its range (a `scale` of 0 would be a zero-size grid).
 def const MAX_SCALE as int init 100;
-def const MAX_QUIET as int init 100;
+# No symbology asks for more than 11 modules of quiet zone (Code 128 10, EAN
+# 11, QR 4).
+def const MAX_QUIET as int init 16;
+
+# MAX_PIXELS bounds a PNG raster (width x height, 8192 x 8192): a larger one is
+# a kind "limit" error before any row is built.
+def const MAX_PIXELS as int init 67108864;
 
 # MAX_HEIGHT bounds a 1D bar height (module units) the same way; it is floored
 # at 1.
@@ -108,6 +114,16 @@ func checkDim(name as string, v as int, lo as int, hi as int) {
         fail("opts." + $name + " must be {$lo}-{$hi}, got {$v}");
     }
     return $v;
+}
+
+# checkPixels fails when a width x height raster is over MAX_PIXELS.
+func checkPixels(width as int, height as int) {
+    if ($width * $height > MAX_PIXELS) {
+        throw Error{
+            kind: "limit",
+            message: "barcode: a {$width} x {$height} raster is over {MAX_PIXELS} pixels"
+        };
+    }
 }
 
 # safeColor rejects a colour that could break out of the SVG `fill` attribute: a
@@ -2740,6 +2756,7 @@ func pixelRows(symbol as Symbol, opts as Options) {
         def m as list of list of bool init $symbol.matrix;
         def n as int init len($m);
         def dim as int init ($n + 2 * $q) * $s;
+        checkPixels($dim, $dim);
         def light as bytes init binary.concat(binary.make(1, 0), binary.make($dim, 255));
         for (def my in 0..$n + 2 * $q) {
             def line as bytes init $light;
@@ -2768,6 +2785,7 @@ func pixelRows(symbol as Symbol, opts as Options) {
     }
     def width as int init ($totalUnits + 2 * $q) * $s;
     def barH as int init checkDim("height", $opts.height, 1, MAX_HEIGHT) * $s;
+    checkPixels($width, $barH + 2 * $q * $s);
     def rr as RunRow init runStart();
     $rr = runAdd($rr, 255, $q * $s);
     def gray as int init 0;

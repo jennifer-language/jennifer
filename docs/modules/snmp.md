@@ -45,7 +45,7 @@ Each call sends one PDU and returns the response bindings.
 | the agent reports an error status | `snmp.SnmpError`, kind `"snmp"`, with `errorStatus` (2 noSuchName, 6 noAccess, ...), its name as `statusName`, and the 1-based `errorIndex` of the varbind at fault (0 / `""` for other failures) |
 | a malformed reply, or a binding whose `number` is out of its type's range | `snmp.SnmpError`, kind `"snmp"` |
 | no answer within `timeoutMs`, after `retries` extra attempts | `Error`, generic kind `"timeout"` |
-| a `walk` past 100000 steps (an agent that does not advance) | `Error`, kind `"limit"` |
+| a `walk` past 400000 steps (an agent that does not advance) | `Error`, kind `"limit"` |
 | a socket failure (an unresolvable address, a bind failure) | `net.NetError`, kind `"net"` |
 
 | Call | Returns | |

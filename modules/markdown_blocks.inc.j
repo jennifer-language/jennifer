@@ -47,12 +47,14 @@ def struct OB {
 # The block parser's state: the open-block stack, the link reference
 # definitions found so far (normalised label -> [url, title]) and the footnote
 # definitions (normalised label -> the `footnote` node, kept out of the tree
-# until the references number them).
+# until the references number them), and the nodes made so far (an md_inline
+# placeholder counts as one).
 def struct BP {
     open as list of OB,
     depth as int,
     refs as map of string to list of string,
-    notes as map of string to doctree.Node
+    notes as map of string to doctree.Node,
+    nodes as int
 };
 
 # A list marker read off a line: the content offset (columns from the start of
@@ -417,6 +419,7 @@ func noteChild(st as BP) { # lint-disable: L205
 # addNode appends a finished node (a heading, a rule) to the deepest open
 # block.
 func addNode(st as BP, n as doctree.Node) { # lint-disable: L205
+    $st.nodes = addNodes($st.nodes, countNodes($n));
     $st = noteChild($st);
     $st.open[$st.depth - 1].kids[] = $n;
     return $st;
@@ -448,6 +451,7 @@ func closeTop(st as BP) { # lint-disable: L205
     } else {
         $nodes = finishBlock($st.open[$t]);
     }
+    $st.nodes = addNodes($st.nodes, freshNodes($kind, $nodes));
     def p as int init $t - 1;
     if ($kind == "item" and $loose) {
         $st.open[$p].loose = true;
@@ -459,6 +463,31 @@ func closeTop(st as BP) { # lint-disable: L205
         $st.open[$p].blank = true;
     }
     return $st;
+}
+
+# freshNodes is how many nodes closing a block of `kind` made: a paragraph's
+# or table's whole output is new, a container wraps children already counted,
+# and a footnote definition is one node kept aside.
+func freshNodes(kind as string, nodes as list of doctree.Node) {
+    if ($kind == "fndef") {
+        return 1;
+    }
+    if ($kind == "paragraph") {
+        # A paragraph node and its md_inline placeholder.
+        return 2 * len($nodes);
+    }
+    if ($kind != "table" and $kind != "deflist") {
+        return len($nodes);
+    }
+    def total as int init 0;
+    for (def n in $nodes) {
+        if ($kind == "table") {
+            $total = $total + countNodes($n);
+        } elseif ($n.kind == "definition_list") {
+            $total = $total + 1;
+        }
+    }
+    return $total;
 }
 
 # closeTo closes open blocks until `keep` is the deepest one.

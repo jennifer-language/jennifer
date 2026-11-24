@@ -159,9 +159,9 @@ is filtered: the link renders with `href="#"`.
 
 | Limit | Value |
 | ----- | ----- |
-| source size | 16,000,000 characters |
+| source size | 4,194,304 characters |
 | nesting depth | 100 levels |
-| nodes (counting what substitutions expand to, checked before they are expanded) | 200,000 |
+| nodes (counted while blocks are parsed, and what substitutions expand to, checked before they are expanded) | 100,000 |
 | cells in one table | 20,000 |
 
 Past any of them is a catchable kind `"limit"` error. The first problem under

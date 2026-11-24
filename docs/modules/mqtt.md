@@ -107,9 +107,9 @@ any message on an earlier subscription, can arrive before the PUBACK or SUBACK.
 queued messages first, in arrival order, before reading the socket. The queue is
 shared by every copy of the `Client` (like the socket), so it does not matter
 which copy the next `receive` gets, and `reconnect` moves what is still queued
-to the new `Client`. It holds at most 1000 messages: one more during a single
-wait throws kind `"limit"` before its PUBACK, so the broker keeps a QoS-1
-message the client could not take.
+to the new `Client`. It holds at most 1000 messages and 64 MiB of payload: one
+more during a single wait throws kind `"limit"` before its PUBACK, so the
+broker keeps a QoS-1 message the client could not take.
 
 ## Retained messages and the Last-Will
 
@@ -247,7 +247,7 @@ MQTT 3.1.1 with QoS 0 and QoS 1. Not implemented:
 | `publishQos1` PUBACK wait | 5 s per attempt, 5 attempts, then `MqttError` |
 | `poll(client, ms)` | `ms`; `receive` blocks until a message arrives |
 | One packet | 64 MiB (the remaining-length varint is peer-declared), else kind `"limit"` |
-| Messages queued during one ack wait | 1000, else kind `"limit"` |
+| Messages queued during one ack wait | 1000 and 64 MiB of payload, else kind `"limit"` |
 
 ## See also
 

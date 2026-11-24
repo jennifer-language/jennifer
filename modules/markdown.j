@@ -321,11 +321,14 @@ func alertMarker(line as string) {
 
 # --- limits and errors ----------------------------------------------
 
-# The nesting-depth cap and total-node budget that turn a pathological document
-# (deeply nested quotes / lists, or a huge input) into a catchable "limit" error
-# rather than an unbounded recursion or allocation.
+# The nesting-depth cap, total-node budget and source size cap that turn a
+# pathological document (deeply nested quotes / lists, or a huge input) into a
+# catchable "limit" error rather than an unbounded recursion or allocation. The
+# node budget is counted while the tree grows (`addNodes`), so a document over
+# it fails before the rest of it is built.
 def const MAX_DOC_DEPTH as int init 100;
-def const MAX_DOC_NODES as int init 200000;
+def const MAX_DOC_NODES as int init 100000;
+def const MAX_SOURCE as int init 4194304;
 
 func mdFail(msg as string) {
     throw Error{kind: "markdown", message: $msg};
@@ -335,6 +338,15 @@ func mdFail(msg as string) {
 # the generic kind for a cap, with the message as mdFail would write it.
 func mdLimit(msg as string) {
     throw Error{kind: "limit", message: $msg};
+}
+
+# addNodes adds `k` nodes to a running node count and checks the budget.
+func addNodes(count as int, k as int) {
+    def total as int init $count + $k;
+    if ($total > MAX_DOC_NODES) {
+        mdLimit("document too large (over {MAX_DOC_NODES} nodes)");
+    }
+    return $total;
 }
 
 # nodeOf returns a zero-valued doctree.Node with only its kind set; callers fill the fields
@@ -705,28 +717,45 @@ func decodeEntities(s as string) {
 include "./markdown_inline.inc.j";
 include "./markdown_blocks.inc.j";
 
+# A node with its inline content parsed, and the running node count after it.
+def struct Resolved {
+    node as doctree.Node,
+    count as int
+};
+
 # resolveInline replaces every md_inline placeholder under a node with the
 # parsed inline nodes, now that all link reference definitions are known.
-func resolveInline(n as doctree.Node, refs as map of string to list of string, depth as int) {
+# `count` is the document's node count so far, a placeholder counted as one.
+func resolveInline(
+    n as doctree.Node,
+    refs as map of string to list of string,
+    depth as int,
+    count as int) {
     if ($depth > MAX_DOC_DEPTH) {
         mdLimit("document nesting too deep (over {MAX_DOC_DEPTH} levels)");
     }
     if (len($n.children) == 0) {
-        return $n;
+        return Resolved{node: $n, count: $count};
     }
+    def total as int init $count;
     def kids as list of doctree.Node init [];
     for (def c in $n.children) {
         if ($c.kind == "md_inline") {
+            def added as int init -1;
             for (def x in parseInline($c.text, $refs)) {
+                $added = $added + countNodes($x);
                 $kids[] = $x;
             }
+            $total = addNodes($total, $added);
         } else {
-            $kids[] = resolveInline($c, $refs, $depth + 1);
+            def sub as Resolved init resolveInline($c, $refs, $depth + 1, $total);
+            $total = $sub.count;
+            $kids[] = $sub.node;
         }
     }
     # Built from the fields rather than copied: a copy of `n` would copy the
     # subtree it is about to replace.
-    return doctree.Node{
+    def node as doctree.Node init doctree.Node{
         kind: $n.kind,
         level: $n.level,
         text: $n.text,
@@ -738,6 +767,7 @@ func resolveInline(n as doctree.Node, refs as map of string to list of string, d
         attrs: $n.attrs,
         children: $kids
     };
+    return Resolved{node: $node, count: $total};
 }
 
 # The footnote numbering pass: the number each label got (in order of its
@@ -800,14 +830,18 @@ func withKidsOf(n as doctree.Node, kids as list of doctree.Node) {
 func placeFootnotes(
     doc as doctree.Node,
     notes as map of string to doctree.Node,
-    refs as map of string to list of string) {
+    refs as map of string to list of string,
+    count as int) {
     def nt as Notes;
     $nt = numberRefs($doc, $nt);
     def bodies as list of doctree.Node init [];
+    def total as int init $count;
     def k as int init 0;
     while ($k < len($nt.order)) {
         def key as string init $nt.order[$k];
-        def body as doctree.Node init resolveInline($notes[$key], $refs, 1);
+        def res as Resolved init resolveInline($notes[$key], $refs, 1, $total);
+        $total = $res.count;
+        def body as doctree.Node init $res.node;
         $nt = numberRefs($body, $nt);
         $bodies[] = $body;
         $k = $k + 1;
@@ -867,7 +901,7 @@ func linkPass(n as doctree.Node, nt as Notes) {
 }
 
 # countNodes sums the nodes in a subtree. The depth cap already bounds recursion
-# depth, so this cannot itself overflow; it enforces the node budget.
+# depth, so this cannot itself overflow.
 func countNodes(n as doctree.Node) {
     def total as int init 1;
     for (def c in $n.children) {
@@ -882,12 +916,16 @@ func countNodes(n as doctree.Node) {
  * can inspect or transform a document (pull the headings for a table of contents,
  * rewrite links, convert to another format) before `render`ing it. The returned node
  * is the document root (its `typeOf` is `"document"`); its children are the top-level
- * blocks. A document whose blocks or inline markup nest too deep, or that holds
- * too many nodes, is a catchable `"limit"` error.
+ * blocks. A source over 4194304 characters, a document whose blocks or inline
+ * markup nest too deep, or one that holds over 100000 nodes (counted while it
+ * is parsed) is a catchable `"limit"` error.
  * @param md {string} the Markdown source
  * @return {doctree.Node} the document root node
  */
 export func parse(md as string) {
+    if (len($md) > MAX_SOURCE) {
+        mdLimit("document too large (over {MAX_SOURCE} characters)");
+    }
     def st as BP init blockParse($md);
     def doc as doctree.Node init nodeOf("document");
     $doc.children = $st.open[0].kids;
@@ -895,9 +933,10 @@ export func parse(md as string) {
     for (def key in maps.keys($st.notes)) {
         $refs["^" + $key] = [$st.notes[$key].attrs["md-label"], ""];
     }
-    $doc = resolveInline($doc, $refs, 0);
+    def res as Resolved init resolveInline($doc, $refs, 0, $st.nodes);
+    $doc = $res.node;
     if (len($st.notes) > 0) {
-        $doc = placeFootnotes($doc, $st.notes, $refs);
+        $doc = placeFootnotes($doc, $st.notes, $refs, $res.count);
     }
     if (countNodes($doc) > MAX_DOC_NODES) {
         mdLimit("document too large (over {MAX_DOC_NODES} nodes)");

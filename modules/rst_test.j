@@ -1252,3 +1252,31 @@ func testEscapeAfterStartStringIsContent() {
     testing.assertEqual(h("`\\` x`\n"), "<p><cite>` x</cite></p>");
     testing.assertEqual(h("*a* *b *c* **d\n"), "<p><em>a</em> <em>b *c</em> **d</p>");
 }
+
+func overSourceCap() {
+    parse(strings.replicate("a", MAX_SOURCE + 1));
+}
+
+# A source over MAX_SOURCE characters is refused before it is parsed.
+func testSourceCapThrows() {
+    testing.assertEqual(MAX_SOURCE, 4194304);
+    testing.assertThrows("overSourceCap", "limit");
+}
+
+# 50,001 paragraphs of one text node each: 100,002 nodes.
+func overBudgetParagraphs() {
+    parseBlocks(strings.split(strings.replicate("x\n\n", 50001), "\n"), 1, 0, true);
+}
+
+# One list of 34,000 items (item, paragraph, text): 102,001 nodes.
+func overBudgetList() {
+    parseBlocks(strings.split(strings.replicate("- x\n", 34000), "\n"), 1, 0, true);
+}
+
+# The node budget is counted while blocks are parsed: both the document's
+# top-level blocks and the items of one list stop at it.
+func testNodeBudgetCountedWhileParsing() {
+    testing.assertEqual(MAX_NODES, 100000);
+    testing.assertThrows("overBudgetParagraphs", "limit");
+    testing.assertThrows("overBudgetList", "limit");
+}

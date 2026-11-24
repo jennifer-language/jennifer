@@ -53,7 +53,7 @@ def const PDU_GETNEXT as int init 1;
 def const PDU_RESPONSE as int init 2;
 def const PDU_SET as int init 3;
 
-def const MAX_WALK as int init 100000;
+def const MAX_WALK as int init 400000;
 
 # How often the agent wakes from a blocked receive to check its shutdown channel.
 def const SHUTDOWN_POLL_MS as int init 250;

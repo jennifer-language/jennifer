@@ -1063,7 +1063,7 @@ func matchFor(app as App, method as string, segs as list of string) {
 # MAX_PATH_SEGMENTS bounds the segments of a request path that routing splits.
 # Routing runs before any handler, middleware or login check, and the request
 # line may be as long as the header cap (64 KiB by default): a path of 65,536
-# "/" split as it is costs some 55 MiB per request. Runs of "/" collapse first
+# "/" split as it is costs about 2 MiB per request. Runs of "/" collapse first
 # (they never make a segment), and a path with more segments than this matches
 # no route, so it is a 404 without being split.
 def const MAX_PATH_SEGMENTS as int init 128;

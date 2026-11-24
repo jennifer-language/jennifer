@@ -69,7 +69,7 @@ variable-length value from the next AI; a predefined-length one needs none.
 | --------------- | ---- | ------- | ------- |
 | `scale` | `int` | 8 | pixels (PNG) or units (SVG) per module / narrow bar, 1-100 |
 | `height` | `int` | 40 | bar height of a 1D code in modules, 1-1000 |
-| `quiet` | `int` | 4 | the light border (quiet zone) in modules, 0-100 |
+| `quiet` | `int` | 4 | the light border (quiet zone) in modules, 0-16 |
 | `ecLevel` | `string` | `"M"` | QR error-correction level: `"L"`, `"M"`, `"Q"` or `"H"` |
 | `foreground` | `string` | `"#000000"` | the dark SVG colour (a PNG is always black) |
 | `background` | `string` | `"#ffffff"` | the light SVG colour (a PNG is always white) |
@@ -88,7 +88,8 @@ screen moire. Lower `opts.scale` for a more compact image.
 
 A `scale`, `quiet` or `height` outside its range is an error (kind
 `"barcode"`) when the symbol is rendered. A colour containing `"`, `<`, `>`,
-`&` or a space is an error too.
+`&` or a space is an error too. A PNG over 67,108,864 pixels (8192 x 8192) is
+a `"limit"` error, raised before any row is built.
 
 ## Verification
 

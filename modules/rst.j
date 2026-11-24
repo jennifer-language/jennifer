@@ -95,11 +95,13 @@ export def struct Diagnostic {
 };
 
 # The nesting-depth cap, total-node budget and input size cap that turn a
-# pathological document into a catchable "rst" error rather than unbounded
-# recursion or allocation. The depth and node figures match the markdown module's.
+# pathological document into a catchable "limit" error rather than unbounded
+# recursion or allocation. The figures match the markdown module's. The node
+# budget is counted while blocks are parsed (`addCount`), so a document over it
+# fails before the rest of it is built.
 def const MAX_DEPTH as int init 100;
-def const MAX_NODES as int init 200000;
-def const MAX_SOURCE as int init 16000000;
+def const MAX_NODES as int init 100000;
+def const MAX_SOURCE as int init 4194304;
 
 # The characters a section adornment, a transition or a quoted literal block may
 # be drawn with: every printable 7-bit ASCII punctuation character.
@@ -215,6 +217,17 @@ func rstFail(msg as string) {
 # cell count): kind "limit", the generic kind for a cap.
 func rstLimit(msg as string) {
     throw Error{kind: "limit", message: $msg};
+}
+
+# addCount adds the nodes under `n` to a running count and checks the node
+# budget. Each loop that collects block nodes keeps one, so neither the
+# document nor any one block in it grows past the budget before it fails.
+func addCount(count as int, n as doctree.Node) {
+    def total as int init $count + countNodes($n);
+    if ($total > MAX_NODES) {
+        rstLimit("document too large (over {MAX_NODES} nodes)");
+    }
+    return $total;
 }
 
 # Nodes are built from a zero value, not a struct literal: a literal of another
@@ -462,7 +475,13 @@ func parseBlocks(lines as list of string, base as int, depth as int, top as bool
     def cur as int init 0;
     def n as int init len($lines);
     def i as int init 0;
+    def count as int init 0;
+    def counted as int init 0;
     while ($i < $n) {
+        while ($counted < len($out)) {
+            $count = addCount($count, $out[$counted]);
+            $counted = $counted + 1;
+        }
         def line as string init $lines[$i];
         if (len($line) == 0) {
             $i = $i + 1;
@@ -658,6 +677,7 @@ func quotedLiteral(lines as list of string, k as int, base as int) {
 # ` : classifier`s) and its indented definition. Items may be separated by blank
 # lines; the list ends at the first line that is not another term.
 func definitionList(lines as list of string, i as int, base as int, depth as int) {
+    def count as int init 0;
     def kids as list of doctree.Node init [];
     def j as int init $i;
     def next as int init $i;
@@ -667,6 +687,7 @@ func definitionList(lines as list of string, i as int, base as int, depth as int
         $kids[] = withChildren(
             "def_desc",
             parseBlocks($blk.lines, $base + $j + 1, $depth + 1, false));
+        $count = addCount($count, $kids[len($kids) - 1]);
         $next = $blk.next;
         def k as int init skipBlank($lines, $next);
         if (isDefinitionStart($lines, $k)) {
@@ -786,6 +807,7 @@ func attribution(alines as list of string, lineNo as int) {
 # --- bullet and enumerated lists --------------------------------------
 
 func bulletList(lines as list of string, i as int, base as int, depth as int) {
+    def count as int init 0;
     def n as int init len($lines);
     def bullet as string init $lines[$i][0..1];
     def items as list of doctree.Node init [];
@@ -799,6 +821,7 @@ func bulletList(lines as list of string, i as int, base as int, depth as int) {
         }
         def blk as IndentBlock init indentedBlock($lines, $j, $m.end);
         $items[] = withChildren("item", parseBlocks($blk.lines, $base + $j, $depth + 1, false));
+        $count = addCount($count, $items[len($items) - 1]);
         $next = $blk.next;
         def k as int init skipBlank($lines, $next);
         if ($k < $n and strings.startsWith($lines[$k], $bullet) and
@@ -1003,6 +1026,7 @@ func enumStartsList(lines as list of string, i as int, es as EnumScan) {
 }
 
 func enumList(lines as list of string, i as int, base as int, depth as int) {
+    def count as int init 0;
     def n as int init len($lines);
     def first as EnumScan init scanEnum($lines[$i]);
     def format as string init $first.format;
@@ -1023,6 +1047,7 @@ func enumList(lines as list of string, i as int, base as int, depth as int) {
         def es as EnumScan init scanEnum($lines[$j]);
         def blk as IndentBlock init indentedBlock($lines, $j, $es.end);
         $items[] = withChildren("item", parseBlocks($blk.lines, $base + $j, $depth + 1, false));
+        $count = addCount($count, $items[len($items) - 1]);
         $next = $blk.next;
         def k as int init skipBlank($lines, $next);
         if ($k < $n and enumContinues($lines, $k, $format, $seq, $auto, $ord)) {
@@ -1196,6 +1221,7 @@ func scanField(line as string) {
 }
 
 func fieldList(lines as list of string, i as int, base as int, depth as int) {
+    def count as int init 0;
     def n as int init len($lines);
     def kids as list of doctree.Node init [];
     def j as int init $i;
@@ -1205,6 +1231,7 @@ func fieldList(lines as list of string, i as int, base as int, depth as int) {
         $kids[] = withChildren("def_term", inlineNodes($fs.name, $base + $j));
         def blk as IndentBlock init indentedBlock($lines, $j, $fs.end);
         $kids[] = withChildren("def_desc", parseBlocks($blk.lines, $base + $j, $depth + 1, false));
+        $count = addCount($count, $kids[len($kids) - 1]);
         $next = $blk.next;
         def k as int init skipBlank($lines, $next);
         if ($k < $n and scanField($lines[$k]).ok) {
@@ -1248,6 +1275,7 @@ func optionStart(lines as list of string, i as int) {
 }
 
 func optionList(lines as list of string, i as int, base as int, depth as int) {
+    def count as int init 0;
     def n as int init len($lines);
     def kids as list of doctree.Node init [];
     def j as int init $i;
@@ -1258,6 +1286,7 @@ func optionList(lines as list of string, i as int, base as int, depth as int) {
         def cut as int init len($lines[$j]) - len($m.groups[1]);
         def blk as IndentBlock init indentedBlock($lines, $j, $cut);
         $kids[] = withChildren("def_desc", parseBlocks($blk.lines, $base + $j, $depth + 1, false));
+        $count = addCount($count, $kids[len($kids) - 1]);
         $next = $blk.next;
         def k as int init skipBlank($lines, $next);
         if ($k < $n and optionStart($lines, $k)) {
@@ -1347,6 +1376,7 @@ func buildLines(
     indent as int,
     lineNo as int,
     depth as int) {
+    def count as int init 0;
     if ($depth > MAX_DEPTH) {
         rstLimit("document nests too deep (over {MAX_DEPTH} levels)");
     }
@@ -1361,6 +1391,7 @@ func buildLines(
             continue;
         }
         $kids[] = withChildren("line", inlineNodes($e.text, $lineNo + $k));
+        $count = addCount($count, $kids[len($kids) - 1]);
         $k = $k + 1;
     }
     return LineBuild{node: withChildren("line_block", $kids), next: $k};

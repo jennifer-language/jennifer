@@ -622,3 +622,9 @@ func testNoAnswerIsTimeout() {
     }
     net.close($silent);
 }
+
+# A walk's step cap leaves room for a large chassis switch's ifTable and
+# ifXTable (near 100,000 varbinds); about 250 MB of Varbinds at the cap.
+func testWalkCap() {
+    testing.assertEqual(MAX_WALK, 400000);
+}

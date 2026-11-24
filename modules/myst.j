@@ -85,6 +85,9 @@ def const MAX_DEPTH as int init 50;
 # A csv-table with more cells than this (after short rows are padded to the
 # widest) is a kind "limit" error, as in the rst module.
 def const MAX_TABLE_CELLS as int init 20000;
+# A source over this many characters is a kind "limit" error, checked before
+# anything is parsed (as in the markdown and rst modules).
+def const MAX_SOURCE as int init 4194304;
 # Each directive opener carries its source line in its info string, between
 # two of these private-use characters, until the lowering pass reads it.
 def const LINE_MARK as string init "";
@@ -932,6 +935,9 @@ func sortDiags(ds as list of Diagnostic) { # lint-disable: L205
 # run parses a document, resolves its references and contents, and collects
 # its diagnostics.
 func run(src as string, opts as Options) {
+    if (len($src) > MAX_SOURCE) {
+        throw Error{kind: "limit", message: "document too large (over {MAX_SOURCE} characters)"};
+    }
     def doc as doctree.Node init withChildren("document", blocks($src, 1, $opts, 0));
     if (hasContents($doc)) {
         $doc = contentsPass($doc);
@@ -958,7 +964,8 @@ func defaultOptions() {
  * Parse MyST into a document tree: a `doctree.Node` whose `typeOf` is
  * `"document"`, walked with `doctree.findAll` / `doctree.text` and friends and
  * rendered with `doctree.render` / `doctree.renderPdf`. Problems are recovered
- * from (see `check`); directives nested too deep are a catchable kind
+ * from (see `check`); a source over 4194304 characters, a document over
+ * markdown's node budget and directives nested too deep are a catchable kind
  * `"limit"` error.
  * @param src {string} the MyST source
  * @return {doctree.Node} the document root node

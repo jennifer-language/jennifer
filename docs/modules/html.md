@@ -229,9 +229,10 @@ The parser is **tolerant** of real-world HTML: void elements (`<br>` / `<img>`),
 self-closing tags, unquoted (`id=x`) and boolean (`disabled`) attributes, mismatched
 nesting (`<b>x</i>` closes the `<b>`), comments, `<!DOCTYPE>`, and `script` / `style`
 raw text are handled, not rejected; the common entities (`&amp;` `&lt;` `&gt;`
-`&quot;` `&#39;` `&apos;`) decode. A nesting depth over 512 or more than 200,000
+`&quot;` `&#39;` `&apos;`) decode. A nesting depth over 256 or more than 200,000
 nodes is a catchable `Error{kind: "limit"}`, so a malicious document cannot
-force an unbounded parse.
+force an unbounded parse. On jennifer-tiny the interpreter's own nesting cap
+(64 value levels, two per element) throws `"limit"` first, near depth 31.
 
 ## Out of scope
 

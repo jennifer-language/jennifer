@@ -133,9 +133,10 @@ An unknown role is kept as its source text and reported.
 
 ## Limits
 
-Directives nested more than 50 deep, or a `csv-table` of more than 20,000
-cells (short rows count as padded to the widest), are a catchable kind
-`"limit"` error, as are the Markdown and `eval-rst` readers' own limits.
+A source over 4,194,304 characters, directives nested more than 50 deep, or a
+`csv-table` of more than 20,000 cells (short rows count as padded to the
+widest), are a catchable kind `"limit"` error, as are the Markdown (100,000
+nodes) and `eval-rst` readers' own limits.
 
 ## See also
 

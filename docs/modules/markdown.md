@@ -215,10 +215,12 @@ Markdown builds the block kinds `"document"`, `"heading"`, `"paragraph"`,
 `"thematic_break"`, `"html_block"`, `"page_break"`, and the inline kinds `"text"`,
 `"codespan"`, `"strong"`, `"emphasis"`, `"strikethrough"`, `"highlight"`,
 `"subscript"`, `"superscript"`, `"link"`, `"image"`, `"footnote_ref"`,
-`"line_break"`, `"html_inline"`. The parse has a nesting-depth cap (100 block
-levels, 32 inline levels such as `***` runs nested inside each other) and a
-budget of 200,000 nodes, so a pathological document is a catchable kind
-`"limit"` error rather than an unbounded parse or silently dropped formatting.
+`"line_break"`, `"html_inline"`. The parse has a source cap (4,194,304
+characters, checked first), a nesting-depth cap (100 block levels, 32 inline
+levels such as `***` runs nested inside each other) and a budget of 100,000
+nodes, counted while the tree is built, so a pathological document is a
+catchable kind `"limit"` error rather than an unbounded parse or silently
+dropped formatting.
 
 ## Authoring Markdown
 

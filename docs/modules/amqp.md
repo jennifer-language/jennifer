@@ -13,7 +13,7 @@ built by hand from `bytes` and the bitwise operators. Needs the default
 | Mandatory message returned by the broker | `AmqpError` with `scope` `"return"` (see [Mandatory publishing](#mandatory-publishing)) |
 | Socket failure (refused, reset) | `net.NetError`, kind `"net"` |
 | Stalled read | kind `"timeout"` |
-| Broker-declared frame over 64 MiB | kind `"limit"` |
+| Broker-declared frame over 64 MiB, or over the frame-max negotiated in Connection.Tune | kind `"limit"` |
 | Broker drops the connection mid-frame | kind `"closed"` (`connection closed after N of M bytes`) |
 
 A broker error carries its reply code and text in the message too:

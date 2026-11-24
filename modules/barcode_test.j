@@ -628,3 +628,25 @@ func testGs1Validation() {
         testing.assertTrue(strings.startsWith($err, "barcode: barcode: gs1-128: "));
     }
 }
+
+func overQuietCap() {
+    renderWith("quiet", 17, false);
+}
+
+# A QR of 1,800 characters at scale 100 is 9,700 x 9,700 pixels: over
+# MAX_PIXELS, refused before its rows are built.
+func overPixelCap() {
+    def o as Options init defaults();
+    $o.scale = 100;
+    png(encode("qr", strings.replicate("A", 1800), defaults()), $o);
+}
+
+func testQuietAndPixelCaps() {
+    testing.assertEqual(MAX_QUIET, 16);
+    testing.assertThrows("overQuietCap", "barcode");
+    def o as Options init defaults();
+    $o.quiet = 16;
+    testing.assertTrue(len(png(encode("code128", "123", defaults()), $o)) > 0);
+    testing.assertEqual(MAX_PIXELS, 67108864);
+    testing.assertThrows("overPixelCap", "limit");
+}

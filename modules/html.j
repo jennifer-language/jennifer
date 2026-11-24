@@ -442,10 +442,13 @@ export func renderAllXhtml(nodes as list of Node) {
 # build and parse round-trip through one model. Tolerant by design: void elements,
 # self-closing tags, unquoted attributes, mismatched nesting, comments, DOCTYPE,
 # and `script` / `style` raw text are handled rather than rejected. A depth and a
-# node budget turn a malicious document into a catchable "html" error.
+# node budget turn a malicious document into a catchable "limit" error.
 # ============================================================================
 
-def const MAX_PARSE_DEPTH as int init 512;
+# A Node nests two value levels (the struct and its children list), so the depth
+# cap stays under half the interpreter's 1000-level value nesting cap and fires
+# first. On jennifer-tiny (64 levels) the interpreter's "limit" fires near 31.
+def const MAX_PARSE_DEPTH as int init 256;
 def const MAX_PARSE_NODES as int init 200000;
 
 # One start-tag attribute, as readStartTag keeps it: a name (no space, `=`, `>`,

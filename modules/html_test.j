@@ -429,3 +429,21 @@ func testParseNonAsciiAcrossTokens() {
     testing.assertEqual(attrOf($doc.children[45], "data-x"), "é");
     testing.assertEqual(render($doc.children[45]), "<p data-x=\"é\">end ö</p>");
 }
+
+func nestedDivs(depth as int) {
+    return strings.replicate("<div>", $depth) + "x" + strings.replicate("</div>", $depth);
+}
+
+func overDepthCap() {
+    parse(nestedDivs(MAX_PARSE_DEPTH));
+}
+
+# The module's depth cap fires below the interpreter's 1000-level value cap
+# (two levels per element): the root and 255 elements parse, one more is
+# kind "limit".
+func testDepthCapIsExact() {
+    testing.assertEqual(MAX_PARSE_DEPTH, 256);
+    def doc as Node init parse(nestedDivs(MAX_PARSE_DEPTH - 1));
+    testing.assertEqual(len($doc.children), 1);
+    testing.assertThrows("overDepthCap", "limit");
+}

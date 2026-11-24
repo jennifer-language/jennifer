@@ -524,6 +524,7 @@ func overfullQueue() {
     def pending as channel of Message init channel.make(MAX_PENDING);
     def c as Client;
     $c.pending = $pending;
+    $c.pendingBytes = pendingCounter();
     def pkt as Packet init Packet{typ: 3, flags: 0, body: bytesOf([0, 1, 97])};
     def i as int init 0;
     while ($i <= MAX_PENDING) {
@@ -533,4 +534,27 @@ func overfullQueue() {
 }
 func testAFullQueueIsALimit() {
     testing.assertThrows("overfullQueue", "limit");
+}
+
+# Two 40 MB payloads are over MAX_PENDING_BYTES: the second throws kind
+# "limit", and taking the first frees its bytes again.
+func overByteBudget(c as Client) {
+    def body as bytes init binary.concat(bytesOf([0, 1, 97]), binary.make(40000000, 0));
+    queuePublish($c, Packet{typ: 3, flags: 0, body: $body});
+    queuePublish($c, Packet{typ: 3, flags: 0, body: $body});
+}
+func testQueuedBytesAreCapped() {
+    testing.assertEqual(MAX_PENDING_BYTES, 67108864);
+    def c as Client;
+    $c.pending = channel.make(MAX_PENDING);
+    $c.pendingBytes = pendingCounter();
+    def kind as string init "";
+    try {
+        overByteBudget($c);
+    } catch (e) {
+        $kind = $e.kind;
+    }
+    testing.assertEqual($kind, "limit");
+    testing.assertEqual(len(takePending($c)[0].payload), 40000000);
+    testing.assertEqual(channel.recv($c.pendingBytes), 0);
 }

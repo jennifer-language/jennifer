@@ -495,3 +495,24 @@ func testVeryLongFencesClose() {
     def c as string init strings.replicate(":", 1001);
     testing.assertContains(h($c + '{note}' + "\nx\n" + $c + "\n"), "admonition-note");
 }
+
+func overSourceCap() {
+    return parse(strings.replicate("a", MAX_SOURCE + 1));
+}
+
+# A source over MAX_SOURCE characters is refused before it is parsed.
+func testSourceCapThrows() {
+    testing.assertEqual(MAX_SOURCE, 4194304);
+    testing.assertThrows("overSourceCap", "limit");
+}
+
+# 990 rows of 100 empty cells: about 100,200 nodes, over markdown's budget,
+# which myst inherits through markdown.parse.
+func overNodeBudget() {
+    return parse(strings.replicate("|h", 100) + "|\n" + strings.replicate("|-", 100) + "|\n" +
+        strings.replicate(strings.replicate("|", 101) + "\n", 990));
+}
+
+func testNodeBudgetIsALimitError() {
+    testing.assertThrows("overNodeBudget", "limit");
+}

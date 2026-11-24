@@ -117,16 +117,16 @@ func testRoundTripShortStrOffset() {
 # OM-004: a broker-declared frame size beyond the cap is rejected before it
 # sizes a read.
 func overFrameCap() {
-    checkFrameSize(MAX_FRAME_BYTES + 1);
+    checkFrameSize(MAX_FRAME_BYTES + 1, 0);
 }
 func negFrameCap() {
-    checkFrameSize(-1);
+    checkFrameSize(-1, 0);
 }
 func testFrameSizeCap() {
     testing.assertThrows("overFrameCap", "limit");
     testing.assertThrows("negFrameCap", "amqp");
-    checkFrameSize(MAX_FRAME_BYTES); # exactly at the limit does not throw
-    checkFrameSize(0);
+    checkFrameSize(MAX_FRAME_BYTES, 0); # exactly at the limit does not throw
+    checkFrameSize(0, 0);
 }
 
 # --- new method encoders / decoders -----------------------------------------
@@ -275,7 +275,7 @@ func testABrokerCloseIsAnAmqpError() {
         testing.assertEqual($err.classId, 0);
     }
     try {
-        checkFrameSize(-1);
+        checkFrameSize(-1, 0);
         throw Error{kind: "missed", message: "a bad frame size"};
     } catch (err) {
         testing.assertEqual($err.kind, "amqp");
@@ -397,7 +397,7 @@ func confirmArgs(tag as int) {
 # readClientMethod is the fake broker's readMethod: a client's Connection.Close
 # is a request to answer, not an error to throw.
 func readClientMethod(conn as net.Conn) {
-    def f as Frame init readFrame($conn, 5000);
+    def f as Frame init readFrame($conn, 5000, 0);
     testing.assertEqual($f.ftype, FRAME_METHOD);
     return Method{
         classId: readShort($f.payload, 0),
@@ -465,7 +465,7 @@ func testQosSendsBasicQos() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def server as task of string init spawn {
         def conn as net.Conn init net.accept($listener);
-        def m as Method init readMethod($conn, 5000);
+        def m as Method init readMethod($conn, 5000, 0);
         def e as bytes;
         writeMethod($conn, 1, CLS_BASIC, B_QOSOK, $e);
         net.setReadDeadline($conn, 5000);
@@ -506,7 +506,7 @@ func testBadCredentialsAreAccessRefused() {
         $start = putLongStr($start, "PLAIN");
         $start = putLongStr($start, "en_US");
         writeMethod($conn, 0, CLS_CONNECTION, CONN_START, $start);
-        def startOk as Frame init readFrame($conn, 5000);
+        def startOk as Frame init readFrame($conn, 5000, 0);
         def capability as string init textHex("authentication_failure_close") + "7401";
         if (strings.contains(hex($startOk.payload), $capability)) {
             def args as bytes;
@@ -542,7 +542,7 @@ func testMandatoryReturnThrowsFromWaitConfirm() {
     def server as task of string init spawn {
         def conn as net.Conn init net.accept($listener);
         serveConfirmSelect($conn);
-        def publish as Method init readMethod($conn, 5000);
+        def publish as Method init readMethod($conn, 5000, 0);
         def body as bytes init readMessageBody(newConn($conn, 0));
         def ret as bytes;
         $ret = putShort($ret, 312);
@@ -553,7 +553,7 @@ func testMandatoryReturnThrowsFromWaitConfirm() {
         writeContent($conn, $body);
         writeMethod($conn, 1, CLS_BASIC, B_ACK, confirmArgs(1));
         # the next, routable publish
-        readMethod($conn, 5000);
+        readMethod($conn, 5000, 0);
         readMessageBody(newConn($conn, 0));
         writeMethod($conn, 1, CLS_BASIC, B_ACK, confirmArgs(2));
         serveClose($conn);
@@ -653,7 +653,7 @@ func testAPendingConfirmIsNamed() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def server as task of null init spawn {
         def conn as net.Conn init net.accept($listener);
-        readMethod($conn, 5000);
+        readMethod($conn, 5000, 0);
         writeMethod($conn, 1, CLS_BASIC, B_ACK, confirmArgs(1));
         net.setReadDeadline($conn, 5000);
         net.readN($conn, 1);
@@ -786,4 +786,31 @@ func testWaitConfirmNeedsConfirmSelect() {
     }
     net.close($c.socket);
     net.close($listener);
+}
+
+# A frame over the negotiated frame-max is kind "limit": with frame-max 4096 a
+# payload may hold 4088 bytes, and the broker's 5000-byte Declare-Ok is refused.
+func testFrameOverNegotiatedMaxIsALimit() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        net.setReadDeadline($conn, 5000);
+        def h as bytes init net.readN($conn, 7);
+        net.readN($conn, readLong($h, 3) + 1);
+        writeMethod($conn, 1, CLS_EXCHANGE, EX_DECLAREOK, binary.make(4996, 0));
+        net.close($conn);
+    };
+    def c as Conn init newConn(net.connect(net.address($listener)), 4096);
+    def kind as string init "";
+    try {
+        declareExchange($c, "logs", "fanout");
+    } catch (err) {
+        $kind = $err.kind;
+    }
+    testing.assertEqual($kind, "limit");
+    task.wait($server);
+    net.close($c.socket);
+    net.close($listener);
+    checkFrameSize(4088, 4096);
+    checkFrameSize(5000, 0);
 }
