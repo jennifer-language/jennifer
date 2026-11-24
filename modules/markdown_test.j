@@ -16,6 +16,8 @@ use encoding;
 use fs;
 use hash;
 use os;
+use compress;
+use regex;
 import "./ansi.j" as ansi;
 import "./pdf.j" as pdf;
 
@@ -1548,10 +1550,46 @@ func testPdfStandard14Golden() {
     $o.headingStyles = [doctree.headingStyle(doctree.gray(205))];
     $o.images["p.png"] = pdf.loadImage("Pic", encoding.fromText("base64", MDIMGPNG));
     def out as bytes init toPdfWith($md, $o);
-    testing.assertEqual(len($out), 3428);
     testing.assertEqual(
-        encoding.toText("hex", hash.compute("sha256", $out)),
-        "4cfa9798184373bf64d9931c58f0963f284738789bc8eb6150319324e9cc354c");
+        encoding.toText("hex", hash.compute("sha256", pdfCanonical($out))),
+        "2300d9bb0c7ebb65b1687bb7b9be3c566d5a6d48c9180bc8f0e5b71be8d8375f");
+}
+
+# pdfCanonical is a PDF with every FlateDecode stream inflated and every
+# `/Length` masked: the compressed bytes depend on the Go release's DEFLATE
+# encoder, the content does not, so the golden holds on any toolchain.
+func pdfCanonical(pdf as bytes) {
+    def parts as list of bytes;
+    def open as bytes init encoding.encode("utf-8", ">>\nstream\n");
+    def close as bytes init encoding.encode("utf-8", "\nendstream");
+    def pos as int init 0;
+    while (true) {
+        def i as int init binary.indexOf($pdf, $open, $pos);
+        if ($i < 0) {
+            break;
+        }
+        def bodyStart as int init $i + len($open);
+        def j as int init binary.indexOf($pdf, $close, $bodyStart);
+        $parts[] = maskLengths($pdf[$pos..$bodyStart]);
+        def body as bytes init $pdf[$bodyStart..$j];
+        try {
+            $body = compress.unpack("zlib", $body);
+        } catch (e) {
+            # Not zlib (a JPEG image stream): kept as written.
+            if ($e.kind != "compress") {
+                throw $e;
+            }
+        }
+        $parts[] = $body;
+        $pos = $j;
+    }
+    $parts[] = maskLengths($pdf[$pos..len($pdf)]);
+    return binary.join($parts);
+}
+
+func maskLengths(b as bytes) {
+    def text as string init encoding.decode("iso-8859-1", $b);
+    return encoding.encode("iso-8859-1", regex.replace('/Length1? [0-9]+', $text, "/Length ?"));
 }
 
 # dejaVu returns the path of a DejaVu face on this machine, or "".
@@ -1617,4 +1655,39 @@ func testPdfDejaVuRoundTrip() {
     for (def cp in [0x395, 0x41f, 0x2192, 0x3b3]) {
         testing.assertContains($cps, $cp);
     }
+}
+
+# wideTable is a 100-column table with a header row and `rows` rows of empty
+# cells: 102 + 101 * rows nodes, 100 holders and 100 texts among them.
+func wideTable(rows as int) {
+    return strings.replicate("|h", 100) + "|\n" + strings.replicate("|-", 100) + "|\n" +
+        strings.replicate(strings.replicate("|", 101) + "\n", $rows);
+}
+
+func overBudgetBlocks() {
+    blockParse(wideTable(990));
+}
+
+# One more paragraph whose inline markup pushes the document over the budget.
+func overBudgetInline() {
+    parse(wideTable(970) + "\n" + strings.replicate("*a* ", 1000) + "\n");
+}
+
+# The node budget is counted while the tree is built: the block pass stops at
+# it, before any inline markup is parsed, and the inline pass counts the nodes
+# it adds.
+func testNodeBudgetCountedWhileParsing() {
+    testing.assertEqual(MAX_DOC_NODES, 100000);
+    testing.assertThrows("overBudgetBlocks", "limit");
+    testing.assertThrows("overBudgetInline", "limit");
+}
+
+func overSourceCap() {
+    parse(strings.replicate("a", MAX_SOURCE + 1));
+}
+
+# A source over MAX_SOURCE characters is refused before it is parsed.
+func testSourceCapThrows() {
+    testing.assertEqual(MAX_SOURCE, 4194304);
+    testing.assertThrows("overSourceCap", "limit");
 }
