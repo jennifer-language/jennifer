@@ -3,9 +3,9 @@
 
 # Build pipeline:
 #   1. scripts/gen-version.sh writes internal/version/version_gen.go from the
-#      current git state (gitignored; regenerated on every build).
+#      current git state and PREFIX (gitignored; regenerated on every build).
 #   2. The toolchain compiles the binary picking up that file via an init()
-#      that sets Version.
+#      that sets Version and Prefix.
 #
 # `make build` produces both binaries because Jennifer has a deliberate
 # two-binary story:
@@ -107,10 +107,19 @@ test:
 clean:
 	rm -f jennifer jennifer-tiny jennifer-tiny-dev internal/version/version_gen.go
 
-# Regenerate the version-init file from git state. Always runs; the .PHONY
-# declaration above ensures make doesn't skip it on rebuild.
+# Install prefix the binaries are built for (M29.4): the system module
+# directory defaults to $(PREFIX)/share/jennifer/modules, the docs to
+# $(PREFIX)/share/doc/jennifer, and the resolver looks for resolv.conf / hosts
+# in $(PREFIX)/etc before /etc (the FHS prefix /usr keeps them in /etc). Built
+# into the binary by gen-version below, so `make build PREFIX=/opt/jennifer`
+# finds its modules there without JENNIFER_SYSMODDIR. An absolute path; the
+# packaging passes its own (Debian, Arch, OpenWrt, Docker: /usr).
+PREFIX ?= /usr
+
+# Regenerate the version-init file from git state and PREFIX. Always runs; the
+# .PHONY declaration above ensures make doesn't skip it on rebuild.
 gen-version:
-	@sh scripts/gen-version.sh
+	@JENNIFER_PREFIX='$(PREFIX)' sh scripts/gen-version.sh
 
 # Print the version string that the next build would embed.
 version:

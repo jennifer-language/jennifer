@@ -63,8 +63,10 @@ build() {
     # `make build` builds the standard-Go `jennifer` and, when the toolchain can,
     # the TinyGo `jennifer-tiny`; it skips the tiny half gracefully otherwise (see
     # the header note), so this never fails for lack of a working
-    # TinyGo. package() installs whichever binaries were produced.
-    make build GOBUILDFLAGS=-trimpath
+    # TinyGo. package() installs whichever binaries were produced. PREFIX is
+    # explicit (an inherited PREFIX in the environment would change the built-in
+    # module path); /usr is where package() installs.
+    make build GOBUILDFLAGS=-trimpath PREFIX=/usr
 }
 
 check() {

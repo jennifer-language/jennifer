@@ -21,15 +21,15 @@ class Jennifer < Formula
   depends_on "go" => :build
 
   def install
-    # Bake the version and the module search path at link time. Homebrew builds
-    # with standard Go, which honours -ldflags -X (TinyGo would not); the GitHub
+    # Bake the version and the install prefix at link time. Homebrew builds with
+    # standard Go, which honours -ldflags -X (TinyGo would not); the GitHub
     # source tarball omits the gitignored version_gen.go, so no init() overrides
-    # these. opt_prefix keeps the module path stable across version bumps.
-    modules = "#{opt_prefix}/share/jennifer/modules"
+    # these. The module path (<prefix>/share/jennifer/modules) and the docs path
+    # follow the prefix; opt_prefix keeps them stable across version bumps.
     ldflags = %W[
       -s -w
       -X jennifer-lang.dev/jennifer/internal/version.Version=#{version}
-      -X jennifer-lang.dev/jennifer/internal/module.compileDefaultSysmoddir=#{modules}
+      -X jennifer-lang.dev/jennifer/internal/version.Prefix=#{opt_prefix}
     ].join(" ")
     system "go", "build", "-trimpath", "-ldflags", ldflags, "-o", bin/"jennifer", "./cmd/jennifer"
 

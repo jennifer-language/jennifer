@@ -2,10 +2,16 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 #
-# Writes internal/version/version_gen.go with the current build version.
-# Called by the Makefile before each build target. The generated file is
-# .gitignored; `go test` without running this script falls back to the
-# default "dev" baked into version.go.
+# Writes internal/version/version_gen.go with the current build version and
+# the install prefix. Called by the Makefile before each build target. The
+# generated file is .gitignored; `go test` without running this script falls
+# back to the defaults in version.go / paths.go ("dev", prefix /usr).
+#
+# The prefix comes from JENNIFER_PREFIX (the Makefile passes `make PREFIX=`),
+# default /usr. It must be an absolute path; the system module directory
+# (<prefix>/share/jennifer/modules), the docs directory and the resolver's
+# configuration directory derive from it. An init() sets both values because
+# TinyGo before 0.43.0 ignores `-ldflags -X`.
 
 set -eu
 
@@ -13,7 +19,27 @@ here=$(cd "$(dirname "$0")" && pwd)
 ver=$(sh "$here/version.sh")
 out="$here/../internal/version/version_gen.go"
 
-cat > "$out" <<EOF
+prefix=${JENNIFER_PREFIX:-/usr}
+case "$prefix" in
+    /*) ;;
+    *) echo "gen-version.sh: PREFIX must be an absolute path, got '$prefix'" >&2; exit 2 ;;
+esac
+# The value lands in a Go string literal: refuse anything that would need
+# escaping (quotes, backslashes, control characters such as a newline).
+if printf '%s' "$prefix" | LC_ALL=C grep -q '["\\[:cntrl:]]'; then
+    echo "gen-version.sh: PREFIX must not contain quotes, backslashes or control characters" >&2
+    exit 2
+fi
+if [ "$(printf '%s' "$prefix" | wc -l)" -ne 0 ]; then
+    echo "gen-version.sh: PREFIX must be a single line" >&2
+    exit 2
+fi
+# Drop trailing slashes (the root stays "/").
+while [ "${#prefix}" -gt 1 ] && [ "${prefix%/}" != "$prefix" ]; do
+    prefix=${prefix%/}
+done
+
+cat > "$out" <<GEN
 // SPDX-License-Identifier: LGPL-3.0-only
 // SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
@@ -21,7 +47,10 @@ cat > "$out" <<EOF
 
 package version
 
-func init() { Version = "$ver" }
-EOF
+func init() {
+	Version = "$ver"
+	Prefix = "$prefix"
+}
+GEN
 
-echo "wrote $out (Version=$ver)"
+echo "wrote $out (Version=$ver Prefix=$prefix)"

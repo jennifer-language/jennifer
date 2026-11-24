@@ -6,6 +6,8 @@ package module
 import (
 	"fmt"
 	"os"
+
+	"jennifer-lang.dev/jennifer/internal/version"
 )
 
 // SysmoddirEnv is the environment variable that overrides the system
@@ -18,17 +20,13 @@ const SysmoddirEnv = "JENNIFER_SYSMODDIR"
 // `vendor/` walk).
 const VendorEnv = "JENNIFER_VENDOR"
 
-// compileDefaultSysmoddir is the built-in system module directory. It is a
-// var (not a const) so the build can override it the same way the version
-// string is stamped - a generated file's init(), since TinyGo ignores
-// `-ldflags -X`. Left at the FHS location a distro package installs to;
-// on a fresh checkout with nothing installed there it simply resolves to
-// no modules, which is fine (a program that imports nothing still runs).
-var compileDefaultSysmoddir = "/usr/share/jennifer/modules"
-
-// CompileDefaultSysmoddir returns the built-in system module directory
-// (the lowest-precedence layer), for `jennifer version -v` reporting.
-func CompileDefaultSysmoddir() string { return compileDefaultSysmoddir }
+// CompileDefaultSysmoddir returns the built-in system module directory (the
+// lowest-precedence layer): <PREFIX>/share/jennifer/modules, where PREFIX is
+// the install prefix the build was made for (`make PREFIX=<dir>`, default
+// /usr; see version.Prefix). On a fresh checkout with nothing installed there
+// it simply resolves to no modules, which is fine (a program that imports
+// nothing still runs).
+func CompileDefaultSysmoddir() string { return version.SysmoddirDefault() }
 
 // Source names the layer a resolved sysmoddir came from, for `meta`
 // reporting and `jennifer version -v`.
@@ -58,7 +56,7 @@ func ResolveSysmoddir(cliFlag string, getenv func(string) string) Sysmoddir {
 	if env := getenv(SysmoddirEnv); env != "" {
 		return Sysmoddir{Dir: env, Source: SourceEnv}
 	}
-	return Sysmoddir{Dir: compileDefaultSysmoddir, Source: SourceCompile}
+	return Sysmoddir{Dir: CompileDefaultSysmoddir(), Source: SourceCompile}
 }
 
 // Validate refuses to start when a sysmoddir named explicitly (via the CLI

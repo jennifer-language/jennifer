@@ -27,7 +27,7 @@ func TestResolveSysmoddirPrecedence(t *testing.T) {
 		t.Errorf("env precedence: got %+v", got)
 	}
 	// Compile default when neither is set.
-	if got := ResolveSysmoddir("", noEnv); got.Source != SourceCompile || got.Dir != compileDefaultSysmoddir {
+	if got := ResolveSysmoddir("", noEnv); got.Source != SourceCompile || got.Dir != CompileDefaultSysmoddir() {
 		t.Errorf("compile default: got %+v", got)
 	}
 }
