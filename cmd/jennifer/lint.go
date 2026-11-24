@@ -173,6 +173,7 @@ func lintComputeDiags(path string, opts lintOptions) (diags []lint.Diagnostic, s
 
 	cfg := lint.DefaultConfig()
 	cfg.Modules, cfg.Bundled = lintModules(prog, baseDir, opts)
+	cfg.DeprecatedExports = lint.ModuleDeprecations(cfg.Modules, os.ReadFile)
 	cfg.LibStructs, cfg.LibConsts, cfg.Libraries = lintLibSurface()
 	diags = lint.Check(prog, suppressTokens, src, absPath, enabled, cfg)
 	if len(baseFiles) > 0 {

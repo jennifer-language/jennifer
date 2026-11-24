@@ -1626,12 +1626,13 @@ func (c *checkCtx) reportLitFieldsAllowMissing(lit *parser.StructLit, declared [
 }
 
 // checkDeprecated (L301) reports a call to a deprecated builtin (the table in
-// internal/libsig) with what to use instead, and the one-value printing shape
-// `io.printf($v)` / `sprintf` / `eprintf`, where the single argument is
-// certainly not a string: that is a verbatim print (rejected.md), written
-// `io.printf("%v", $v)`. A single string argument is the format and is fine.
+// internal/libsig) with what to use instead, and the deprecated `net` call
+// shapes only their arguments tell apart (deprecatedNetShape).
 func checkDeprecated(c *checkCtx) {
 	typedWalk(c, nil, func(t *typer, e parser.Expr, resolve func(string) *binding) {
+		if reportDeprecatedExport(c, e) {
+			return
+		}
 		qc, ok := e.(*parser.QualifiedCallExpr)
 		if !ok || c.cfg.Modules[qc.Prefix] != nil {
 			return
@@ -1642,8 +1643,47 @@ func checkDeprecated(c *checkCtx) {
 		}
 		if d, ok := libsig.Deprecated(lib, qc.Callee); ok {
 			c.report("L301", qc, fmt.Sprintf("`%s.%s` is deprecated and removed in %s; use %s", qc.Prefix, qc.Callee, d.Removed, d.Instead))
+			return
 		}
+		if lib == "net" {
+			if msg := deprecatedNetShape(t, qc, resolve); msg != "" {
+				c.report("L301", qc, msg)
+			}
+		}
+		checkDeprecatedCrypto(c, t, lib, qc, resolve)
+		checkDeprecatedDecoders(c, lib, qc)
+		checkDeprecatedSQLDriver(c, lib, qc)
+		checkDeprecatedRestValues(c, t, lib, qc, resolve)
+		checkDeprecatedRestHandles(c, lib, qc)
+		checkDeprecatedWaits(c, lib, qc)
 	})
+}
+
+// deprecatedNetShape names the fix for a deprecated `net` call shape (M29.37,
+// removed in 0.29.0): the trailing timeoutMs of connect / connectTLS /
+// startTLS, and the trailing idle timeout of readAll / readN. A two-argument
+// connectTLS / startTLS is the old shape only when its second argument is
+// certainly an int (a net.TLSOptions is the current form).
+func deprecatedNetShape(t *typer, qc *parser.QualifiedCallExpr, resolve func(string) *binding) string {
+	p, n := qc.Prefix, len(qc.Args)
+	const removed = "is deprecated and removed in 0.29.0"
+	intArg := func(i int) bool {
+		ty, ok := t.typeOf(qc.Args[i], resolve)
+		return ok && ty.Kind == parser.TypeInt
+	}
+	switch {
+	case qc.Callee == "connect" && n == 2:
+		return fmt.Sprintf("`%s.connect(addr, timeoutMs)` %s; use `%s.connectWith(addr, %s.ConnectOptions{timeoutMs: ...})`", p, removed, p, p)
+	case qc.Callee == "connectTLS" && (n == 3 || (n == 2 && intArg(1))):
+		return fmt.Sprintf("`%s.connectTLS(..., timeoutMs)` %s; use `%s.connectWith(addr, %s.ConnectOptions{timeoutMs: ..., tls: true, tlsOptions: ...})`", p, removed, p, p)
+	case qc.Callee == "startTLS" && (n == 3 || (n == 2 && intArg(1))):
+		return fmt.Sprintf("`%s.startTLS(..., timeoutMs)` %s; use `%s.startTLSWith(conn, %s.ConnectOptions{timeoutMs: ..., tlsOptions: ...})`", p, removed, p, p)
+	case qc.Callee == "readAll" && n == 3:
+		return fmt.Sprintf("`%s.readAll(conn, maxBytes, idleTimeoutMs)` %s; use `%s.setIdleTimeout(conn, ms)` before `%s.readAll(conn, maxBytes)`", p, removed, p, p)
+	case qc.Callee == "readN" && n == 3:
+		return fmt.Sprintf("`%s.readN(conn, n, idleTimeoutMs)` %s; use `%s.setIdleTimeout(conn, ms)` before `%s.readN(conn, n)`", p, removed, p, p)
+	}
+	return ""
 }
 
 // removedShape reports whether a call is one of the removed call shapes

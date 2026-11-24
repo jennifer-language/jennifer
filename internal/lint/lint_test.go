@@ -1350,6 +1350,63 @@ func TestRemovedBuiltins(t *testing.T) {
 	}
 }
 
+// TestDeprecatedNetShapes: L301 reports a deprecated builtin (`net.eof`) and
+// the deprecated `net` call shapes: a trailing timeoutMs on connect,
+// connectTLS and startTLS (a lone second argument only when it is certainly
+// an int), and the trailing idle timeout of readAll / readN. It is info, and
+// the arity (L109) and argument-type (L110) checks accept the old shapes.
+func TestDeprecatedNetShapes(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	const head = "use net;\ndef c as net.Conn init net.connect(\"h:1\");\ndef o as net.TLSOptions;\n"
+	cases := []struct {
+		name string
+		src  string
+		want int
+		frag string
+	}{
+		{"connect with a timeout", "use net;\ndef c as net.Conn init net.connect(\"h:1\", 500);", 1, "`net.connect(addr, timeoutMs)` is deprecated and removed in 0.29.0; use `net.connectWith(addr, net.ConnectOptions{timeoutMs: ...})`"},
+		{"aliased connect with a timeout", "use net as n;\ndef c as n.Conn init n.connect(\"h:1\", 500);", 1, "`n.connectWith("},
+		{"connect", "use net;\ndef c as net.Conn init net.connect(\"h:1\");", 0, ""},
+		{"connectWith", "use net;\ndef c as net.Conn init net.connectWith(\"h:1\", net.ConnectOptions{timeoutMs: 500, tls: true});", 0, ""},
+		{"connectTLS with an int", "use net;\ndef c as net.Conn init net.connectTLS(\"h:1\", 500);", 1, "`net.connectTLS(..., timeoutMs)`"},
+		{"connectTLS with options", head + "def d as net.Conn init net.connectTLS(\"h:1\", $o);", 0, ""},
+		{"connectTLS with options and an int", head + "def d as net.Conn init net.connectTLS(\"h:1\", $o, 500);", 1, "`net.connectTLS(..., timeoutMs)`"},
+		{"startTLS with an int variable", head + "def ms as int init 500;\nnet.startTLS($c, $ms);", 1, "`net.startTLSWith(conn,"},
+		{"startTLS with options", head + "net.startTLS($c, $o);", 0, ""},
+		{"startTLS with options and an int", head + "net.startTLS($c, $o, 500);", 1, "`net.startTLS(..., timeoutMs)`"},
+		{"startTLSWith", head + "net.startTLSWith($c, net.ConnectOptions{timeoutMs: 500});", 0, ""},
+		{"readAll with an idle timeout", head + "def b as bytes init net.readAll($c, 100, 500);", 1, "`net.setIdleTimeout(conn, ms)` before `net.readAll(conn, maxBytes)`"},
+		{"readAll with a cap", head + "def b as bytes init net.readAll($c, 100);", 0, ""},
+		{"readN with an idle timeout", head + "def b as bytes init net.readN($c, 4, 500);", 1, "`net.readN(conn, n, idleTimeoutMs)`"},
+		{"readN", head + "def b as bytes init net.readN($c, 4);", 0, ""},
+		{"eof", head + "def e as bool init net.eof($c);", 1, "`net.eof` is deprecated and removed in 0.29.0; use an empty `net.readBytes`"},
+		{"setIdleTimeout", head + "net.setIdleTimeout($c, 500);", 0, ""},
+		{"lookupWith", "use net;\ndef a as list of string init net.lookupWith(\"localhost\", net.ConnectOptions{timeoutMs: 500});", 0, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			diags := lintSrcResolved(t, c.src, only("L301", "L114", "L109", "L110"), cfg)
+			if got := countID(diags, "L301"); got != c.want {
+				t.Errorf("L301 count = %d, want %d: %v", got, c.want, diags)
+			}
+			if n := countID(diags, "L114") + countID(diags, "L109") + countID(diags, "L110"); n != 0 {
+				t.Errorf("L114/L109/L110 also reported: %v", diags)
+			}
+			for _, d := range diags {
+				if d.ID != "L301" {
+					continue
+				}
+				if d.Severity != lint.SeverityInfo {
+					t.Errorf("L301 severity = %v, want info", d.Severity)
+				}
+				if !strings.Contains(d.Message, c.frag) {
+					t.Errorf("L301 message %q lacks %q", d.Message, c.frag)
+				}
+			}
+		})
+	}
+}
+
 // TestPrintfFormat: L117 parses a literal printf format as printf does at
 // call time: a malformed verb or modifier, a verb count other than the value
 // count, and a value whose static type its verb does not take are reported;

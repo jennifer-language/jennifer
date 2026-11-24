@@ -29,6 +29,10 @@ type Config struct {
 	// directory. A literal of such a module's struct may leave fields out, as
 	// the interpreter allows, so L113 reports only its unknown fields.
 	Bundled map[string]bool
+	// DeprecatedExports holds, per Modules prefix, the exported functions
+	// whose docblock carries `@deprecated`, with the tag's text (see
+	// ModuleDeprecations). L301 reports a call to one. Left nil, none is.
+	DeprecatedExports map[string]map[string]string
 	// LibStructs and LibConsts describe the standard library's registered
 	// struct / opaque types (keyed "lib.Name") and constants (keyed "lib.NAME",
 	// valued by their type). The CLI fills them from an interpreter with every
