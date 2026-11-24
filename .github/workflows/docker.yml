@@ -24,9 +24,13 @@
 # release-only (a per-commit build of each would multiply the build for little
 # gain).
 #
-# Both release arches are linux/amd64 + linux/arm64, cross-compiled on the amd64
-# runner (Go and TinyGo honour GOARCH), so only the slim stage's tiny apt step
-# and the alpine stage's apk step touch QEMU. Independent of release.yml - the
+# The arches are linux/amd64, linux/arm64, linux/arm/v7, linux/386 and
+# linux/riscv64, plus linux/arm/v6 for alpine (each variant takes the platforms
+# its base publishes: debian:trixie-slim has arm/v5 and v7 but no v6;
+# distroless only the first three, so static has those), cross-compiled
+# on the amd64 runner (Go and TinyGo honour GOARCH; TinyGo has no riscv64, so
+# that image carries jennifer alone), so only the slim stage's tiny apt step,
+# the alpine stage's apk step and the `jvc version` check touch QEMU. Independent of release.yml - the
 # image build is self-contained from source.
 
 name: docker
@@ -113,7 +117,7 @@ jobs:
           context: .
           file: packaging/docker/Dockerfile
           target: slim
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/386,linux/riscv64
           push: ${{ startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main' }}
           # A release build carries its version; a main build carries a generic
           # "dev" (no commit id) so :dev images all report the same meta.VERSION.
@@ -144,7 +148,7 @@ jobs:
           context: .
           file: packaging/docker/Dockerfile
           target: alpine
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64,linux/arm64,linux/arm/v6,linux/arm/v7,linux/386,linux/riscv64
           push: ${{ startsWith(github.ref, 'refs/tags/') }}
           build-args: |
             VERSION=${{ github.ref_name }}
@@ -173,7 +177,7 @@ jobs:
           context: .
           file: packaging/docker/Dockerfile
           target: static
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: ${{ startsWith(github.ref, 'refs/tags/') }}
           build-args: |
             VERSION=${{ github.ref_name }}

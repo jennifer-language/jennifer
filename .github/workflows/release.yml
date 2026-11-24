@@ -11,9 +11,10 @@
 # pre-release; benchmarks run in the test pipeline (test.yml), not
 # here - CI-runner numbers are too noisy for release notes.
 #
-# Supported platforms: linux/amd64, linux/arm64 (two binaries each).
-# macOS and Windows ship best-effort, UNSUPPORTED `jennifer`-only
-# builds in a separate matrix.
+# Supported platforms: linux/amd64, linux/arm64, linux/arm (GOARM=7, named
+# armv7, and GOARM=6, named armv6), linux/386 (two binaries each) and
+# linux/riscv64 (`jennifer` only: TinyGo has no riscv64 target). macOS, Windows and Android ship
+# best-effort, UNSUPPORTED `jennifer`-only builds in a separate matrix.
 
 name: release
 
@@ -31,16 +32,53 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.os }}/${{ matrix.arch }}
+    name: Build ${{ matrix.os }}/${{ matrix.label || matrix.arch }}
     runs-on: ubuntu-latest
+    env:
+      # The arch in the artifact names: the Go arch, except armv7 / armv6 for
+      # GOARCH=arm GOARM=7 / 6 (the variant is part of what the binary needs).
+      LABEL: ${{ matrix.label || matrix.arch }}
+      # The CPU QEMU emulates for the row's smoke and module tests (empty: its
+      # default). The steps that run a binary export it as QEMU_CPU only when
+      # set: qemu-user refuses an empty QEMU_CPU.
+      ROW_QEMU_CPU: ${{ matrix.qemucpu }}
     strategy:
       fail-fast: false
       matrix:
+        # deb: the Debian architecture of the .deb (none: the row builds no
+        # .deb). notiny: TinyGo has no target for the arch, so the row ships
+        # `jennifer` alone. qemucpu: the CPU QEMU emulates.
         include:
           - os: linux
             arch: amd64
+            deb: amd64
           - os: linux
             arch: arm64
+            deb: arm64
+          # ARMv7 with VFP, the common 32-bit ARM (Raspberry Pi 2 and later
+          # in 32-bit mode, most ARM boards and phones of that era). Tarball
+          # and .ipk only: the armhf .deb carries the armv6 binary.
+          - os: linux
+            arch: arm
+            goarm: '7'
+            label: armv7
+          # ARMv6 with VFP (Raspberry Pi Zero / 1, OpenWrt bcm2708). It also
+          # runs on every ARMv7, so it is the armhf .deb's binary: Raspberry Pi
+          # OS's armhf baseline is ARMv6. QEMU emulates an ARM1176, so an
+          # ARMv7-only instruction faults in the smoke test.
+          - os: linux
+            arch: arm
+            goarm: '6'
+            label: armv6
+            deb: armhf
+            qemucpu: arm1176
+          - os: linux
+            arch: '386'
+            deb: i386
+          - os: linux
+            arch: riscv64
+            deb: riscv64
+            notiny: true
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -54,21 +92,26 @@ jobs:
           cache: true
 
       - name: Set up TinyGo
+        if: ${{ !matrix.notiny }}
         uses: acifani/setup-tinygo@v3
         with:
           tinygo-version: '0.41.1'
 
       - name: Set up QEMU (for non-native arch smoke tests)
-        if: matrix.arch != 'amd64'
+        # 386 runs natively on the amd64 runner.
+        if: matrix.arch != 'amd64' && matrix.arch != '386'
         uses: docker/setup-qemu-action@v4
 
       - name: Regenerate version stamp
-        run: ./scripts/gen-version.sh
+        # The tarballs, .deb and .ipk install under /usr (M29.4: the built-in
+        # module, docs and resolver paths follow the prefix).
+        run: JENNIFER_PREFIX=/usr ./scripts/gen-version.sh
 
       - name: Build Go binary (jennifer)
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
+          GOARM: ${{ matrix.goarm }}
           CGO_ENABLED: '0'
         run: |
           # Release flags: -trimpath drops local build paths for a
@@ -80,6 +123,7 @@ jobs:
           go build -trimpath -ldflags="-s -w" -o jennifer ./cmd/jennifer
 
       - name: Build TinyGo binary (jennifer-tiny)
+        if: ${{ !matrix.notiny }}
         env:
           # TinyGo's `-target=` flag names board / arch presets
           # (`wasi`, `microbit`, ...); it does *not* accept `os/arch`
@@ -99,22 +143,58 @@ jobs:
           # docs/technical/tinygo.md.
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
+          GOARM: ${{ matrix.goarm }}
         run: |
           tinygo build -scheduler=tasks -stack-size=4mb -no-debug -o jennifer-tiny ./cmd/jennifer
 
       - name: Smoke-test the binaries
         run: |
+          set -eu
+          if [ -n "$ROW_QEMU_CPU" ]; then export QEMU_CPU="$ROW_QEMU_CPU"; fi
           # On a native-arch run we execute directly; on a foreign
           # arch QEMU user-mode emulation handles it.
-          ./jennifer run examples/hello.j
-          ./jennifer-tiny run examples/hello.j
-          # Deep recursion must end in the catchable depth-limit error, not a
-          # segfault: this checks that the -stack-size above still leaves room
-          # for internal/limits.MaxCallDepth on this arch (frame sizes differ
-          # per arch, so it runs on every row).
-          for bin in ./jennifer ./jennifer-tiny; do
+          bins=./jennifer
+          [ -f ./jennifer-tiny ] && bins="$bins ./jennifer-tiny"
+          for bin in $bins; do
+            "$bin" version
+            "$bin" run examples/hello.j
+            # Deep recursion must end in the catchable depth-limit error, not a
+            # segfault: this checks that the -stack-size above still leaves room
+            # for internal/limits.MaxCallDepth on this arch (frame sizes differ
+            # per arch, so it runs on every row).
             "$bin" run examples/recursion_limit.j | diff -u examples/expected/recursion_limit.txt -
           done
+          ./jennifer version -v
+
+      - name: Name resolution against a loopback DNS fake (no network)
+        # M29.5 on every arch: net.lookupWith with dnsServers asks a DNS
+        # server written in Jennifer on loopback UDP, and JENNIFER_HOSTS routes
+        # net.lookup through the interpreter's resolver stub.
+        run: |
+          set -eu
+          if [ -n "$ROW_QEMU_CPU" ]; then export QEMU_CPU="$ROW_QEMU_CPU"; fi
+          printf '192.0.2.9 smoke.test\n' > "$RUNNER_TEMP/hosts"
+          JENNIFER_HOSTS="$RUNNER_TEMP/hosts" ./jennifer run scripts/smoke-dns.j | tee "$RUNNER_TEMP/dns.txt"
+          grep -qx 'lookupWith: 192.0.2.7' "$RUNNER_TEMP/dns.txt"
+          grep -qx 'hosts: \["192.0.2.9"\]' "$RUNNER_TEMP/dns.txt"
+
+      - name: Module tests under the target arch
+        # Every shipped module overlay, run by the release binary on its own
+        # arch (under QEMU off amd64 / 386). None needs the network: they pass
+        # in a network namespace with only loopback up. A failure fails the row,
+        # so a 32-bit or riscv64 regression blocks the release.
+        run: |
+          set -u
+          if [ -n "$ROW_QEMU_CPU" ]; then export QEMU_CPU="$ROW_QEMU_CPU"; fi
+          rc=0
+          for t in modules/*_test.j; do
+            if ! JENNIFER_SYSMODDIR="$PWD/modules" ./jennifer test "$t" > "$RUNNER_TEMP/overlay.log" 2>&1; then
+              echo "::error::$t failed on ${LABEL}"
+              cat "$RUNNER_TEMP/overlay.log"
+              rc=1
+            fi
+          done
+          exit $rc
 
       - name: Golden examples under the release jennifer-tiny (amd64 only)
         # The release build uses its own tinygo command rather than the
@@ -158,18 +238,22 @@ jobs:
           # plus the packaging metadata downstream distros consume.
           # Naming: jennifer-${TAG}-${OS}-${ARCH}.tar.gz
           TAG="${GITHUB_REF_NAME}"
-          STAGE="jennifer-${TAG}-${{ matrix.os }}-${{ matrix.arch }}"
+          STAGE="jennifer-${TAG}-${{ matrix.os }}-${LABEL}"
           mkdir -p "$STAGE/share/man/man1" "$STAGE/share/mime/packages" \
                    "$STAGE/share/bash-completion/completions" \
                    "$STAGE/share/vim/vimfiles/syntax" "$STAGE/share/vim/vimfiles/ftdetect" \
                    "$STAGE/share/nvim/site/syntax" "$STAGE/share/nvim/site/ftdetect" \
                    "$STAGE/share/jennifer/syntaxes"
-          cp jennifer jennifer-tiny "$STAGE/"
+          cp jennifer "$STAGE/"
           cp packaging/man/jennifer.1      "$STAGE/share/man/man1/"
-          cp packaging/man/jennifer-tiny.1 "$STAGE/share/man/man1/"
           cp packaging/mime/jennifer.xml "$STAGE/share/mime/packages/"
           cp packaging/completions/jennifer.bash "$STAGE/share/bash-completion/completions/jennifer"
-          ln -sf jennifer "$STAGE/share/bash-completion/completions/jennifer-tiny"
+          # jennifer-tiny where TinyGo builds for the arch (not riscv64).
+          if [ -f jennifer-tiny ]; then
+            cp jennifer-tiny "$STAGE/"
+            cp packaging/man/jennifer-tiny.1 "$STAGE/share/man/man1/"
+            ln -sf jennifer "$STAGE/share/bash-completion/completions/jennifer-tiny"
+          fi
           # Vim and Neovim read separate runtimepaths; ship a copy for each.
           cp editors/vim/syntax/jennifer.vim   "$STAGE/share/vim/vimfiles/syntax/"
           cp editors/vim/ftdetect/jennifer.vim "$STAGE/share/vim/vimfiles/ftdetect/"
@@ -191,30 +275,30 @@ jobs:
           (cd dist && sha256sum "${STAGE}.tar.gz" > "${STAGE}.tar.gz.sha256")
 
       - name: Build Debian .deb
+        # One .deb per Debian arch: the armv7 row builds none (armhf is armv6).
+        if: matrix.deb
         run: |
           mkdir -p dist
           # Tags are bare semver (e.g. `0.14.1`), no `v` prefix to strip.
           DEB_VERSION="${GITHUB_REF_NAME}"
-          case "${{ matrix.arch }}" in
-              amd64)  DEB_ARCH=amd64 ;;
-              arm64)  DEB_ARCH=arm64 ;;
-              *)      echo "unsupported arch ${{ matrix.arch }}" >&2; exit 1 ;;
-          esac
-          ./scripts/build-deb.sh "$DEB_VERSION" "$DEB_ARCH" dist
+          # The matrix names the Debian arch (armhf for armv6, i386 for 386).
+          ./scripts/build-deb.sh "$DEB_VERSION" "${{ matrix.deb }}" dist
 
-      - name: Build OpenWRT .ipk
+      - name: Build OpenWrt .ipk
         run: |
           mkdir -p dist
-          # Bare semver tag. build-ipk.sh maps amd64 -> x86_64 and
-          # arm64 -> aarch64_generic and assembles the .ipk from the static
-          # ./jennifer with plain ar/tar (no OpenWRT SDK needed).
-          ./scripts/build-ipk.sh "${GITHUB_REF_NAME}" "${{ matrix.arch }}" dist
+          # Bare semver tag. build-ipk.sh maps amd64 -> x86_64, arm64 ->
+          # aarch64_generic, armv7 -> arm_cortex-a7_neon-vfpv4, armv6 ->
+          # arm_arm1176jzf-s_vfp, 386 -> i386_pentium4 and riscv64 ->
+          # riscv64_riscv64 and assembles the .ipk from the static ./jennifer
+          # with plain ar/tar (no OpenWrt SDK needed).
+          ./scripts/build-ipk.sh "${GITHUB_REF_NAME}" "${LABEL}" dist
 
       - name: Upload build artifacts
         if: github.server_url == 'https://github.com'
         uses: actions/upload-artifact@v7
         with:
-          name: jennifer-${{ matrix.os }}-${{ matrix.arch }}
+          name: jennifer-${{ matrix.os }}-${{ matrix.label || matrix.arch }}
           path: |
             dist/*.tar.gz
             dist/*.deb
@@ -243,6 +327,14 @@ jobs:
             arch: amd64
           - os: windows
             arch: '386'
+          # Go's android targets: only arm64 links without cgo (amd64, arm
+          # and 386 need the NDK's external linker). Built for Termux's
+          # prefix, so its modules and resolv.conf are found there (M29.4,
+          # M29.5). Bionic's linker (/system/bin/linker64) runs it, so no
+          # QEMU smoke test on the Linux runner.
+          - os: android
+            arch: arm64
+            prefix: /data/data/com.termux/files/usr
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -256,7 +348,7 @@ jobs:
           cache: true
 
       - name: Regenerate version stamp
-        run: ./scripts/gen-version.sh
+        run: JENNIFER_PREFIX='${{ matrix.prefix || '/usr' }}' ./scripts/gen-version.sh
 
       - name: Build Go binary (jennifer only)
         env:
@@ -279,6 +371,14 @@ jobs:
           cp "jennifer${ext}" "$STAGE/"
           cp README.md JENNIFER.md packaging/UNSUPPORTED.txt "$STAGE/"
           cp packaging/debian/copyright "$STAGE/LICENSE.txt"
+          if [ "${{ matrix.os }}" = "android" ]; then
+            # The importable modules, for <prefix>/share/jennifer/modules.
+            mkdir -p "$STAGE/share/jennifer/modules"
+            for m in modules/*.j; do
+              case "$m" in *_test.j) continue ;; esac
+              cp "$m" "$STAGE/share/jennifer/modules/"
+            done
+          fi
           if [ "${{ matrix.os }}" = "windows" ]; then
             zip -qr "dist/${STAGE}.zip" "$STAGE"
             (cd dist && sha256sum "${STAGE}.zip" > "${STAGE}.zip.sha256")
@@ -456,6 +556,11 @@ jobs:
           find artifacts -type f \
               \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.deb' -o -name '*.ipk' -o -name '*.sha256' -o -name '*.exe' \) \
               -exec cp {} release/ \;
+          # One .deb per Debian arch (armhf: the armv6 binary, not armv7).
+          dups=$(ls release/*.deb | sed 's/.*_//' | sort | uniq -d)
+          if [ -n "$dups" ]; then
+            echo "::error::more than one .deb for: $dups"; exit 1
+          fi
           # Test + coverage reports (produced by the amd64 build row).
           if [ -d artifacts/test-reports ]; then
             cp artifacts/test-reports/report.xml \
@@ -544,19 +649,22 @@ jobs:
           echo "--- generated PKGBUILD-git ---"
           cat release/PKGBUILD-git
 
-      - name: Generate release-ready OpenWRT feed Makefile
+      - name: Generate release-ready OpenWrt feed Makefile
         run: |
           # Fill the committed packaging/openwrt/Makefile template's version and
           # per-arch tarball hashes so a feed maintainer can drop it into an
-          # OpenWRT SDK without hand-editing. Same tarball hashes as PKGBUILD-bin;
+          # OpenWrt SDK without hand-editing. Same tarball hashes as PKGBUILD-bin;
           # the in-tree template stays the canonical source. Tags are bare semver.
           PKGVER="${GITHUB_REF_NAME}"
-          AMD64_HASH=$(awk '{print $1}' "release/jennifer-${PKGVER}-linux-amd64.tar.gz.sha256")
-          ARM64_HASH=$(awk '{print $1}' "release/jennifer-${PKGVER}-linux-arm64.tar.gz.sha256")
+          hash() { awk '{print $1}' "release/jennifer-${PKGVER}-linux-$1.tar.gz.sha256"; }
           sed \
               -e "s/@PKG_VERSION@/${PKGVER}/" \
-              -e "s/@HASH_AMD64@/${AMD64_HASH}/" \
-              -e "s/@HASH_ARM64@/${ARM64_HASH}/" \
+              -e "s/@HASH_AMD64@/$(hash amd64)/" \
+              -e "s/@HASH_ARM64@/$(hash arm64)/" \
+              -e "s/@HASH_ARMV7@/$(hash armv7)/" \
+              -e "s/@HASH_ARMV6@/$(hash armv6)/" \
+              -e "s/@HASH_386@/$(hash 386)/" \
+              -e "s/@HASH_RISCV64@/$(hash riscv64)/" \
               packaging/openwrt/Makefile > release/openwrt-Makefile
           echo "--- generated openwrt-Makefile ---"
           cat release/openwrt-Makefile
@@ -580,12 +688,14 @@ jobs:
           {
             echo "## Jennifer ${TAG}"
             echo
-            echo "**Linux** ships two binaries - same source, same language, different compiler:"
+            echo "**Linux** (amd64, arm64, armv7, armv6, 386, riscv64) ships two binaries - same source, same language, different compiler (riscv64: \`jennifer\` only, TinyGo has no riscv64 target):"
             echo
             echo "- \`jennifer\`       - standard Go build. Default, full-featured; what most users want."
             echo "- \`jennifer-tiny\`  - TinyGo build. Smaller, embeddable; no \`os/exec\` or network stack."
             echo
-            echo "**macOS and Windows** get the standard \`jennifer\` only, as best-effort *unsupported* builds (no \`jennifer-tiny\`)."
+            echo "**macOS, Windows and Android (arm64, Termux prefix)** get the standard \`jennifer\` only, as best-effort *unsupported* builds (no \`jennifer-tiny\`)."
+            echo
+            echo "The \`armhf\` \`.deb\` carries the armv6 binaries, which run on ARMv6 and ARMv7 alike (Raspberry Pi OS's armhf baseline is ARMv6); the armv7 build ships as a tarball and an OpenWrt \`.ipk\` only."
             echo
             echo "Install \`jennifer\` unless you have a specific reason to use the constrained variant; see \`docs/user-guide/installing.md\` for guidance."
             echo
@@ -609,7 +719,7 @@ jobs:
             [ -e release/jennifer-manual.pdf ] && echo "- \`jennifer-manual.pdf\` - the full documentation as a single PDF."
             [ -e release/jennifer-module-api.pdf ] && echo "- \`jennifer-module-api.pdf\` - the module API reference as a single PDF."
             echo
-            echo "Artifacts named \`-UNSUPPORTED\` are best-effort macOS / Windows builds (standard \`jennifer\` only, no TinyGo, unsigned, no support); see \`docs/user-guide/installing.md\`. The \`*-setup.exe\` is the same unsupported Windows build wrapped in an installer (PATH, \`.j\` association, bundled modules). Any of these may be missing if that build failed - it does not block the Linux release."
+            echo "Artifacts named \`-UNSUPPORTED\` are best-effort macOS / Windows / Android builds (standard \`jennifer\` only, no TinyGo, unsigned, no support); see \`docs/user-guide/installing.md\`. The \`*-setup.exe\` is the same unsupported Windows build wrapped in an installer (PATH, \`.j\` association, bundled modules). Any of these may be missing if that build failed - it does not block the Linux release."
           } > release_notes.md
           cat release_notes.md
 

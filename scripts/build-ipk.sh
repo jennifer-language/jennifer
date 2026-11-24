@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 #
-# Assemble an OpenWRT `.ipk` from an already-built static `jennifer`
+# Assemble an OpenWrt `.ipk` from an already-built static `jennifer`
 # binary. Run after the cross-compile step has produced ./jennifer in
 # CWD (the release pipeline builds it CGO_ENABLED=0, so it is a fully
-# static, libc-independent ELF that runs on OpenWRT's musl the same as
-# on glibc). No OpenWRT SDK is needed: an `.ipk` is an `ar` archive of
+# static, libc-independent ELF that runs on OpenWrt's musl the same as
+# on glibc). No OpenWrt SDK is needed: an `.ipk` is an `ar` archive of
 # debian-binary + control.tar.gz + data.tar.gz, which this script builds
 # with stock `ar` / `tar` / `gzip`.
 #
@@ -15,13 +15,13 @@
 # (man pages, MIME, vim/nvim/sublime syntax): those waste flash on a
 # router and have no consumer there. jennifer-tiny is not shipped either
 # (it is currently unbuildable upstream, and one interpreter is what an
-# OpenWRT target wants); when it returns it is the better fit here and
+# OpenWrt target wants); when it returns it is the better fit here and
 # gets its own package.
 #
 # The install paths match the binary's compile-time defaults:
 #   /usr/bin/jennifer                 - the interpreter
 #   /usr/share/jennifer/modules/*.j   - the system module dir
-#     (internal/module.compileDefaultSysmoddir), so bare
+#     (<PREFIX>/share/jennifer/modules, the release builds use PREFIX=/usr), so bare
 #     `import "name.j";` resolves with no --sysmoddir / JENNIFER_SYSMODDIR.
 #
 # Usage:
@@ -29,10 +29,11 @@
 #
 # Arguments:
 #   <version>      - bare semver, matching the git tag (e.g. 0.14.1).
-#   <arch>         - amd64 or arm64 (the release matrix arch), mapped to
-#                    the default OpenWRT architecture string below.
+#   <arch>         - amd64, arm64, armv6 (GOARM=6), armv7 (GOARM=7), 386
+#                    or riscv64 (the release row's label), mapped to the
+#                    default OpenWrt architecture string below.
 #   <out-dir>      - directory to write the resulting .ipk into.
-#   [openwrt-arch] - optional override for the OpenWRT `Architecture:`
+#   [openwrt-arch] - optional override for the OpenWrt `Architecture:`
 #                    field (e.g. aarch64_cortex-a53, arm_cortex-a7_neon-vfpv4).
 #                    Because the binary is static and CPU-family- (not
 #                    subtarget-) specific, the default generic string plus
@@ -58,15 +59,24 @@ ARCH="$2"
 OUT="$3"
 OWRT_ARCH="${4:-}"
 
-# Map the release matrix arch to the default OpenWRT architecture string.
-# x86_64 is stable across x86-64 OpenWRT targets; aarch64_generic is the
+# Map the release matrix arch to the default OpenWrt architecture string.
+# x86_64 is stable across x86-64 OpenWrt targets; aarch64_generic is the
 # lowest-common-denominator ARMv8 string (a generic ARMv8 static binary runs
-# on every aarch64 subtarget - see the README on --force-architecture).
+# on every aarch64 subtarget - see the README on --force-architecture). The
+# 32-bit strings name the most common subtarget of each family: the GOARM=7
+# build needs an ARMv7 with VFP (cortex-a7 / a9 / a15 targets), the GOARM=6
+# build an ARMv6 with VFP (arm1176jzf-s: bcm27xx/bcm2708, the Raspberry Pi
+# Zero / 1; not the ARMv5 targets), the 386 build SSE2 (pentium4, not
+# x86/legacy or geode).
 case "$ARCH" in
     amd64) DEFAULT_OWRT_ARCH=x86_64 ;;
     arm64) DEFAULT_OWRT_ARCH=aarch64_generic ;;
+    armv6) DEFAULT_OWRT_ARCH=arm_arm1176jzf-s_vfp ;;
+    armv7) DEFAULT_OWRT_ARCH=arm_cortex-a7_neon-vfpv4 ;;
+    386) DEFAULT_OWRT_ARCH=i386_pentium4 ;;
+    riscv64) DEFAULT_OWRT_ARCH=riscv64_riscv64 ;;
     *)
-        echo "unsupported arch: $ARCH (want amd64 or arm64)" >&2
+        echo "unsupported arch: $ARCH (want amd64, arm64, armv6, armv7, 386 or riscv64)" >&2
         exit 2
         ;;
 esac

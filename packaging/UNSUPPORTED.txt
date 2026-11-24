@@ -1,8 +1,8 @@
 Unsupported build of the Jennifer interpreter
 =============================================
 
-Linux is the only supported platform. This macOS / Windows binary is
-best-effort and provided as-is, with no guarantees:
+Linux is the only supported platform. This macOS / Windows / Android
+binary is best-effort and provided as-is, with no guarantees:
 
   - Standard `jennifer` build only - no `jennifer-tiny` (TinyGo).
     This is the full-featured build, so os.run / os.spawn, the net
@@ -13,7 +13,7 @@ best-effort and provided as-is, with no guarantees:
     Open). On Windows, SmartScreen warns about an unknown publisher;
     choose "More info" then "Run anyway".
 
-  - No support. Bugs specific to macOS / Windows may not be fixed;
+  - No support. Bugs specific to macOS / Windows / Android may not be fixed;
     supported development and testing happen on Linux.
 
   - Just the binary in this archive. No man pages, MIME registration, or
@@ -23,6 +23,13 @@ best-effort and provided as-is, with no guarantees:
 
   - Windows XP and earlier cannot run this binary: the Go toolchain
     targets Windows 10 or newer.
+
+  - Android (arm64): built for Termux's prefix,
+    /data/data/com.termux/files/usr. Copy jennifer to $PREFIX/bin and
+    share/jennifer/modules to $PREFIX/share/jennifer/modules; the
+    resolver reads $PREFIX/etc/resolv.conf. Outside Termux set
+    JENNIFER_SYSMODDIR and JENNIFER_RESOLV_CONF. `jennifer version -v`
+    shows every path and where it came from.
 
 See docs/user-guide/installing.md (section "macOS / Windows
 (unsupported)") for the full write-up.

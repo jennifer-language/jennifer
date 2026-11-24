@@ -8,7 +8,7 @@ Vcs-Git: https://github.com/jennifer-language/jennifer.git
 Standards-Version: 4.6.2
 
 Package: jennifer
-Architecture: amd64 arm64
+Architecture: amd64 arm64 armhf i386 riscv64
 Depends: ${misc:Depends}
 Recommends: shared-mime-info
 Suggests: vim, bat
@@ -16,7 +16,8 @@ Description: Jennifer programming language interpreter
  Jennifer is a small, experimental, interpreted programming language.
  Source files use the .j extension.
  .
- This package installs two binaries:
+ This package installs two binaries (jennifer-tiny only where TinyGo
+ supports the architecture, not on riscv64):
    * /usr/bin/jennifer      - standard Go build (default, full-featured)
    * /usr/bin/jennifer-tiny - TinyGo build (constrained, small, embeddable)
  .

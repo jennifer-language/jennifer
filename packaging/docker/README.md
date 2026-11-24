@@ -13,8 +13,13 @@ the image with **no environment variable**.
 ## Variants and tags
 
 Published to GHCR on each release tag by
-[`.github/workflows/docker.yml`](../../.github/workflows/docker.yml), multi-arch
-(`linux/amd64` + `linux/arm64`):
+[`.github/workflows/docker.yml`](../../.github/workflows/docker.yml), multi-arch:
+`linux/amd64`, `linux/arm64`, `linux/arm/v7`, `linux/386` and `linux/riscv64`
+for `slim` and `alpine`, plus `linux/arm/v6` for `alpine`; `linux/amd64`,
+`linux/arm64` and `linux/arm/v7` for `static`. Each variant has the platforms
+its base image publishes: Debian has no arm/v6 (its armel is arm/v5),
+distroless no arm/v6, 386 or riscv64. TinyGo has no riscv64
+target, so the riscv64 images carry `jennifer` without `jennifer-tiny`.
 
 | Tag | Stage | Base | Notes |
 |-----|-------|------|-------|

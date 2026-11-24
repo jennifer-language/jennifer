@@ -3,11 +3,11 @@
 #
 # PR gate: runs the full Go test suite and a TinyGo build on every
 # push to main and every pull request, once per supported toolchain pair
-# (see the matrix below). Linux amd64 only - the same
-# pure-Go interpreter cross-compiles cleanly to arm64 and the other
-# supported platforms, so per-arch test runs would not catch
-# additional bugs at this stage. Cross-arch builds live in
-# release.yml.
+# (see the matrix below). Linux amd64, plus the Go suite once more as
+# linux/386 (the `test-386` job): 386 binaries run natively on the amd64
+# runner, and a 32-bit Go `int` is where size limits and slice lengths
+# differ (M29.6). The other arches run the release binaries' smoke test and
+# module overlays under QEMU in release.yml.
 
 name: test
 
@@ -118,6 +118,41 @@ jobs:
 
       - name: Smoke-test the Go binary (default)
         run: ./jennifer run examples/hello.j
+
+      - name: A PREFIX build finds its modules there (M29.4)
+        # The install prefix is built in (internal/version.Prefix): a build for
+        # another prefix resolves bare imports under <prefix>/share/jennifer/
+        # modules and reports it, with no JENNIFER_SYSMODDIR. The default build
+        # above must still report /usr.
+        run: |
+          set -eu
+          ./jennifer version -v | grep -qx 'prefix: /usr (build)'
+          prefix="$RUNNER_TEMP/prefix"
+          mkdir -p "$prefix/share/jennifer/modules"
+          for m in modules/*.j; do
+            case "$m" in *_test.j) continue ;; esac
+            cp "$m" "$prefix/share/jennifer/modules/"
+          done
+          JENNIFER_PREFIX="$prefix" sh scripts/gen-version.sh
+          go build -o "$RUNNER_TEMP/jennifer-prefix" ./cmd/jennifer
+          sh scripts/gen-version.sh
+          "$RUNNER_TEMP/jennifer-prefix" version -v | grep -qx "system module dir: $prefix/share/jennifer/modules (build)"
+          printf 'import "semver.j" as v;\nuse io;\nio.printf("%%t\\n", v.isValid("1.2.3"));\n' \
+            | "$RUNNER_TEMP/jennifer-prefix" run - | grep -qx true
+
+      - name: Name resolution against a loopback DNS fake (M29.5)
+        run: |
+          set -eu
+          printf '192.0.2.9 smoke.test\n' > "$RUNNER_TEMP/hosts"
+          JENNIFER_HOSTS="$RUNNER_TEMP/hosts" ./jennifer run scripts/smoke-dns.j | tee "$RUNNER_TEMP/dns.txt"
+          grep -qx 'lookupWith: 192.0.2.7' "$RUNNER_TEMP/dns.txt"
+          grep -qx 'hosts: \["192.0.2.9"\]' "$RUNNER_TEMP/dns.txt"
+          # A variable naming a missing file fails the lookup, naming it.
+          printf 'use net;\nnet.lookup("example.com");\n' > "$RUNNER_TEMP/nc.j"
+          if JENNIFER_RESOLV_CONF=/nonexistent ./jennifer run "$RUNNER_TEMP/nc.j" 2> "$RUNNER_TEMP/nc.err"; then
+            echo "::error::a missing JENNIFER_RESOLV_CONF did not fail the lookup"; exit 1
+          fi
+          grep -q 'JENNIFER_RESOLV_CONF names .*/nonexistent' "$RUNNER_TEMP/nc.err"
 
       - name: Smoke-test the TinyGo binary (constrained)
         run: ./jennifer-tiny run examples/hello.j
@@ -339,3 +374,27 @@ jobs:
             echo "em-dash or en-dash found - use plain ASCII '-' instead"
             exit 1
           fi
+
+  test-386:
+    # The Go suite as linux/386, natively on the amd64 runner: a 32-bit Go
+    # `int` (lengths, caps, atomics alignment) is the one thing the amd64 run
+    # cannot see (M29.6). Jennifer's own int stays int64 everywhere.
+    name: go test (GOARCH=386)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet (386)
+        run: GOARCH=386 go vet ./...
+
+      - name: go test (386)
+        run: GOARCH=386 CGO_ENABLED=0 go test ./... 2>&1 | tail -80; exit "${PIPESTATUS[0]}"

@@ -19,12 +19,14 @@
 #                pipeline passes the tag straight through; dev
 #                builds use a ~dev pre-release form so version-sort
 #                stays correct.
-#   <arch>     - Debian architecture: amd64 or arm64.
+#   <arch>     - Debian architecture: amd64, arm64, armhf (the GOARM=6
+#                linux/arm build, which also runs on ARMv7), i386 or riscv64.
 #   <out-dir>  - Directory to write the resulting .deb into.
 #
 # Expects in CWD:
 #   ./jennifer       - standard Go binary (default, full-featured)
-#   ./jennifer-tiny  - TinyGo binary (constrained; no os/exec, no net)
+#   ./jennifer-tiny  - TinyGo binary (constrained; no os/exec, no net);
+#                      optional, absent where TinyGo has no target (riscv64)
 #
 # Output:
 #   <out-dir>/jennifer_<version>_<arch>.deb
@@ -42,9 +44,9 @@ ARCH="$2"
 OUT="$3"
 
 case "$ARCH" in
-    amd64|arm64) ;;
+    amd64|arm64|armhf|i386|riscv64) ;;
     *)
-        echo "unsupported arch: $ARCH (want amd64 or arm64)" >&2
+        echo "unsupported arch: $ARCH (want amd64, arm64, armhf, i386 or riscv64)" >&2
         exit 2
         ;;
 esac
@@ -54,12 +56,13 @@ if ! command -v dpkg-deb >/dev/null 2>&1; then
     exit 2
 fi
 
-for f in ./jennifer ./jennifer-tiny; do
-    if [ ! -f "$f" ]; then
-        echo "missing required input: $f" >&2
-        exit 2
-    fi
-done
+if [ ! -f ./jennifer ]; then
+    echo "missing required input: ./jennifer" >&2
+    exit 2
+fi
+# jennifer-tiny ships where TinyGo builds for the architecture.
+TINY=0
+[ -f ./jennifer-tiny ] && TINY=1
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PKG_DIR="$REPO_ROOT/packaging"
@@ -80,11 +83,11 @@ mkdir -p "$STAGE/DEBIAN"
 
 # Binaries.
 install -m 0755 ./jennifer "$STAGE/usr/bin/jennifer"
-install -m 0755 ./jennifer-tiny "$STAGE/usr/bin/jennifer-tiny"
+[ "$TINY" = 1 ] && install -m 0755 ./jennifer-tiny "$STAGE/usr/bin/jennifer-tiny"
 
 # Man pages, gzipped per Debian policy (max compression).
 gzip -9n -c "$PKG_DIR/man/jennifer.1"      > "$STAGE/usr/share/man/man1/jennifer.1.gz"
-gzip -9n -c "$PKG_DIR/man/jennifer-tiny.1" > "$STAGE/usr/share/man/man1/jennifer-tiny.1.gz"
+[ "$TINY" = 1 ] && gzip -9n -c "$PKG_DIR/man/jennifer-tiny.1" > "$STAGE/usr/share/man/man1/jennifer-tiny.1.gz"
 
 # Shared MIME definition.
 install -m 0644 "$PKG_DIR/mime/jennifer.xml" "$STAGE/usr/share/mime/packages/jennifer.xml"
@@ -95,7 +98,7 @@ install -m 0644 "$PKG_DIR/mime/jennifer.xml" "$STAGE/usr/share/mime/packages/jen
 mkdir -p "$STAGE/usr/share/bash-completion/completions"
 install -m 0644 "$PKG_DIR/completions/jennifer.bash" \
     "$STAGE/usr/share/bash-completion/completions/jennifer"
-ln -sf jennifer "$STAGE/usr/share/bash-completion/completions/jennifer-tiny"
+[ "$TINY" = 1 ] && ln -sf jennifer "$STAGE/usr/share/bash-completion/completions/jennifer-tiny"
 
 # Vim / Neovim syntax highlighting, so `.j` files highlight with no user
 # setup. Vim and Neovim have separate runtimepaths: /usr/share/vim/vimfiles
