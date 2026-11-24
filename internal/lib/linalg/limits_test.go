@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
@@ -32,5 +33,34 @@ func TestMatmulOutputCap(t *testing.T) {
 	}
 	if got := m1.TotalAlloc - m0.TotalAlloc; got > 4<<20 {
 		t.Fatalf("allocated %d bytes before refusing", got)
+	}
+}
+
+// TestCubicRoutinesCancel: matmul, determinant, solve and inverse poll the
+// task's cancel flag once per outer row / column, so task.cancel stops them.
+func TestCubicRoutinesCancel(t *testing.T) {
+	rows := [][]float64{{4, 1, 2}, {1, 5, 3}, {2, 3, 6}}
+	a := mat(rows...)
+	v := vec(1, 2, 3)
+	cases := []struct {
+		name string
+		fn   interpreter.Builtin
+		args []interpreter.Value
+	}{
+		{"matmul", matmulFn, []interpreter.Value{a, a}},
+		{"determinant", determinantFn, []interpreter.Value{a}},
+		{"solve", solveFn, []interpreter.Value{a, v}},
+		{"inverse", inverseFn, []interpreter.Value{a}},
+	}
+	for _, tc := range cases {
+		ts := &interpreter.TaskState{}
+		ts.RequestCancel()
+		_, err := tc.fn(interpreter.BuiltinCtx{Cancel: ts}, tc.args)
+		if err == nil || !strings.Contains(err.Error(), "task cancelled") {
+			t.Errorf("%s: got %v, want task cancelled", tc.name, err)
+		}
+		if _, err := tc.fn(interpreter.BuiltinCtx{Cancel: &interpreter.TaskState{}}, tc.args); err != nil {
+			t.Errorf("%s, uncancelled task: %v", tc.name, err)
+		}
 	}
 }

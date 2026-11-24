@@ -4,6 +4,7 @@
 package mllib
 
 import (
+	"errors"
 	"math"
 	"runtime"
 	"strings"
@@ -44,18 +45,42 @@ func refuses(t *testing.T, want string, maxAlloc uint64, f func() error) {
 	}
 }
 
-// TestPCAFeatureCap: d features need a d x d covariance; past
-// limits.MaxMatrixElements it is refused before the covariance is built.
+// TestPCAFeatureCap: the Jacobi solve costs about 3*d^3 per sweep, so past
+// maxPCAFeatures features pca throws "limit" before building the covariance.
 func TestPCAFeatureCap(t *testing.T) {
-	d := int(math.Sqrt(float64(limits.MaxMatrixElements))) + 76
+	d := maxPCAFeatures + 1
 	row := func(off int64) interpreter.Value {
 		return intList(d, func(i int) int64 { return int64(i)*off + 1 })
 	}
 	x := interpreter.ListVal(parser.ListType(parser.PrimitiveType(parser.TypeInt)), []interpreter.Value{row(1), row(2)})
 	refuses(t, "ml.pca: ", 4<<20, func() error {
 		_, err := mlCall("pca", x, interpreter.IntVal(1))
+		var ce *limits.CapError
+		if !errors.As(err, &ce) {
+			t.Fatalf("got %v (%T), want a limits.CapError", err, err)
+		}
 		return err
 	})
+}
+
+// TestPCACancel: a cancelled task stops pca at the next Jacobi sweep.
+func TestPCACancel(t *testing.T) {
+	rows := make([][]float64, 3)
+	for i := range rows {
+		rows[i] = make([]float64, 8)
+		for j := range rows[i] {
+			rows[i][j] = float64((i+1)*(j+3)%7) + float64(j)
+		}
+	}
+	ts := &interpreter.TaskState{}
+	ts.RequestCancel()
+	_, err := pcaFn(interpreter.BuiltinCtx{Cancel: ts}, []interpreter.Value{mat(rows...), interpreter.IntVal(1)})
+	if err == nil || !strings.Contains(err.Error(), "task cancelled") {
+		t.Fatalf("got %v, want task cancelled", err)
+	}
+	if _, err := pcaFn(interpreter.BuiltinCtx{Cancel: &interpreter.TaskState{}}, []interpreter.Value{mat(rows...), interpreter.IntVal(1)}); err != nil {
+		t.Fatalf("uncancelled task: %v", err)
+	}
 }
 
 // TestConfusionMatrixLabelCap: just past sqrt(limits.MaxMatrixElements)

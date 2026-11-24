@@ -354,7 +354,7 @@ func crossFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 // a matrix times a vector -> the vector `M v` (v as a column); a vector times a
 // matrix -> the vector `v M` (v as a row). Two vectors are ambiguous - `dot` is
 // the tool for that.
-func matmulFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func matmulFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("linalg.matmul expects 2 arguments (matrix or vector, matrix or vector), got %d", len(args))
 	}
@@ -381,8 +381,12 @@ func matmulFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		if exceedsElementBudget(int64(m), int64(p)) {
 			return interpreter.Null(), limits.Capf("linalg.matmul: result too large (%dx%d exceeds the %d-element limit)", m, p, limits.MaxMatrixElements)
 		}
+		stop := cancelCheck(ctx)
 		out := make([][]float64, m)
 		for i := 0; i < m; i++ {
+			if err := stop(); err != nil {
+				return interpreter.Null(), err
+			}
 			out[i] = make([]float64, p)
 			for j := 0; j < p; j++ {
 				s := 0.0
@@ -463,7 +467,7 @@ func transposeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	return matrixVal("transpose", out)
 }
 
-func determinantFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func determinantFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("linalg.determinant expects 1 argument (matrix), got %d", len(args))
 	}
@@ -474,10 +478,14 @@ func determinantFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpre
 	if _, err := requireSquare("determinant", a); err != nil {
 		return interpreter.Null(), err
 	}
-	return scalarVal("determinant", determinant(a))
+	det, err := determinant(a, cancelCheck(ctx))
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return scalarVal("determinant", det)
 }
 
-func inverseFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func inverseFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("linalg.inverse expects 1 argument (matrix), got %d", len(args))
 	}
@@ -488,14 +496,14 @@ func inverseFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if _, err := requireSquare("inverse", a); err != nil {
 		return interpreter.Null(), err
 	}
-	inv, err := inverse(a)
+	inv, err := inverse(a, cancelCheck(ctx))
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	return matrixVal("inverse", inv)
 }
 
-func solveFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func solveFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("linalg.solve expects 2 arguments (matrix, vector), got %d", len(args))
 	}
@@ -514,7 +522,7 @@ func solveFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if len(b) != n {
 		return interpreter.Null(), fmt.Errorf("linalg.solve: right-hand side length %d must match the %dx%d matrix", len(b), n, n)
 	}
-	x, err := solve(a, b)
+	x, err := solve(a, b, cancelCheck(ctx))
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -668,6 +676,19 @@ func elementwise(name string, args []interpreter.Value, op func(x, y float64) fl
 	return vectorVal(name, out)
 }
 
+// cancelCheck returns the poll the O(n^3) routines run once per outer row or
+// column: an error once the calling task is cancelled (task.cancel, a request
+// deadline), nil otherwise and always on the main goroutine.
+func cancelCheck(ctx interpreter.BuiltinCtx) func() error {
+	ts := ctx.Cancel
+	return func() error {
+		if ts != nil && ts.Cancelled.Load() {
+			return interpreter.ErrTaskCancelled()
+		}
+		return nil
+	}
+}
+
 // copyMatrix returns a deep copy of m (the elimination routines mutate their
 // working copy, never the caller's input).
 func copyMatrix(m [][]float64) [][]float64 {
@@ -680,12 +701,15 @@ func copyMatrix(m [][]float64) [][]float64 {
 
 // determinant computes det(a) by Gaussian elimination with partial pivoting. A
 // singular matrix returns 0 (a valid, finite result - only inverse / solve treat
-// singularity as an error).
-func determinant(a [][]float64) float64 {
+// singularity as an error). stop (see cancelCheck) runs once per column.
+func determinant(a [][]float64, stop func() error) (float64, error) {
 	m := copyMatrix(a)
 	n := len(m)
 	det := 1.0
 	for i := 0; i < n; i++ {
+		if err := stop(); err != nil {
+			return 0, err
+		}
 		p := i
 		for r := i + 1; r < n; r++ {
 			if math.Abs(m[r][i]) > math.Abs(m[p][i]) {
@@ -693,7 +717,7 @@ func determinant(a [][]float64) float64 {
 			}
 		}
 		if m[p][i] == 0 {
-			return 0
+			return 0, nil
 		}
 		if p != i {
 			m[i], m[p] = m[p], m[i]
@@ -707,7 +731,7 @@ func determinant(a [][]float64) float64 {
 			}
 		}
 	}
-	return det
+	return det, nil
 }
 
 // errSingular is the sentinel a caller turns into a positioned error.
@@ -739,7 +763,8 @@ func negligiblePivot(piv, rowScale, colScale float64, n int) bool {
 }
 
 // solve solves a x = b by Gauss-Jordan elimination with partial pivoting.
-func solve(a [][]float64, b []float64) ([]float64, error) {
+// stop (see cancelCheck) runs once per column.
+func solve(a [][]float64, b []float64, stop func() error) ([]float64, error) {
 	n := len(a)
 	// Augmented [a | b].
 	m := make([][]float64, n)
@@ -748,6 +773,9 @@ func solve(a [][]float64, b []float64) ([]float64, error) {
 	}
 	rowScale, colScale := singularScales(a)
 	for i := 0; i < n; i++ {
+		if err := stop(); err != nil {
+			return nil, err
+		}
 		p := i
 		for r := i + 1; r < n; r++ {
 			if math.Abs(m[r][i]) > math.Abs(m[p][i]) {
@@ -777,7 +805,8 @@ func solve(a [][]float64, b []float64) ([]float64, error) {
 }
 
 // inverse computes a^-1 by Gauss-Jordan elimination on the augmented [a | I].
-func inverse(a [][]float64) ([][]float64, error) {
+// stop (see cancelCheck) runs once per column.
+func inverse(a [][]float64, stop func() error) ([][]float64, error) {
 	n := len(a)
 	m := make([][]float64, n)
 	for i := 0; i < n; i++ {
@@ -787,6 +816,9 @@ func inverse(a [][]float64) ([][]float64, error) {
 	}
 	rowScale, colScale := singularScales(a)
 	for i := 0; i < n; i++ {
+		if err := stop(); err != nil {
+			return nil, err
+		}
 		p := i
 		for r := i + 1; r < n; r++ {
 			if math.Abs(m[r][i]) > math.Abs(m[p][i]) {

@@ -33,7 +33,17 @@ func (m *pcaModel) transformOne(x []float64) []float64 {
 	return out
 }
 
-func pcaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+// maxJacobiSweeps bounds the cyclic Jacobi solve; it converges quadratically,
+// so real inputs stop after about 10 sweeps.
+const maxJacobiSweeps = 100
+
+// maxPCAFeatures caps ml.pca's feature count. A Jacobi sweep costs about 3*d^3
+// steps, so the cost grows as d^3 while the input grows only as d (a 3-row
+// input with d features). Measured (Ryzen 7 5800X, random data): d = 256 takes
+// about 1 to 1.7 s (7 to 9 sweeps), d = 512 already 8 to 16 s.
+const maxPCAFeatures = 256
+
+func pcaFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("ml.pca expects 2 arguments (X, nComponents), got %d", len(args))
 	}
@@ -50,10 +60,10 @@ func pcaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 		return interpreter.Null(), fmt.Errorf("ml.pca: nComponents must be in [1, features] (got %d, features=%d)", nc64, d)
 	}
 	nc := int(args[1].Int())
-	// The covariance is d x d (and the Jacobi sweeps O(d^3)): cap it like a
-	// linalg matrix before allocating.
-	if cells, ok := limits.MulInt64(int64(d), int64(d)); !ok || cells > limits.MaxMatrixElements {
-		return interpreter.Null(), limits.Capf("ml.pca: %d features need a %dx%d covariance, over the %d-element limit", d, d, d, limits.MaxMatrixElements)
+	// The covariance is d x d and every Jacobi sweep O(d^3): cap d before
+	// allocating.
+	if d > maxPCAFeatures {
+		return interpreter.Null(), limits.Capf("ml.pca: %d features, over the limit of %d", d, maxPCAFeatures)
 	}
 	// Center, build the covariance matrix, eigendecompose (Jacobi), take the top.
 	mu := make([]float64, d)
@@ -85,7 +95,15 @@ func pcaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 			cov[i][j] /= den
 		}
 	}
-	vals, vecs := jacobiEigen(cov)
+	vals, vecs, err := jacobiEigen(cov, func() error {
+		if ctx.Cancel != nil && ctx.Cancel.Cancelled.Load() {
+			return interpreter.ErrTaskCancelled()
+		}
+		return nil
+	})
+	if err != nil {
+		return interpreter.Null(), err
+	}
 	// Sort components by descending eigenvalue.
 	idx := make([]int, d)
 	for i := range idx {
@@ -123,7 +141,9 @@ func pcaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 
 // jacobiEigen returns the eigenvalues and eigenvectors of a symmetric matrix by
 // the cyclic Jacobi rotation method. vecs[i][j] is component i of eigenvector j.
-func jacobiEigen(a [][]float64) ([]float64, [][]float64) {
+//
+// stop runs before every sweep; its error (task cancelled) ends the solve.
+func jacobiEigen(a [][]float64, stop func() error) ([]float64, [][]float64, error) {
 	n := len(a)
 	// Work on a copy; v accumulates the rotations (the eigenvectors).
 	m := make([][]float64, n)
@@ -152,7 +172,10 @@ func jacobiEigen(a [][]float64) ([]float64, [][]float64) {
 		}
 	}
 	const tol = 1e-30 // (about eps)^2: off-diagonal mass relative to ||A||_F^2
-	for sweep := 0; sweep < 100; sweep++ {
+	for sweep := 0; sweep < maxJacobiSweeps; sweep++ {
+		if err := stop(); err != nil {
+			return nil, nil, err
+		}
 		off := 0.0
 		for i := 0; i < n; i++ {
 			for j := i + 1; j < n; j++ {
@@ -193,5 +216,5 @@ func jacobiEigen(a [][]float64) ([]float64, [][]float64) {
 	for i := 0; i < n; i++ {
 		vals[i] = m[i][i]
 	}
-	return vals, v
+	return vals, v, nil
 }
