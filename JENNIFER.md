@@ -340,12 +340,12 @@ depth cap), `"timeout"`, `"closed"` (a closed socket or handle, or a peer
 closing mid-read; a second `close` is a no-op), `"net"` (always a
 `net.NetError`), `"cancelled"` (message `task cancelled`), `"value"` (invalid
 input value, some modules). Match `kind`, never the message. Runaway recursion
-raises `"limit"` ("call stack too deep"). The depth budget (10000; 120 on
+raises `"limit"` ("call stack too deep"). The depth budget (10000; 400 on
 `jennifer-tiny`, which also throws once calls use 3 MB of its 4 MB stack) counts
-nested blocks and operand evaluations too, so real recursion depth is a few
-hundred to a few thousand calls. A library promising callers a specific kind
-should expect `"limit"` from deep input (a deeply nested document) and translate
-it. A literal, index, field or append write nesting a value past 1000 container
+nested blocks and operand evaluations too, so a simple recursion reaches about a
+third of it in calls. A library promising callers a specific kind should expect
+`"limit"` from deep input (a deeply nested document) and translate it. A
+literal, index, field or append write nesting a value past 1000 container
 levels (64 on `jennifer-tiny`; one `N{kids: [...]}` wrap is two) throws
 `"limit"` ("value nests deeper than the N-level limit").
 `exit`/`return`/`break`/`continue` are control flow, not catchable.
