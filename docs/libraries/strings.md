@@ -47,7 +47,7 @@ io.printf("%s\n", "hello"[1..4]);                      # "ell" (a slice)
 | `strings.startsWith(s, prefix)`               | bool           |                                                           |
 | `strings.endsWith(s, suffix)`                 | bool           |                                                           |
 | `strings.indexOf(s, sub)`                     | int            | Rune index of first occurrence; `-1` if not found         |
-| `strings.indexOf(s, sub, from)`               | int            | As above but searching from rune offset `from` (in `[0, len]`); on non-ASCII `s` each call counts runes from the start |
+| `strings.indexOf(s, sub, from)`               | int            | As above but searching from rune offset `from` (in `[0, len]`); on non-ASCII `s` the count resumes from the last position used in `s` |
 | `strings.lastIndexOf(s, sub)`                 | int            | Rune index of the *last* occurrence; `-1` if not found    |
 | `strings.count(s, sub)`                       | int            | Number of non-overlapping occurrences, scanning left to right (`count("aaaa", "aa")` is `2`); an empty `sub` is an error |
 | `strings.trim(s)`                             | string         | Strip leading and trailing whitespace                     |
@@ -58,7 +58,7 @@ io.printf("%s\n", "hello"[1..4]);                      # "ell" (a slice)
 | `strings.trimLeftSet(s, cutset)`, `strings.trimRightSet(s, cutset)` | string | One-sided cutset trim                     |
 | `strings.replace(s, old, new)`                | string         | Replace **all** occurrences of `old` with `new`; an empty `old` is an error |
 | `strings.replicate(s, n)`                     | string         | `n` copies concatenated; `n` must be non-negative         |
-| `strings.split(s, sep)`                       | list of string | Split on a non-empty separator; preserves empty segments. More than 4194304 parts (1048576 on `jennifer-tiny`) is an error |
+| `strings.split(s, sep)`                       | list of string | Split on a non-empty separator; preserves empty segments. More than 16777216 parts (4194304 on `jennifer-tiny`) is an error |
 | `strings.chars(s)`                            | list of string | One single-rune string per Unicode code point; same part limit as `split` |
 | `strings.join(parts[, sep])`                  | string         | Concatenate a `list of string` with `sep` between entries; Without `sep` the parts are joined with `""`, as `binary.join` does. A result over 256 MiB (32 MiB on `jennifer-tiny`) is an error |
 
@@ -88,7 +88,7 @@ Slices, `strings.indexOf`, and `len` all agree on rune indices. So given
 | Negative count | `strings.replicate(s, -1)` |
 | Empty substring (`count`), separator (`split`) or `old` (`replace`) | `strings.replace(s, "", "-")` |
 | `replicate` / `replace` / `join` result over 256 MiB (32 MiB on `jennifer-tiny`), kind `"limit"`; the same cap applies to every result one call builds, bytes included (`binary.make`, `binary.join`) | `strings.replace: result exceeds the 268435456-byte limit` |
-| `split` / `chars` with more than 4194304 parts (1048576 on `jennifer-tiny`), kind `"limit"` | `strings.chars: 5000000 runes exceed the limit of 4194304; ...` |
+| `split` / `chars` with more than 16777216 parts (4194304 on `jennifer-tiny`), kind `"limit"` | `strings.chars: 20000000 runes exceed the limit of 16777216; ...` |
 | Wrong argument type | `len(42)`, `strings.replicate("x", "3")` |
 | Wrong number of arguments | `strings.upper()` |
 
@@ -158,11 +158,15 @@ Two things cost O(n) in the size of a value:
   *every time*, turning an O(n) loop into O(n²). A parameter the function
   only reads is passed without a copy (see
   [Performance](../user-guide/performance.md)).
-- **Slicing `$s[a..b]` and `strings.indexOf(s, sub, from)` on non-ASCII
-  text count runes from the start of the string on every call**, so slicing
-  many pieces out of one long string is O(n²). On ASCII text (every rune one
-  byte) they locate the offset in O(1). For non-ASCII
-  text, keep offsets relative to a shorter piece.
+- **Jumping around a long non-ASCII string by position.** Slicing `$s[a..b]`
+  and `strings.indexOf(s, sub, from)` take rune positions. On ASCII text
+  (every rune one byte) the offset is found in O(1). On other text the
+  interpreter remembers the last position used in the string and counts runes
+  from there, so a scan that moves forward (find the next delimiter from the
+  last one, slice the piece between) is O(n) in all, and a step back from the
+  last position costs the distance stepped. Alternating between far-apart
+  positions counts from the start again, and so may alternating between
+  several long strings.
 
 Keep the big value in one place and pass helpers only small things (an
 index, a short piece).

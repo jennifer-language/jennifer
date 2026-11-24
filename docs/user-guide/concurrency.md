@@ -49,14 +49,15 @@ examples.
 observes at its next loop checkpoint, where the runtime raises a catchable "task
 cancelled" (kind `"cancelled"`), so a runaway `spawn` can be stopped, and a body
 that catches it inside a `try` / `catch` exits cleanly with a partial result. A body blocked in
-`time.sleep`, a channel operation, a `task` wait or a socket read (TCP
+`time.sleep`, a channel operation, a `task` wait, `os.waitTimeout` or a socket read (TCP
 `net.readBytes` / `readN` / `readAll`, UDP `net.recvFrom`, and so the `http`
 module's requests) wakes at once and raises the same error. A task blocked in
 another system call - `net.accept`, `term.readByte` - does not see the flag
 until that call returns; close its socket from another task (the blocked call
 then raises a catchable `Error{kind: "closed"}`) or `task.discard` it.
-`task.waitTimeout` / `task.waitAnyTimeout` bound a wait, throwing a catchable
-`Error{kind: "timeout"}`. Details are in the
+`task.waitTimeout` / `waitAnyTimeout` / `waitAllTimeout`,
+`channel.recvTimeout` / `selectTimeout` and `os.waitTimeout` bound a wait,
+throwing a catchable `Error{kind: "timeout"}`; `0` polls. Details are in the
 [`task` reference's Cancellation and Timeouts sections](../libraries/task.md#cancellation).
 
 **Channels stream values.** Where a `task` observes one result, a

@@ -52,7 +52,7 @@ stays an ordinary identifier everywhere else (a field or parameter named
 
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
-| `channel.make(capacity)` | `channel of T` | A new channel. `capacity` 0 is unbuffered (send blocks for a receiver); `n` buffers up to `n` values (above 1,048,576, or 65,536 on `jennifer-tiny`, is a catchable error of kind `"limit"`). `T` comes from the binding. |
+| `channel.make(capacity)` | `channel of T` | A new channel. `capacity` 0 is unbuffered (send blocks for a receiver); `n` buffers up to `n` values (above 4,194,304, or 262,144 on `jennifer-tiny`, is a catchable error of kind `"limit"`). `T` comes from the binding. |
 | `channel.send(ch, value)` | `null` | Checks `value` against the channel's `T`, deep-copies it in, then sends (blocking per capacity). Wrong type is a catchable error; a send on a closed channel is `Error{kind: "closed"}`. |
 | `channel.recv(ch)` | `T` | Blocks and returns the next value. On a closed **and** drained channel it throws a catchable `Error{kind: "closed"}` ("receive on a closed channel"). |
 | `channel.recvTimeout(ch, ms)` | `T` | `recv` waiting at most `ms` milliseconds: the next value, or a catchable `Error{kind: "timeout"}`. A timeout takes nothing (a value sent later stays for the next receive); `0` polls. Closed and drained throws as `recv`; `task.cancel` wakes it. |

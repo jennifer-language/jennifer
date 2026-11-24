@@ -571,6 +571,21 @@ that keeps them from being picked by accident:
 A weak name stays until the protocols that need it are gone; it is not
 deprecated for being weak.
 
+## `encoding` carries registered character sets only
+
+`encoding.encode` / `decode` take a codec name, so any byte-to-text variant
+could be added as one more name. Each would be small; together they would
+turn the library into a catalogue of private formats. The line:
+
+| Rule | How it holds |
+| --- | --- |
+| Registered sets only | A codec is a character set registered with IANA or specified by WHATWG or an RFC (UTF-8 / 16 / 32, ISO-8859-*, Windows-125x, Mac OS Roman, EBCDIC code pages). |
+| No format-private variants | An encoding that exists only inside one file or wire format (Java's Modified UTF-8 in `writeUTF` streams and class files, CESU-8, WTF-8) is decoded by the code that reads that format, usually its deck: the variant comes with the format's own framing anyway (Java's 2-byte length prefix). |
+| Strict codecs stay strict | A variant is never accepted by loosening a registered codec: `"utf-8"` keeps refusing overlong forms and encoded surrogates. |
+
+Such a decoder is a short loop over `bytes` that rewrites the variant's
+special forms and hands the rest to `"utf-8"`.
+
 ## Kept as they are: the 2026-11-21 stance review
 
 A review of every built-in library against the stances found these

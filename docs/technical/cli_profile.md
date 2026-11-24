@@ -62,8 +62,9 @@ system module directory as `<sys>/web.j`, anything else in full.
 A high `SELF` is a hot line; a high `CUM` with low `SELF` and `WAIT` is a line
 that mostly waits on the work it dispatches. A high `WAIT` is a line that sat in
 a blocking builtin: `time.sleep`, `channel.send` / `recv` / `recvTimeout` /
-`select`, `task.wait` / `waitAll` / `waitAny` / `waitTimeout` /
-`waitAnyTimeout`, `httpd.accept`, `net.accept` / `readBytes` / `readAll` /
+`select` / `selectTimeout`, `task.wait` / `waitAll` / `waitAny` / `waitTimeout` /
+`waitAnyTimeout` / `waitAllTimeout`, `os.waitTimeout` / `waitBytesTimeout`,
+`httpd.accept`, `net.accept` / `readBytes` / `readAll` /
 `readN` / `recvFrom`, `serial.read` (the builtins that watch task cancellation
 while they block, plus the two `accept`s). Other builtins count as self time,
 including a `meta.callMain` waiting for the host lock and the network wait inside
@@ -210,9 +211,6 @@ literal element, field / index / append write, slice, throw, catch, defer argume
 Spawn-frame deep copies - a scope snapshot captured at spawn launch:
   COUNT     TOTAL  FUNCTION     POSITION                  SOURCE
       8  88.621µs  spawnCopies  examples/profile.j:44:22  $handles[] = spawn {
-
-Module-boundary rebuilds - a value holding a module's own structs, rebuilt to cross a module call:
-  (none)
 ```
 
 The eager-copy table is **sorted by bytes**, not by count: a site that copies a
@@ -226,23 +224,10 @@ one site copied several types. The pprof form carries both measures as the
 `alloc_objects` (count) and `alloc_space` (bytes) sample types, plus a `type`
 label (`go tool pprof -sample_index=alloc_space`).
 
-The module-boundary table has the same columns plus `DIR`. A call into an
-imported module hands each argument to the module and the result back through
-`retagStructs`, which rebuilds every struct, list and map holding a struct that
-module declares, so each struct carries the identity its side of the boundary
-expects. That is a copy in all but name: it is paid whether or not the callee
-touches the value, and it grows with the value. `in` rows are arguments entering
-the module, `out` rows are results and constants leaving it; both sit at the call
-site (or the `alias.NAME` read), and `TYPE` is the caller's view of the value
-(`m.Tree`, `list of m.Node`). A value holding no struct of the called module is
-passed as is and never appears. In the pprof form these samples carry
-`kind=boundary-in` / `boundary-out`.
-
 | Copy path             | What it is                                                                                                       |
 | --------------------- | --------------------------------------------------------------------------------------------------------------- |
 | **Eager copies**      | Every store that deep-copies a compound value (`Value.Copy()`), at the position where it happens: a `def` / assignment / parameter binding; an element of a list, map, struct or enum literal (`Cur{names: $c.names}` copies the list, reported at `$c.names`); a field, index, map or append write (`$p.xs = $xs`, `$ys[0] = $xs`, `$ys[] = $xs`); a list or `bytes` slice; a thrown value, the catch binding and a `defer` argument. Where the real allocation cost lives. A fresh list / map / struct literal or slice is already private, so storing it is **not** counted again (no redundant copy); neither is a borrowed read-only parameter / local, a moved variable or an owned call result, which skip the copy too. A parameter bound by a call from another module (or through `meta.call` / `meta.callMain`, or a func value called across a module boundary) is reported at the **parameter's declaration**, since that path has no call-site position. |
 | **Spawn-frame copies**| The scope snapshot taken when a `spawn` launches (`snapshotForSpawn`, the environment copy), with its time.        |
-| **Module-boundary rebuilds** | The struct-identity rebuild of an argument or result crossing into or out of an imported module (`retagStructs`): module method calls, func values called across a module boundary, and module constant reads. A `meta.callMain` re-entry into the host is not reported (that path has no call site). |
 
 `examples/profile.j` exercises both - read it to see where value semantics turn
 a store into real allocation.

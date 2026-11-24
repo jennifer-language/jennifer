@@ -358,14 +358,14 @@ microseconds and a build that copies pays one full copy per call:
 | `nested read param`    | a 100 x 100 `list of list of int` passed to a function that reads one cell, 2 000 calls: a nested-collection parameter is never borrowed (M30.3). |
 | `wrapped nested read`  | the same matrix inside a struct, 2 000 calls: the control, and the workaround - a struct parameter is borrowed. |
 | `sortBy callee read`   | a v3 `Grid` passed to a function that reads one cell and also calls `lists.sortBy` with a named key, 2 000 calls: in a program with mutable globals, a callback builtin anywhere below a function turns its borrow off (M30.8). |
-| `module handle call`   | a 10 000-node tree struct declared in `examples/benchmark/tree.j`, passed to that module's one-lookup `has`, 200 calls: the module-boundary rebuild of every argument holding the module's own structs (M29.14). |
+| `module handle call`   | a 10 000-node tree struct declared in `examples/benchmark/tree.j`, passed to that module's one-lookup `has`, 200 calls: a module call with a large argument, which since M29.14 crosses without a rebuild. |
 
 Read `nested read param` against `wrapped nested read`: the same work, and the
 ratio is the cost of the copy. The `sortBy` row reads against v3's
 `borrowed read param` the same way. When one of the gaps closes, its row drops
 to the control's level and the suite records it. `jennifer profile --allocs
-examples/benchmark.j --suite v4` shows the copies (eager copies) and the
-rebuilds (module-boundary rebuilds) by call site.
+examples/benchmark.j --suite v4` shows the copies (eager copies) by call
+site.
 
 ```
 === Jennifer benchmark suite (v4 within --suite all, jennifer) ===

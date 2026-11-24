@@ -55,7 +55,8 @@ def p as pdf.Page init pdf.draw(pdf.page(612, 792), $ops);
 ```
 
 The variants mirror the per-op functions: `DrawOp.Text` / `DrawOp.TextUnicode`
-(embedded font), `DrawOp.Line`, `DrawOp.Rect` (`filled`), `DrawOp.Color` (sets
+(embedded font), `DrawOp.Glyphs` (glyph ids already mapped in an embedded font,
+like `textGlyphs`), `DrawOp.Line`, `DrawOp.Rect` (`filled`), `DrawOp.Color` (sets
 the colour for ops after it), `DrawOp.Image` (an image already registered with
 `addImage`), and `DrawOp.Link`.
 
@@ -66,10 +67,13 @@ the colour for ops after it), `DrawOp.Image` (an image already registered with
 | `pdf.text(pg, x, y, font, size, str)` | `Page` | draw text in a standard-14 font at (x, y) |
 | `pdf.loadFont(name, ttfBytes)` | `LoadedFont` | load an embeddable TrueType font under a resource name |
 | `pdf.addFont(doc, lf)` | `Document` | register an embedded font in the document |
+| `pdf.addFonts(doc, lfs)` | `Document` | register a `list of LoadedFont` in one call |
 | `pdf.textUnicode(pg, x, y, lf, size, str)` | `Page` | draw Unicode text in an embedded font at (x, y) |
+| `pdf.textGlyphs(pg, x, y, font, size, gids, cps)` | `Page` | draw glyph ids of a registered embedded font, named by its resource name, with the code point of each (see below) |
 | `pdf.loadImage(name, imgBytes)` | `Image` | load a PNG / JPEG / GIF under a resource name |
 | `pdf.imageFrom(name, img)` | `Image` | embed an [`images.Image`](../libraries/images.md) under a resource name |
 | `pdf.addImage(doc, img)` | `Document` | register an embedded image in the document |
+| `pdf.addImages(doc, imgs)` | `Document` | register a `list of Image` in one call; use it instead of `addImage` in a loop, which is O(images squared) |
 | `pdf.drawImage(pg, img, x, y, width, height)` | `Page` | draw an image into the box at (x, y) |
 | `pdf.measureText(font, size, str)` | `float` | width of `str` in points (standard-14) |
 | `pdf.measureTextUnicode(lf, size, str)` | `float` | width of `str` in points (embedded font) |
@@ -86,6 +90,8 @@ the colour for ops after it), `DrawOp.Image` (an image already registered with
 | `pdf.draw(pg, ops)` | `Page` | apply a `list of DrawOp` in order (batch form of the per-op draws; see below) |
 | `pdf.addPage(doc, pg)` | `Document` | append a page |
 | `pdf.addPages(doc, pgs)` | `Document` | append a batch of pages in one copy; use this (collecting pages into a `list of Page`) instead of `addPage` in a loop, which is O(pages squared) |
+| `pdf.bookmark(doc, page, y, title, level)` | `Document` | append an outline entry (see [Bookmarks](#bookmarks-outline)) |
+| `pdf.bookmarks(doc, entries)` | `Document` | append a `list of OutlineEntry` in one call; use it instead of `bookmark` in a loop, which is O(entries squared) |
 | `pdf.pageLabel()` | `PageLabel` | a blank running header / footer spec (Helvetica 9pt, 36pt margin) |
 | `pdf.setHeader(doc, label)` | `Document` | attach a running header, drawn on every page at render |
 | `pdf.setFooter(doc, label)` | `Document` | attach a running footer, drawn on every page at render |
@@ -176,6 +182,18 @@ renders. A **ToUnicode** map is written too, so the text stays selectable and
 copyable in a viewer. The whole font file is embedded (no glyph subsetting).
 `loadFont` accepts a TrueType (`glyf`) font; a CFF / OpenType-PostScript
 (`.otf`) font throws (`FontFile3` embedding is not supported).
+
+Every call that takes a `LoadedFont` hands the whole font (its bytes included)
+into the module. A layout engine that has already mapped and measured its text
+(with [`font.glyphIds`](font.md) / `font.advances`, once per font) draws with
+`textGlyphs(pg, x, y, font, size, gids, cps)` or `DrawOp.Glyphs` instead: the
+font is named by its resource name, `gids` are the glyph ids and `cps` the code
+point each one stands for (for the ToUnicode map). The page records each
+distinct glyph once (`textUnicode` records every glyph drawn), so it stays small
+however much text it holds; the rendered PDF is the same bytes as with
+`textUnicode` for the same glyphs. A malformed name, a glyph id outside
+0..65535 or `cps` of another length than `gids` throws `Error{kind: "pdf"}`.
+[`doctree`](doctree.md) draws its embedded faces this way.
 
 ## Images
 
@@ -338,6 +356,12 @@ hierarchy becomes a bookmark tree. When any bookmark is present, `render` emits
 the `/Outlines` object tree and opens the document with the bookmark panel
 showing (`/PageMode /UseOutlines`). Building the tree takes one pass over the
 entries, so thousands of bookmarks cost no more per entry than a few.
+
+`pdf.bookmarks(doc, entries)` appends a whole `list of OutlineEntry` (`title`,
+`page`, `y`, `level`) at once, with the same nesting and checks; nothing is
+appended when an entry is invalid. Each `bookmark` call hands the whole document
+into the module and back, so a long outline built one call at a time costs
+O(entries squared); collect the entries and add them with one `bookmarks` call.
 
 A `level` below 1 or a negative `page` throws `Error{kind: "pdf"}` at once. The
 page index is checked against the document when it is rendered, so a bookmark

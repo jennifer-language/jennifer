@@ -1,7 +1,8 @@
 # `task` - operations on spawned computations
 
 Enable with `use task;`. Builtins for observing, joining, cancelling
-and bounding `task of T` values produced by `spawn { ... }` blocks.
+and bounding `task of T` values produced by `spawn { ... }` blocks, and
+for bounding what a task allocates.
 
 For when to use `spawn`, value-semantics capture, and the exit-time
 loud-fail contract, see
@@ -30,6 +31,8 @@ io.printf("%d\n", $n);                      # 2
 | `task.waitTimeout($t, ms)`      | `T`             | Like `task.wait`, but throws a catchable `Error{kind: "timeout"}` if `$t` doesn't finish in `ms` (`ms` up to ~9.2e12; a larger value is a catchable error, not a silent instant timeout). |
 | `task.waitAnyTimeout($ts, ms)`  | `int`           | Like `task.waitAny`, but throws a catchable `Error{kind: "timeout"}` if none finishes in `ms`. |
 | `task.waitAllTimeout($ts, ms)`  | `list of T`     | Like `task.waitAll`, but throws a catchable `Error{kind: "timeout"}` if not all finish in `ms`; the tasks keep running. |
+| `task.setAllocBudget(bytes)`    | `null`          | Give the calling task an allocation budget (see "Allocation budget"); `math.MAX_INT` lifts the limit. |
+| `task.allocated()`              | `int`           | Bytes counted so far by the calling task's budget; `0` without one. |
 
 `task.wait` is the core call; the rest are conveniences or
 non-blocking variants. More complex patterns compose from these.
@@ -231,6 +234,49 @@ try {
 }
 ```
 
+## Allocation budget
+
+`task.setAllocBudget(bytes)` makes the calling task count the bytes it
+allocates; once the count passes `bytes`, the task's next counted operation
+throws a **catchable** `Error{kind: "limit"}` naming the budget and the count.
+Only that task is stopped: other tasks, and the process, go on. The guard is
+for work that may build a huge value (a request handler, a decoder fed by a
+client), which would otherwise run the whole process out of memory.
+
+```jennifer
+use task;
+
+def t as task of int init spawn {
+    task.setAllocBudget(64 * 1024 * 1024);
+    try {
+        return buildReport();
+    } catch (e) {
+        if ($e.kind != "limit") { throw $e; }
+        return -1;                          # over budget: give up on this one
+    }
+};
+```
+
+| | |
+| --- | --- |
+| Counted | An eager copy (`def`, assignment, a parameter), an append, an index write (and the cells a new key adds), a field write, string `+` and interpolation, a list / map / struct / enum literal, a materialised range or slice, and every builtin's result |
+| Size | One `Value` cell (48 bytes) per list element and struct field, two per map entry, the bytes of a `bytes`, the bytes of a new string, plus the level below extrapolated from the first 8 elements; deeper levels are not counted |
+| Cumulative | Bytes allocated, not live: a value that is dropped stays counted, and `$s = $s + $x` in a loop counts every intermediate string |
+| A second call | Changes the limit and keeps the count; `math.MAX_INT` lifts the limit, the count goes on |
+| `0` or negative | Throws (kind `"runtime"`) |
+| Spawned tasks | A task spawned by a task with a budget shares it (count and limit); a task without one spawns tasks without one |
+| Nested | A task that sets a budget while running under one it inherited gets its own, nested: its bytes count toward both, either limit throws, and `task.allocated()` reads its own |
+| After a throw | The task gets 1 MiB of room to handle the error (log, answer); one that keeps allocating throws again |
+| Without a budget | Nothing is counted; the cost is one pointer check per counted operation |
+
+The count is an estimate taken where the interpreter can see the value, not a
+measurement of the Go heap: a builtin that allocates a large buffer and returns
+a small value is counted by its result, and one huge allocation is counted
+after it is made (the library caps, kind `"limit"` as well, bound those). Size
+a budget from `task.allocated()` logged by a representative run, with headroom.
+The `web` module sets one per request with
+[`web.allocBudget`](../modules/web.md#memory-per-request).
+
 ## Errors
 
 The boundary checks are uniform across the library:
@@ -242,9 +288,10 @@ The boundary checks are uniform across the library:
 | Empty list to `waitAny` | `task.waitAny: list is empty (no tasks to wait on)` |
 | `ms` negative | `task.waitTimeout: timeout (ms) must be >= 0, got -1` |
 | `ms` too large | `task.waitTimeout: timeout (ms) 99999999999999999 is too large (max 9223372036854)` |
+| Budget `0` or negative | `task.setAllocBudget: bytes must be > 0 (math.MAX_INT for no limit), got 0` |
 
 These are kind `"runtime"`; a timeout is `"timeout"`, a cancelled wait
-`"cancelled"`. All errors are positioned at the call site. Errors re-raised by
+`"cancelled"`, a passed allocation budget `"limit"`. All errors are positioned at the call site. Errors re-raised by
 `task.wait` carry the position from the spawn body, so the report
 shows the actual fault location.
 

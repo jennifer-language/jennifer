@@ -90,6 +90,18 @@ io.printf("hi\n");
 (`env -S` splits the rest of the line into arguments, which is how
 `jennifer run` reaches the interpreter on Linux.)
 
+`/usr/bin/env` is not universal: Android, some minimal containers and
+userlands under another prefix have no `/usr/bin/env`, and an old `env`
+lacks `-S`. There, name the interpreter by its absolute path; the kernel
+passes one argument after it, so `run` fits:
+
+```text
+#!/opt/jennifer/bin/jennifer run
+```
+
+`jvc app install` writes such a launcher by itself when `/usr/bin/env` is
+missing.
+
 Source files normally must end in `.j`, but a file with a `#!` shebang first
 line is exempt: `chmod +x` it and install it under a bare command name
 (`/usr/local/bin/mytool`, no extension) and it runs as a normal command. Only the

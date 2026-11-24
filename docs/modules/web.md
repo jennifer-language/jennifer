@@ -224,6 +224,7 @@ threading it through:
 | `web.before($app, handler)` | Add a middleware (runs before each route handler). |
 | `web.notFound($app, handler)` | A custom handler for unmatched requests (default: a plain 404). |
 | `web.onError($app, handler)` | An error handler for a throwing route / middleware (default: log to stderr). |
+| `web.allocBudget($app, limit)` | A per-request allocation budget in bytes (see [Memory per request](#memory-per-request)); `math.MAX_INT` removes it, 0 or negative throws a `WebError` (500). |
 
 A `HEAD` request is served by the matching **`GET`** route automatically (HTTP
 requires it, and health checks / caches rely on it); the response body is
@@ -287,6 +288,7 @@ never stops the accept loop) and answers it:
 |---|---|---|
 | `web.WebError` with a 4xx `status` (400: a request body that cannot be read) | that status, `400 <message>` | no |
 | kind `"limit"` (a body past a parser cap, such as 10000 form fields) | `413 content too large` | no |
+| kind `"limit"` from the request's allocation budget (`web.allocBudget`) | `500 internal server error` | kind / message / position |
 | anything else | `500 internal server error` | kind / message / position |
 
 `web.WebError{kind: "web", message, status}` is every error of kind `"web"`:
@@ -524,6 +526,30 @@ def worker as task of null init spawn { web.serveOn($app, $srv); };
 httpd.shutdown($srv);
 task.wait($worker);
 ```
+
+### Memory per request
+
+`web.allocBudget($app, limit)` gives every request an allocation budget: the
+worker task that handles it calls `task.setAllocBudget(limit)` before routing,
+so the middleware, the handler, the module code they call and the tasks they
+spawn count the bytes they allocate against it (see
+[the task library](../libraries/task.md#allocation-budget)). A request that
+builds a value past the budget raises a catchable `Error{kind: "limit"}` in its
+handler instead of running the process out of memory; one that escapes is
+answered `500` and written to stderr, and every other request goes on.
+
+```jennifer
+use math;
+
+$app = web.allocBudget($app, 64 * 1024 * 1024);   # 64 MiB per request
+```
+
+The answer is `500`, not the `413` of a parser cap: the request may be small,
+it is the server that declines to spend more on it, and retrying it trips again
+(a `503` would invite clients and proxies to retry). The count is cumulative
+(allocated, not live: building a string by `+` in a loop counts every
+intermediate string), so size the budget from `task.allocated()` logged by a
+representative request, with headroom.
 
 ### Slow handlers and the respond timeout
 

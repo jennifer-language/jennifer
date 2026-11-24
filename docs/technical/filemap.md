@@ -24,6 +24,7 @@ described in [index.md](index.md#pipeline); this page is the file-level index.
 | `highlight.go` | ANSI token colouring of the REPL input line (categories mirror the `editors/` definitions). |
 | `diag_unix.go` / `diag_other.go` | `kill -USR1` interpreter diagnostics dump (Unix); no-op elsewhere. |
 | `termrestore_unix.go` / `termrestore_other.go` | Restore a raw-mode terminal on a terminating signal (Unix); no-op elsewhere. |
+| `memlimit_std.go` / `memlimit_tinygo.go` | At startup, the Go soft memory limit: 90% of the machine or cgroup limit (`internal/memlimit`), unless `GOMEMLIMIT` is set; nothing on TinyGo. |
 | `devtools_tinygo.go`, `serve_tinygo.go`, `spawn_std.go`, `spawn_tinygo.go` | TinyGo build: run-only stubs for `tokens` / `ast` / `fmt` / `lint` / `profile` / `test` (`tinygo && !tinygo_devtools`; the `tinygo_devtools` tag compiles the real ones into `jennifer-tiny-dev`), the `serve` stub (`tinygo`, no network stack), and `canSpawnSelf` (`test --isolated` needs `os/exec`). |
 
 ### CLI tests
@@ -54,7 +55,7 @@ described in [index.md](index.md#pipeline); this page is the file-level index.
 | `preproc/preproc.go` | File-import preprocessor; trivia stripping. |
 | `preproc/preproc_test.go` | Preprocessor tests. |
 | `module/resolve.go` | Module path classification + resolution. |
-| `module/sysmoddir.go` | System module dir: CLI / env / compile precedence + validation. |
+| `module/sysmoddir.go` | System module dir: CLI / env / build (`<PREFIX>/share/jennifer/modules`) precedence + validation. |
 | `module/resolve_test.go` / `module/sysmoddir_test.go` | Resolver + sysmoddir tests. |
 | `reqcheck/reqcheck.go` | Requirement-header (`# pragma-jennifer-*:`) validation, shared by every first read of a source file. |
 | `capabilities/capabilities.go`, `capabilities/capabilities_std.go`, `capabilities/capabilities_tiny.go` | The build's host-capability set (`exec` / `net` / `sql` standard, empty tiny), behind the capability header check and `meta.CAPABILITIES`. |
@@ -75,9 +76,10 @@ described in [index.md](index.md#pipeline); this page is the file-level index.
 | File | Description |
 | ---- | ----------- |
 | `value.go` | Runtime `Value` tagged union (incl. struct + namespaced-struct + `KindObject` tags; an object's payload is an `ObjectBox`: a wrapped `Value` tree or a library-native `NativeObject`). |
+| `value_layout.go` | The 48-byte `Value` layout (M29.11): the payload accessors and setters, the interned `Identity`, `mapDesc`. |
 | `environment.go` | Scoped symbol table (name map + slot slice). |
 | `interpreter.go` | Tree-walking evaluator; namespaced-struct + object registration and resolution. |
-| `module.go` | Module loading: the run-scoped module registry, sub-interpreters, export checks, cross-boundary struct retagging. |
+| `module.go` | Module loading: the run-scoped module registry, sub-interpreters, export checks, module struct identity. |
 | `globalsafe.go` | `GlobalSafe` escape analysis that widens read-only-parameter borrow to functions proven to mutate no global. |
 | `spawncapture.go` | Spawn-capture analysis: the globals each `spawn` body reads, so the snapshot copies only those. |
 | `argsnap.go` | Argument snapshots: marks call arguments that alias a global a later argument may mutate, so they are copied (never borrowed). |
@@ -88,6 +90,8 @@ described in [index.md](index.md#pipeline); this page is the file-level index.
 | `stackguard_std.go` / `stackguard_tiny.go` | `stackTooDeep`: on `jennifer-tiny`, a call chain past 3 MB of the fixed 4 MB stack raises the call-depth `"limit"` error (M28.72); no-op on the default binary, which relies on `MaxCallDepth`. |
 | `profiling.go` | The optional `Profiler` interface and `eagerCopy` hook. |
 | `diag_runtime_std.go` / `diag_runtime_tiny.go` | Runtime snapshot (goroutines, memory) for the `kill -USR1` diagnostics dump. |
+| `runecursor.go` | The rune cursor (M29.13): a 16-slot table keyed by a string's data pointer and length, so rune-position slices and `indexOf` resume their walk. |
+| `allocbudget.go` | The opt-in per-task allocation budget (M29.3): the counter on the goroutine's `CallChain`, the O(1) size estimate, the charge and the `"limit"` throw. |
 | `interpreter_test.go` | End-to-end interpreter tests. |
 | `ownership_test.go` | Value semantics on every path of the owned-result and moved-argument copy elisions, across a module boundary too. |
 | `interactive_test.go` | REPL `EvalInteractive` tests. |
@@ -120,7 +124,7 @@ described in [index.md](index.md#pipeline); this page is the file-level index.
 | `strings/stringslib.go` | `strings`: case and folding, predicates, search, trimming, `replace` / `replicate`, `split` / `chars` / `join`. |
 | `lists/listslib.go` | `lists`: `push` / `first` / `last` / `reverse` / `sort` / `sortWith` / `contains` / `indexOf` / `mismatch` / `concat` / `replicate` / `shuffle` / `range`, plus the higher-order `map` / `filter` / `reduce` / `find` / `any` / `all` / `sortBy`. |
 | `maps/mapslib.go` | `maps`: `keys` / `values` / `has` / `delete` / `merge` / `without`. |
-| `os/oslib.go`, `os/exec.go`, `os/signal_unix.go`, `os/signal_other.go`, `os/isterminal_std.go`, `os/isterminal_tinygo.go` | `os`: `PLATFORM` / `ARCH` / `EOL` / `DIRSEP` / `PATHSEP` / `ARGS` + `getEnv` / `hasFlag` / `flag` / `isTerminal`; external-program execution (`run` / `runBytes` / `spawn` / `wait` / `waitBytes` / `poll` / `kill` / `release`); `catchSignal` / `gotSignal` (Unix); `isTerminal` per build. |
+| `os/oslib.go`, `os/exec.go`, `os/signal_unix.go`, `os/signal_other.go`, `os/isterminal_std.go`, `os/isterminal_tinygo.go` | `os`: `PLATFORM` / `ARCH` / `EOL` / `DIRSEP` / `PATHSEP` / `ARGS` + `argsBytes` / `getEnv` / `getEnvBytes` / `isTerminal`; external-program execution (`run` / `runBytes` / `spawn` / `wait` / `waitBytes` / `poll` / `kill` / `release`); `catchSignal` / `gotSignal` (Unix); `isTerminal` per build. |
 | `meta/metalib.go` | `meta`: `VERSION` / `BUILD` / `SYSMODDIR` / `CAPABILITIES` (interpreter self-identity) + `hasCapability` / `call` / `defined` / `callMain` / `definedMain`. |
 | `time/timelib.go`, `time/zone.go`, `time/format.go` | `time`: `Time` / `Duration`, Unix + calendar + arithmetic; fixed-offset `Zone`, `UTC` / `local` / `inZone`; strftime `format` / `parse` + ISO round-trip. |
 | `hash/hashlib.go` | `hash`: MD5 / SHA-1 / SHA-2 / SHA-3 / BLAKE2 one-shot `compute`, `hmac`, constant-time `equal`, + streaming via a codec table. |
@@ -133,8 +137,8 @@ described in [index.md](index.md#pipeline); this page is the file-level index.
 | `encoding/encodinglib.go`, `encoding/form.go`, `encoding/codecs.go`, `encoding/utfcodecs.go`, `encoding/codecs_gen.go`, `encoding/gen_codecs.go` | `encoding`: introspection + `toText` / `fromText` + `encode` / `decode`; `form.go` the bounded request parsers `parseForm` / `parseCookies` / `parseMultipart`; strict UTF-8 / UTF-16 / UTF-32 codecs (both byte orders, BOM handling per RFC 2781) in `utfcodecs.go`; hand-written `ascii` / `ebcdic` + generated ISO-8859-N / Windows-125N tables (`codecs_gen.go` is generated, do not edit; `gen_codecs.go` is the `go:build ignore` codegen). |
 | `doctree/node.go`, `doctree/edit.go`, `doctree/build.go`, `doctree/lib.go`, `doctree/format.go` | The compact document tree shared by `json` / `toml` / `yaml`: a 40-byte `Node` per value (map members in document order, a sorted key index above 8 members), about 8x smaller than the same document as `Value`s; JSON Pointer addressing and the copy-the-spine write verbs (`edit.go`); a `Builder` that grows containers in place for TOML's reopened tables, then seals them (`build.go`); and `Lib`, which registers the opaque `NAME.Value` type (a `NativeObject` payload) and the shared accessor + write builtins, with per-library options for `isNull` and date-times (`lib.go`); `FormatFloat`, the float spelling the `toml` / `yaml` encoders share (`format.go`). |
 | `json/jsonlib.go`, `json/jsondecode.go`, `json/jsonnode.go`, `json/jsonmerge.go` | `json`: RFC 8259 `encode` / `encodePretty` + `Value` emitter; recursive-descent decoder into a `doctree` tree (unescaped strings sliced from the input), positioned errors; RFC 7386 `mergePatch`. |
-| `task/tasklib.go` | `task`: `wait` / `poll` / `discard` / `waitAll` / `waitAny`, `cancel` / `cancelled`, `waitTimeout` / `waitAnyTimeout` over `task of T` handles. |
-| `channel/channellib.go` | `channel`: `make` / `send` / `recv` / `recvTimeout` / `close` / `select` / `len` / `capacity` over `channel of T`. |
+| `task/tasklib.go` | `task`: `wait` / `poll` / `discard` / `waitAll` / `waitAny`, `cancel` / `cancelled`, `waitTimeout` / `waitAnyTimeout` / `waitAllTimeout` over `task of T` handles. |
+| `channel/channellib.go` | `channel`: `make` / `send` / `recv` / `recvTimeout` / `close` / `select` / `selectTimeout` / `len` / `capacity` over `channel of T`. |
 | `kv/kvlib.go` | `kv`: in-process key/value store with per-key TTL; a run-scoped registry on the host interpreter. |
 | `fs/fslib.go`, `fs/handles.go`, `fs/temp.go`, `fs/watch.go`, `fs/mkfifo*.go`, `fs/readsecret*.go` | `fs`: one-shot read / write / append + metadata + dir ops; `mkfifo` (unix split); buffered `fs.File` handles; `makeTempFile` / `makeTempDir`; the polling `fs.Watcher`; `readSecretBytes` / `readSecretString` (size-capped, refuse a file others could read or replace unless on a read-only mount; refused outright on non-Unix). |
 | `net/netlib.go`, `net/netlib_std.go`, `net/netlib_tinygo.go` (+ `netlib_broadcast_*.go`, `netlib_binddevice_*.go`, `netlib_errno_*.go`) | `net`: shared install / dispatch; `!tinygo` full TCP / TLS / UDP / DNS; `tinygo` friendly-error stubs; per-OS `setBroadcast` / `bindToDevice`; socket errno (Winsock codes on Windows) -> `NetError.reason`. |
@@ -151,7 +155,7 @@ described in [index.md](index.md#pipeline); this page is the file-level index.
 | `crypto/mtwei.go` | `crypto` EC-SRP over Curve25519 (`mtweiKeygen` / `mtweiId` / `mtweiClientKey`) for the `@jennifer/mactelnet` deck, over `math/big`. |
 | `intl/intllib.go` | `intl`: locale catalogs - `load(lang, catalog)`, `setLocale` / `locale`, `tr(key[, params])` with `%name%` interpolation; `formatNumber` (`number.go`). |
 | `term/termlib.go`, `term/termlib_std.go`, `term/termlib_tinygo.go` | `term`: raw mode (`makeRaw` / `restore` -> `term.State`), `size`, raw byte reads; `!tinygo` real termios (+ `RestoreAll` for the CLI signal path), `tinygo` stubs. |
-| `httpd/httpdlib.go`, `httpd/httpdlib_std.go`, `httpd/httpdlib_tinygo.go`, `httpd/httpdlib_memlimit.go` | `httpd`: HTTP/1.1 server engine over `net/http` (TLS, graceful shutdown) - pull loop `listen` / `accept` / `respond` + request accessors; the cgroup-aware buffer budget (`httpdlib_memlimit.go`); `tinygo` stubs. |
+| `httpd/httpdlib.go`, `httpd/httpdlib_std.go`, `httpd/httpdlib_tinygo.go`, `httpd/httpdlib_memlimit.go` | `httpd`: HTTP/1.1 server engine over `net/http` (TLS, graceful shutdown) - pull loop `listen` / `accept` / `respond` + request accessors; the buffer budget sized from `internal/memlimit` (`httpdlib_memlimit.go`); `tinygo` stubs. |
 | `xml/xmllib.go`, `xml/xmldecode.go`, `xml/xmlaccess.go`, `xml/xmlnode.go` | `xml`: `decode` / `encode` / `encodePretty` over an opaque `xml.Value` element tree (ordered attributes, children, mixed text); `xmlnode.go` is the compact native tree (a `NativeObject` payload, names and plain text sliced from the input). |
 | `yaml/yamllib.go`, `yaml/yamldecode.go`, `yaml/yamlencode.go`, `yaml/yamlguard.go` | `yaml`: YAML 1.2 `decode` / `decodeAll` / `encode` / `encodePretty` over an opaque `yaml.Value` (on `gopkg.in/yaml.v3`, converted into a `doctree` tree with bytes and timestamp nodes); the read / walk / write surface is `doctree`'s; `yamlguard.go` bounds collection nesting before `yaml.v3` parses (a scan that follows its scanner token by token, so the bound holds for hostile input). |
 | `toml/tomllib.go`, `toml/tomldecode.go` | `toml`: TOML 1.0 `encode` / `encodePretty` / `decode` into a `doctree` tree (tables grown with a `doctree.Builder`, date-times as datetime nodes tagged with their form); the read / walk / write surface, plus `asDatetime`, is `doctree`'s. |
@@ -194,6 +198,8 @@ described in [index.md](index.md#pipeline); this page is the file-level index.
 | `internal/limits/nesting_tiny.go` | `MaxNestingDepth = 64` + `MaxCallDepth = 120` (`tinygo`): the same caps lowered to stay below `jennifer-tiny`'s fixed 4 MB stack; the other caps are lowered too. See [tinygo.md](tinygo.md). |
 | `internal/limits/caperror.go` | `CapError` / `Capf`: a reached cap as a Go error of kind `"limit"`, kept through `%w` wrapping. |
 | `internal/limits/size.go` | Overflow-checked `AddInt` / `MulInt` / `AddInt64` / `MulInt64`, saturating `LimitPlusOne`, and capped readers `ReadAll` / `ReadN` / `ReadDelim` that grow with the data (`TooLargeError`, `ErrTooLarge`). |
+| `internal/dnsconf/dnsconf.go`, `dnsconf_std.go`, `dnsconf_tiny.go`, `files.go`, `wire.go` | Resolver configuration (M29.5): picks resolv.conf / hosts (`JENNIFER_RESOLV_CONF` / `JENNIFER_HOSTS`, `<PREFIX>/etc`, `/etc`), the hint a failed lookup carries without one; `!tinygo` routes `net.DefaultResolver` through an in-process stub (hosts answers, forwarding to the chosen nameservers) and `Query` for `net.lookupWith`'s `dnsServers`. |
+| `internal/memlimit/memlimit.go` | `Detect`: the machine memory limit, the smaller of `/proc/meminfo` MemTotal and the tightest cgroup v1 / v2 limit on the way to the root (`!tinygo`). Used for the startup memory limit and `httpd.setMaxBufferBudgetFromRAM`. |
 | `internal/limits/duration.go` | `MaxDurationUnits` / `DurationFitsUnits` / `DurationFromUnits`: user counts of ms / s / ... turned into a `time.Duration` without int64 wrap. |
 | `internal/limits/utf8.go` | `InvalidUTF8At` / `CheckUTF8`: the UTF-8 check on text read in as a `string` (an error naming the byte offset). |
 
@@ -202,7 +208,8 @@ described in [index.md](index.md#pipeline); this page is the file-level index.
 | File | Description |
 | ---- | ----------- |
 | `internal/version/version.go` | Default `Version = "dev"`; `AtLeast` / `Below` / `Compare` / `CheckConstraint` for the `# pragma-jennifer-version` header (a dev build meets every floor). |
-| `internal/version/version_gen.go` | GENERATED by `scripts/gen-version.sh` (gitignored). |
+| `internal/version/paths.go` | `Prefix` (the install prefix, default `/usr`) and the paths derived from it: `SysmoddirDefault`, `DocDir`, `SysconfDir` (M29.4). |
+| `internal/version/version_gen.go` | GENERATED by `scripts/gen-version.sh` (gitignored): sets `Version` and `Prefix` (`make PREFIX=`). |
 | `scripts/version.sh` | Computes the version string from git state. |
 | `scripts/gen-version.sh` | Writes `version_gen.go` before each build. |
 | `scripts/gen-module-docs.j` | Jennifer program that renders the per-module API reference (`docs/api/`) + the `docs/SUMMARY.md` "Module API Reference" region from each module's doc comments, via the `docblock` module. Run at publish time by `docs.yml` before `grimoire build --pdf` (not committed); `test.yml` runs it as a smoke-check. |

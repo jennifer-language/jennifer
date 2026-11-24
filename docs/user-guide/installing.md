@@ -11,9 +11,27 @@ built from the same source with different compilers:
 | `jennifer-tiny` | TinyGo                 | Constrained variant. Smaller binary for minimal-footprint deployments (embedded systems, minimal containers, small scripting hosts). No `os/exec` (a TinyGo runtime gap), no network stack (no netdev driver), no `sql`. Run-only: the `tokens` / `ast` / `fmt` / `lint` / `profile` / `test` / `serve` development subcommands are in the default binary only. Each missing surface throws an error pointing at `jennifer`. |
 
 Both binaries install side by side. The packages below install both, as do
-the tarball and a from-source build. The best-effort **macOS / Windows**
-builds ship the standard `jennifer` only (see
+the tarball and a from-source build. The best-effort **macOS / Windows /
+Android** builds ship the standard `jennifer` only (see
 [macOS / Windows](#macos--windows-unsupported) below).
+
+The Linux releases cover these architectures:
+
+| Release arch | Go target | `.deb` | `.ipk` | `jennifer-tiny` | Runs on |
+| --- | --- | --- | --- | --- | --- |
+| `amd64` | `linux/amd64` | `amd64` | `x86_64` | yes | 64-bit x86 |
+| `arm64` | `linux/arm64` | `arm64` | `aarch64_generic` | yes | 64-bit ARM (Raspberry Pi 3 and later in 64-bit mode) |
+| `armv7` | `linux/arm`, `GOARM=7` | none (use `armhf`) | `arm_cortex-a7_neon-vfpv4` | yes | 32-bit ARMv7 with VFP; not ARMv6 |
+| `armv6` | `linux/arm`, `GOARM=6` | `armhf` | `arm_arm1176jzf-s_vfp` | yes | 32-bit ARMv6 with VFP (Raspberry Pi Zero / 1) and every ARMv7 |
+| `386` | `linux/386` | `i386` | `i386_pentium4` | yes | 32-bit x86 with SSE2 |
+| `riscv64` | `linux/riscv64` | `riscv64` | `riscv64_riscv64` | no (no TinyGo target) | 64-bit RISC-V |
+
+The one `armhf` `.deb` carries the `armv6` binaries, so it installs on any
+32-bit ARM Debian / Raspberry Pi OS system (Raspberry Pi OS's armhf baseline is
+ARMv6); the `armv7` build ships as a tarball and an `.ipk` only.
+
+A Jennifer `int` is 64-bit on every one of them; on the 32-bit targets only
+the memory a program can use is smaller (a 4 GiB address space).
 
 ## Install
 
@@ -25,14 +43,14 @@ verify the checksum, and install:
 
 ```sh
 # Replace X.Y.Z with the release version, e.g. 0.27.0
-ARCH=$(dpkg --print-architecture)   # amd64 or arm64
+ARCH=$(dpkg --print-architecture)   # amd64, arm64, armhf, i386 or riscv64
 curl -LO "https://github.com/jennifer-language/jennifer/releases/download/X.Y.Z/jennifer_X.Y.Z_${ARCH}.deb"
 curl -LO "https://github.com/jennifer-language/jennifer/releases/download/X.Y.Z/jennifer_X.Y.Z_${ARCH}.deb.sha256"
 sha256sum -c "jennifer_X.Y.Z_${ARCH}.deb.sha256"
 sudo dpkg -i "jennifer_X.Y.Z_${ARCH}.deb"
 ```
 
-Installs `/usr/bin/jennifer` + `/usr/bin/jennifer-tiny`, man pages
+Installs `/usr/bin/jennifer` + `/usr/bin/jennifer-tiny` (not on riscv64), man pages
 under `/usr/share/man/man1/`, bash completion, the XDG MIME definition
 that registers `.j` as `text/x-jennifer` with file managers and
 editors, and Vim + Neovim syntax highlighting (in both
@@ -110,7 +128,10 @@ sudo install -m 0644 share/jennifer/modules/*.j /usr/share/jennifer/modules/
 
 ### Container image
 
-Each release publishes multi-arch (`linux/amd64` + `linux/arm64`) images to GHCR.
+Each release publishes multi-arch images to GHCR (`linux/amd64`, `linux/arm64`,
+`linux/arm/v7`, `linux/386` and `linux/riscv64`, plus `linux/arm/v6` for
+`:alpine`; `:static` has the first three; see
+[packaging/docker/README.md](../../packaging/docker/README.md)).
 The image bundles both binaries and the system modules, so a bare
 `import "name.j";` resolves with no setup. The container sets `WORKDIR /work` and
 `ENTRYPOINT ["jennifer"]`, so you mount your code at `/work` and pass the
@@ -199,8 +220,8 @@ bind host ports below 1024 without extra configuration - map to a high port
 ### macOS / Windows (unsupported)
 
 **Linux is the only supported platform.** As a convenience, best-effort
-**unsupported** binaries for macOS (Intel + Apple Silicon) and Windows
-(64- and 32-bit) are attached to each
+**unsupported** binaries for macOS (Intel + Apple Silicon), Windows
+(64- and 32-bit) and Android (arm64) are attached to each
 [release](https://github.com/jennifer-language/jennifer/releases), named
 `...-UNSUPPORTED`. Read the caveats before relying on them:
 
@@ -219,6 +240,16 @@ bind host ports below 1024 without extra configuration - map to a high port
   supported development and testing happen on Linux. Supported
   builds for these platforms are planned after 1.0.0 (see
   [the roadmap, M31](../roadmap.md#m31---multiplatform-promote-macos--windows-to-supported)).
+- **Android (arm64).** Go links only `android/arm64` without the NDK, so
+  that is the one Android build. It is built for
+  [Termux](https://termux.dev)'s prefix (`/data/data/com.termux/files/usr`):
+  copy `jennifer` to `$PREFIX/bin` and the archive's `share/jennifer/modules`
+  to `$PREFIX/share/jennifer/modules`; Termux's `$PREFIX/etc/resolv.conf`
+  and `hosts` are found without configuration, and `$TMPDIR` is honoured.
+  Elsewhere set `JENNIFER_SYSMODDIR` and `JENNIFER_RESOLV_CONF`. Android
+  has no `/usr/bin/env`, so a script's shebang names the interpreter:
+  `#!/data/data/com.termux/files/usr/bin/jennifer run` (Termux's
+  `termux-exec` also rewrites `/usr/bin/env` shebangs).
 - **Just the binary (macOS).** The `-UNSUPPORTED` archive holds only the
   executable plus `JENNIFER.md`, `README.md`, and the licence - no installer,
   man pages, MIME registration, or shell completion. Windows gets an installer
@@ -288,6 +319,34 @@ from git state before invoking the toolchain, so `./jennifer
 version` always reflects the current commit. See
 [../libraries/meta.md](../libraries/meta.md) for the
 `meta.VERSION` string format.
+
+#### Install prefix
+
+The binary carries the install prefix it was built for, `/usr` by default.
+`make build PREFIX=<dir>` (an absolute path) builds for another one:
+
+| Path | Default (`PREFIX=/usr`) | Overridden by |
+| --- | --- | --- |
+| System modules | `<PREFIX>/share/jennifer/modules` | `--sysmoddir`, `JENNIFER_SYSMODDIR` |
+| Docs (`JENNIFER.md`) | `<PREFIX>/share/doc/jennifer` | - |
+| resolv.conf, hosts | `<PREFIX>/etc/...`, then `/etc/...` (`/usr` uses `/etc` only) | `JENNIFER_RESOLV_CONF`, `JENNIFER_HOSTS` |
+| Temporary files | `$TMPDIR`, else the platform's (`/tmp`; `/data/local/tmp` on Android) | `TMPDIR` |
+
+```sh
+make build PREFIX=/opt/jennifer
+sudo install -D -m 0755 jennifer /opt/jennifer/bin/jennifer
+sudo mkdir -p /opt/jennifer/share/jennifer/modules
+sudo install -m 0644 modules/*.j /opt/jennifer/share/jennifer/modules/   # minus *_test.j
+/opt/jennifer/bin/jennifer version -v   # prefix, each path and where it came from
+```
+
+A self-contained userland under an app's data directory (Termux on Android,
+for one) builds with its own prefix (Termux exports `PREFIX`, which `make`
+picks up) and keeps its `resolv.conf` in `$PREFIX/etc`, which the resolver
+finds without configuration (see the
+[resolver configuration](../libraries/net.md#resolver-configuration)). The
+release builds and the packages (Debian, Arch, OpenWrt, the container image)
+use `/usr`.
 
 ## Running
 

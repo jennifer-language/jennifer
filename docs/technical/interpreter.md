@@ -10,32 +10,40 @@ binary small and predictable under TinyGo.
 
 ```go
 type Value struct {
-    Kind    ValueKind  // KindNull | KindInt | KindFloat | KindString |
-                       //  KindBool | KindBytes | KindList | KindMap |
-                       //  KindStruct | KindTask | KindObject | KindEnum |
-                       //  KindFunc | KindChannel
-    Int     int64
-    Float   float64
-    Str     string
-    Bool    bool
-    List    []Value       // KindList:   element data
-    Map     []MapEntry    // KindMap:    insertion-ordered entries
-    Bytes   []byte        // KindBytes:  raw bytes
-    Fields  []StructField // KindStruct / KindEnum: ordered (Name, Value)
-    Variant string        // KindEnum: the active variant
-    StructName string     // KindStruct / KindEnum: the type name
-    StructNS, ModPath string // library / module type identity
-    ElemTyp *parser.Type  // KindList: declared element type (stamped)
-    KeyTyp  *parser.Type  // KindMap:  declared key type   (stamped)
-    ValTyp  *parser.Type  // KindMap:  declared value type (stamped)
-    Task    *TaskState    // KindTask:    shared handle
-    Obj     *ObjectBox    // KindObject:  opaque library payload
-    Fn      *parser.MethodDef // KindFunc: the function
-    FnHome  *Interpreter  // KindFunc: the interpreter that defined Fn
-    Chan    *ChannelState // KindChannel: shared handle
-    // plus unexported fields: nest (nesting depth), strRunes, mapIdx
+    Kind     ValueKind      // KindNull | KindInt | KindFloat | KindString |
+                            //  KindBool | KindBytes | KindList | KindMap |
+                            //  KindStruct | KindTask | KindObject | KindEnum |
+                            //  KindFunc | KindChannel
+    tag      uint8          // which slice payload sp/sn/sc hold, what ref points at
+    nest     uint16         // nesting-height cache (nesting.go)
+    strRunes int32          // rune-count cache of a string
+    word     uint64         // int64, float64 bits or bool
+    sp       unsafe.Pointer // one slice header: string, list, map entries,
+    sn, sc   int            //  bytes or struct fields (the tag says which)
+    ref      unsafe.Pointer // the out-of-line part (below)
 }
 ```
+
+`Value` is 48 bytes on 64-bit targets. `ref` is the interned `*Identity` of a
+struct or enum, a list's element `*parser.Type`, a map's `mapDesc` (key and
+value types plus the key index), or the `*TaskState`, `*ChannelState`,
+`*ObjectBox` or func handle (`Fn` plus its home interpreter `FnHome`).
+Payloads are read and written only through the accessors in `value_layout.go`
+(`Int`, `Float`, `Str`, `List`, `SetList`, `Map`, `Fields`, `Identity`,
+`StructName`, `ElemTyp`, `Task`, `Fn`, ...). A getter checks the tag before it
+reinterprets the words, so a value whose `Kind` is rewritten never exposes one
+payload as another, and a wrong-kind scalar read returns 0. Slice getters share
+the backing (`v.List()[i] = x` writes into the value); an append is stored back
+with `v.SetList(append(v.List(), x))`. `Identity` is `(StructNS, ModPath,
+name, variant)`, interned once per type (`InternIdentity`) and never modified:
+values of one type share the pointer, so a type comparison is a pointer
+comparison, and the empty identity is nil.
+
+The rune cursor of M29.13 is not a field: a builtin receives a copy of the
+binding, which would lose it. `runecursor.go` keeps a process-wide 16-slot
+table keyed by a string's data pointer and length, holding its last
+rune-to-byte position, so `$s[a..b]` and `strings.indexOf(s, sub, from)`
+resume the walk instead of starting over.
 
 `ZeroFor(t parser.Type)` returns the zero value for each declared type and is
 used when a `def` omits its `init` clause: `0`, `0.0`, `""`, `false`,
@@ -124,7 +132,7 @@ more than one way in sibling blocks is not owned).
   the right-hand side (as a direct argument), the old value is dead on every
   path out of the statement: overwritten when the call returns, unreachable
   when it throws because the error unwinds the frame. The parameter binds it
-  without the copy (`evalCall`, and `callMethodMoving` for a module call), so a
+  without the copy (`evalCall`, and `dispatchModuleMethod` for a module call), so a
   callee that mutates its parameter does so in place. The one path that could
   still observe `$v` after a throw is a `try` in the **same function**, so a call
   inside a `try` body is never marked; a global (reachable from the callee and
@@ -132,10 +140,9 @@ more than one way in sibling blocks is not owned).
   rules out all top-level code. Callers other than this exact shape pay one
   copy, at the bind.
 
-Crossing a module boundary, `findImpostorStruct` and the retag precheck
-(`subtreeNeedsRetag`) skip the elements of a list / map whose element types are
-primitive (`primitiveType`) - a typed list can hold no struct - so a module call
-carrying a large `list of string` stays O(1) as well. Pinned by
+`findImpostorStruct`, which words the error once a module call's argument check
+has failed, skips the elements of a list / map whose element types are
+primitive (`primitiveType`): a typed list can hold no struct. Pinned by
 `internal/parser/ownership_test.go` (which calls are marked, which functions own
 their results) and `internal/interpreter/ownership_test.go` (value semantics on
 every elided and every non-elided path, across a module boundary too).
@@ -673,10 +680,10 @@ the toolchain sees slot code). A raw `'...'` string never interpolates (it lexes
    every `QualifiedCallExpr.Fn` / `QualifiedConstRefExpr.Const` against
    the now-populated namespace AND module-alias tables. A library builtin,
    a library const, a module-alias const (`m.CONST` - its
-   boundary-retagged, deep-const value cached on the node), and a
+   deep-const value cached on the node), and a
    module-alias function (`m.fn(...)` - a `moduleMethodTarget{mod,
-   *MethodDef}` cached in `Fn`, dispatched through `dispatchModuleMethod`
-   -> `CallMethodWith`) all resolve to a direct dispatch instead of a
+   *MethodDef}` cached in `Fn`, dispatched through `dispatchModuleMethod`)
+   all resolve to a direct dispatch instead of a
    per-access lookup (an unexported / missing name stays unstamped, so its
    runtime error is unchanged). This pass runs after BOTH import
    mechanisms (the tables didn't exist during Resolve) and is skipped by
@@ -802,7 +809,7 @@ existing qualified-reference eval layer, since the parser resolver and
   mismatches reposition at the consumer's call site; a `runtime error`,
   `throw`, or `exit` from the module body propagates unchanged.
 - `evalQualifiedConst` reads `alias.CONST` from the module's global scope
-  (`m.interp.global.GetBinding`), or returns the boundary-retagged value
+  (`m.interp.global.GetBinding`), or returns the value
   `resolveQualifiedRefs` cached on the node.
 
 `use` non-transitivity, run-once sharing, and `-race` safety all fall out
@@ -824,31 +831,30 @@ or exported function parameter typed as a *private* module struct; only the
 module's own bare struct types are checked, so library / namespaced types
 cross freely.
 
-**Cross-module struct identity** is boundary translation, not internal
-tagging. A module's own structs stay bare (`StructNS ""`) inside the module,
-where all the existing struct machinery works unchanged. `retagStructs`
-re-tags them to `(module-stem, name)` as a value crosses *out* to an
-importer (a `callModuleMethod` return, a `moduleConst` read) and back to
-bare on the way *in* (a `callModuleMethod` argument), recursing through
-struct fields, list elements, and map values; library / other-module
-structs (a different namespace) are untouched. So the consumer can type a
-module struct (`def p as points.Point`, or `def ps as list of points.Point`;
-the `def`-check's `resolveDeclaredStructNS` stamps the type's namespace to
-the module stem, recursing into list / map / task element types so a
-collection element type matches the identity `retagStructs` gives the
-values), construct one (`points.Point{...}` in `evalStructLit`), read its
-fields, and pass it back - all type-checking - while `a.Point` and `b.Point`
-stay distinct `(namespace, name)` pairs. Struct identity is keyed by the
+**Cross-module struct identity** is one identity on both sides of the
+boundary. A module's own structs and enums carry `(StructNS = module stem,
+ModPath = canonical path)` inside the module as in its importers:
+`resolveDeclaredStructNS` stamps the module's bare type names with it at load
+(`ownTypeIdentity`; the entry program's is empty), and struct / enum literals,
+zero values (`zeroStructFor` / `zeroEnumFor`, built in the owning module's
+interpreter) and constants inside the module are built with it. A value
+crosses a module call, a func value call, `meta.callMain` or a constant read
+unchanged, with no walk or rebuild. `Error` stays bare everywhere. Inside a
+module, `lookupStructDef` / `lookupEnumDef` resolve the module's own path to
+its own tables and refuse a bare non-Error name, so a consumer's same-named
+struct never binds to a module type; `findImpostorStruct` only words the error
+once an argument check has failed. So the consumer can type a module struct
+(`def p as points.Point`, `def ps as list of points.Point`), construct one
+(`points.Point{...}`), read its fields and pass it back, while `a.Point` and
+`b.Point` stay distinct. Struct identity is keyed by the
 module's **canonical path**, carried in the `ModPath` field on both `Value` and
 `parser.Type` (empty for library / user structs) and compared by `Value.Equal` /
 `MatchesDeclared`; `StructNS` holds the file **stem** purely for display, so two
 module files sharing a basename (`a/util.j`, `b/util.j`, or `@jennifer/benchmark` vs
 `@alice/benchmark`) are distinct types while both still render as
-`benchmark.Point`. The boundary retag threads `(StructNS, ModPath)` so a foreign
-struct that only shares the stem is left untouched, and function parameter types
-are stamped alongside `def` types so a `func f(s as mod.Struct)` param carries
-the same identity the passed value does. The retag copies only compound values
-at the boundary (module calls are not a hot path). Declared-type
+`benchmark.Point`. Function parameter types are stamped alongside `def` types,
+so a `func f(s as mod.Struct)` param carries the same identity the passed value
+does. Declared-type
 stamping happens once, single-threaded, before execution:
 `resolveDeclaredTypesOnce` (run from `Run` after `loadModuleImports`) walks
 every declared type - top-level, function bodies, and spawn bodies - stamps it,
@@ -883,7 +889,7 @@ home context, its aliases resolve, and `env.depth` threads the caller's
 call-depth counter so recursion bouncing through a cross-boundary func call still
 trips the catchable guard (as it does through `dispatchModuleMethod` /
 `meta.callMain`). Same-interpreter calls (`FnHome == i`, or a `nil` home)
-keep the ordinary `callUserMethod` path with no retag.
+keep the ordinary `callUserMethod` path.
 
 `callMethodWithDepth` raises its **argument-count and argument-type mismatches as
 `*runtimeError`** (not a plain Go error), so a wrong-arity or wrong-kind call to a
@@ -896,19 +902,9 @@ against a mis-declared handler: a two-parameter
 `web`'s dispatch logs it and still answers the request instead of leaving the
 connection hung.
 
-Struct arguments and the return value cross the boundary through **`crossRetag(v,
-from, to)`**, which reuses `retagStructs` (above) in a two-pass form:
-`to`'s own structs - tagged with `to`'s identity as `from` sees them - are
-un-tagged to bare inside `to`, then `from`'s own structs - bare inside `from` -
-take `from`'s identity so `to` recognises them as that module's structs. Because
-a struct belongs to exactly one module, the two passes target disjoint owners, so
-the *same* helper serves both directions (arguments crossing in, the result
-crossing out) and every pairing (host->module, module->host, module->module). The
-webapi authenticator is the worked case: a host func value returning a
-`webapi.Identity` (built through the host's `webapi` alias, so tagged
-`(webapi-stem, webapi-path)` in the host) is called from inside the `webapi`
-module and its return is retagged bare, exactly the identity the module's own
-code expects. `FnHome` is a shared pointer, copied with the (immutable) func value
+Arguments, the result and a thrown value need no translation: a struct's
+identity is the same in every interpreter, so the webapi authenticator's
+`webapi.Identity` is the identity the module's own code expects. `FnHome` is a shared pointer, copied with the (immutable) func value
 like `Fn`, and never mutated. Pinned by `cmd/jennifer/funcvalue_home_test.go` and
 `args_dispatch_test.go`.
 
@@ -922,7 +918,7 @@ reference docs are split per library:
 - [libraries/convert.md](../libraries/convert.md) - `toInt`, `toFloat`, `toString`, `toBool`, `typeOf`
 - [libraries/math.md](../libraries/math.md) - `math.abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`, `rand`, `randInt`, `randSeed`; constants `math.PI`, `math.E`
 - [libraries/strings.md](../libraries/strings.md) - `upper`, `lower`, `fold`, `contains`, `startsWith`, `endsWith`, `indexOf`, `lastIndexOf`, `count`, `trim`/`trimLeft`/`trimRight`, `replace`, `replicate`, `split`, `chars`, `join`
-- [libraries/os.md](../libraries/os.md) - `os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`, `os.ARGS`, `os.getEnv`, `os.hasFlag`, `os.flag`, `os.run`, `os.spawn`, `os.wait`, `os.poll`, `os.kill`, `os.release`
+- [libraries/os.md](../libraries/os.md) - `os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`, `os.ARGS`, `os.argsBytes`, `os.getEnv`, `os.getEnvBytes`, `os.run`, `os.spawn`, `os.spawnWith`, `os.wait`, `os.waitTimeout`, `os.poll`, `os.kill`, `os.release`
 - [libraries/meta.md](../libraries/meta.md) - `meta.VERSION` (build version), `meta.BUILD` (toolchain), `meta.SYSMODDIR`, `meta.CAPABILITIES`, `meta.call` / `meta.callMain`
 - [libraries/index.md](../libraries/index.md) - catalog and organizing principles (every other library has its own page there)
 - `len(EXPR)` is a language built-in primary, not a library function. See [grammar.md](grammar.md).
@@ -1330,10 +1326,11 @@ shutdowns don't print spurious "unwaited" lines.
 
 ### task library Go layer
 
-`internal/lib/task` registers nine namespaced builtins through
+`internal/lib/task` registers ten namespaced builtins through
 the standard `RegisterNamespaced` path - the five observation
 builtins below, plus cooperative cancellation (`cancel` /
-`cancelled`) and bounded waits (`waitTimeout` / `waitAnyTimeout`):
+`cancelled`) and bounded waits (`waitTimeout` / `waitAnyTimeout` /
+`waitAllTimeout`):
 
 | Builtin            | Path                                                                                          |
 | ------------------ | --------------------------------------------------------------------------------------------- |

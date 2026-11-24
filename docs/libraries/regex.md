@@ -19,9 +19,9 @@ if (regex.matches("^[A-Z][a-z]+$", "Hello")) {
 | ------------------------------------------ | -------------------- | ------------------------------------------------------------------------ |
 | `regex.matches(pattern, s)`                | `bool`               | Does `pattern` match anywhere in `s`?                                    |
 | `regex.find(pattern, s)`                   | `regex.Match`        | First match, or a sentinel with `start=-1` on no match.                  |
-| `regex.findAll(pattern, s)`                | `list of regex.Match` | Every non-overlapping match, left to right. More than 4194304 / (8 + 2 x groups + 6 x named groups) matches (524288 for a group-less pattern; a quarter on `jennifer-tiny`) is an error. |
+| `regex.findAll(pattern, s)`                | `list of regex.Match` | Every non-overlapping match, left to right. More than 16777216 / (8 + 2 x groups + 6 x named groups) matches (2097152 for a group-less pattern; a quarter on `jennifer-tiny`) is an error. |
 | `regex.replace(pattern, s, replacement)`   | `string`             | Replace every match. `$1`, `${name}` expand to captured groups. Errors when the result could pass 256 MiB (32 MiB on `jennifer-tiny`), bounding each `$` reference by its match length. |
-| `regex.split(pattern, s)`                  | `list of string`     | Split `s` at every match of `pattern`. More than 4194304 parts (1048576 on `jennifer-tiny`) is an error. |
+| `regex.split(pattern, s)`                  | `list of string`     | Split `s` at every match of `pattern`. More than 16777216 parts (4194304 on `jennifer-tiny`) is an error. |
 | `regex.escape(s)`                          | `string`             | Escape metacharacters so `s` is treated as a literal pattern.            |
 
 ## The `regex.Match` struct
@@ -188,7 +188,7 @@ Every error is positioned at the call site and catchable with `try` / `catch`.
 | --- | --- | --- |
 | Invalid pattern (quoted, escaped, cut after 64 characters, with the RE2 reason) | `"runtime"` | `regex.find: invalid pattern "x[": missing closing ]: "["` |
 | Pattern over 32 KiB, or compiling to more than 50,000 instructions | `"limit"` | `regex.matches: pattern "x{1000}x{1000}..."... compiles to 62002 instructions, over the limit of 50000` |
-| `findAll`, `replace` or `split` result cap | `"limit"` | `regex.split: more than 4194304 parts` |
+| `findAll`, `replace` or `split` result cap | `"limit"` | `regex.split: more than 16777216 parts` |
 | Wrong argument type | `"runtime"` | `regex.matches: pattern must be string, got int` |
 | Wrong argument count | `"runtime"` | `regex.replace expects 3 arguments (pattern, s, replacement), got 2` |
 

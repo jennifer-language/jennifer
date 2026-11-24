@@ -501,7 +501,7 @@ A bare `throw "boom";` works too (any value), but the handler cannot read `.kind
   struct with `kind = "runtime"` (the sites below use a more specific
   kind) and the original file / line / col preserved.
 - **Timeouts** - a `net` read or write past its deadline, a `connect` past its
-  `timeoutMs`, a `task.waitTimeout` / `waitAnyTimeout` that runs out - carry
+  `timeoutMs`, a `task.waitTimeout` / `waitAnyTimeout` / `waitAllTimeout` that runs out - carry
   `kind = "timeout"`. In `net`, a call on a closed socket (one closed before
   the call, or under a call blocked on it) carries `kind = "closed"`, so a poll
   loop can tell "nothing arrived yet" and "we closed it" from a broken socket
@@ -541,9 +541,9 @@ same situation, so a handler can treat it the same way whatever raised it.
 | `"runtime"` | a fault in the program: an index out of range, a missing map key, a type mismatch, division by zero, a bad argument to a library function | the interpreter and the Go libraries |
 | `"value"` | an invalid input value, such as a malformed semver, JWT or colour name | `jwt`, `semver`, `feed`, `markdown`, `screen`, `ansi`, `validate`; most modules use their own kind for this instead |
 | `"limit"` | a size, count or depth cap was reached: the input may be valid, just too big for the cap | the call-depth and recursion guards, `archive`, `net.readAll`, the document decoders' nesting and node caps (`json`, `toml`, `yaml`, `xml`, `asn1`, and their `set` / `insert`), and the bundled modules' receive caps (`http`, `imap`, `pop`, `redis`, `ldap`, `mqtt`, `websocket`, `zmq`, `transport`) and processing budgets (`font`, `html`, `pdf`, `tengine`, the `snmp` / `webdav` walks) |
-| `"timeout"` | a deadline passed | `net` reads, writes and `connect`, `serial` deadlines, `i2c` bus timeouts, `task.waitTimeout` / `waitAnyTimeout`, `channel.recvTimeout` |
-| `"closed"` | the connection or handle is closed: closed before the call, under a blocked call, or by the peer mid-read (`net.readN`, a reply `http` got only part of) | `net`, `serial`, `http`, and the protocol modules over `net` (`amqp`, `imap`, `mqtt`, `pop`, `redis`, `websocket`) |
-| `"net"` | the network failed: a connection refused, reset or unreachable, a name that does not resolve, a TLS handshake or certificate that fails, or a peer that closed before any byte of its reply. Always a `net.NetError` (below) | `net` and every module over it (`http`, `smtp`, `redis`, ...), which pass it on |
+| `"timeout"` | a deadline passed | `net` reads, writes and `connect`, the `sql` query deadline, `serial` deadlines, `i2c` bus timeouts, `task.waitTimeout` / `waitAnyTimeout` / `waitAllTimeout`, `channel.recvTimeout` / `selectTimeout`, `os.waitTimeout` / `waitBytesTimeout`, `term.readByteTimeout` |
+| `"closed"` | the connection or handle is closed: closed before the call, under a blocked call, or by the peer mid-read (`net.readN`, a reply `http` got only part of) | `net`, `serial`, `http`, and the protocol modules over `net` (`amqp`, `imap`, `mqtt`, `pop`, `redis`, `websocket`); `term.readByte` / `readByteTimeout` at the end of input |
+| `"net"` | the network failed: a connection refused, reset or unreachable, a name that does not resolve, a TLS handshake or certificate that fails, or a peer that closed before any byte of its reply. Always a `net.NetError` (below) | `net`, `sql`, and every module over `net` (`http`, `smtp`, `redis`, ...), which pass it on |
 | `"cancelled"` | the task running the code was cancelled (`task.cancel`); the message is `task cancelled` | the loop checkpoint in a spawned body and every blocking builtin |
 
 A built-in library raises its own kind for **input data** it read and found
@@ -563,6 +563,7 @@ plain `Error`; the library pages list them under "Errors".
 | `"time"`, `"uuid"`, `"decimal"`, `"convert"` | a string that does not parse (`time.parse` / `fromIso`, `uuid.parse`, `decimal.from`, `convert.toInt` / `toFloat` / `toBool`) |
 | `"kv"` | a damaged store file in `kv.openFile` |
 | `"fs"`, `"io"`, `"os"` | invalid UTF-8 read as text from a file, stdin or a child process's output (`"fs"` also for a refused secret file) |
+| `"sql"` | a column `sql.asString` / `asFloat` / `asBool` cannot return (not UTF-8, NaN or infinite, an integer other than 0 / 1); also every error a database server reports. Always a `sql.SqlError{kind, message, code, sqlState}` |
 
 A generic kind is a plain `Error`, except `"net"`. A module's own kind may
 carry a struct with more fields - `rest.HttpError`, `smtp.SmtpError` and the

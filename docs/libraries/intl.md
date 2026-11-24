@@ -225,7 +225,7 @@ sv: 1 234 567,88
 | Errors | Kind `"runtime"`: a malformed locale, a language not in the table (never a silent fallback to English), `digits` outside 0-20, or a value that is not a number. |
 
 The text is for people to read, not to parse back: keep stored and exchanged
-numbers in their plain form (`decimal.toString`, JSON numbers).
+numbers in their plain form (`convert.toString` of a `decimal.Decimal`, JSON numbers).
 
 ## Errors
 

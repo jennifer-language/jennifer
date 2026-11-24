@@ -105,10 +105,10 @@ All are positioned, catchable errors. The size and count caps are kind
 | `join` | a non-`bytes` element | `"runtime"` |
 | `join` | a result above 256 MiB (32 MiB on `jennifer-tiny`) | `"limit"` |
 | `split(b, sep)` | an empty `sep` | `"runtime"` |
-| `split(b, sep)` | more than 4,194,304 parts (1,048,576 on `jennifer-tiny`) | `"limit"` |
+| `split(b, sep)` | more than 16,777,216 parts (4,194,304 on `jennifer-tiny`) | `"limit"` |
 | `bitXor` / `bitAnd` / `bitOr` | an empty `key` | `"runtime"` |
 | `read*` | a span past the end of `b`, a negative offset, a size outside the allowed set, an order other than `"le"` / `"be"`, a non-finite float, an 8-byte unsigned value above the int range, a `count` outside `[0, len(b)]`, a `stride` below 1 (the offset is checked even when `count` is 0) | `"runtime"` |
-| `readInts` / `readFloats` | a `count` above 4,194,304 (1,048,576 on `jennifer-tiny`) | `"limit"` |
+| `readInts` / `readFloats` | a `count` above 16,777,216 (4,194,304 on `jennifer-tiny`) | `"limit"` |
 | any | a wrong argument type (`binary.make("3")`), or the wrong number of arguments | `"runtime"` |
 
 ## Performance

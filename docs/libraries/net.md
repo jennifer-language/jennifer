@@ -1,7 +1,7 @@
 # `net` - TCP + UDP sockets and DNS lookups
 
-Enable with `use net;`. Blocking TCP and UDP sockets plus two
-DNS lookup helpers. For non-blocking use, combine with
+Enable with `use net;`. Blocking TCP and UDP sockets plus DNS
+lookups. For non-blocking use, combine with
 [`spawn`](../user-guide/concurrency.md); there is no `*Async` surface.
 
 ```jennifer
@@ -208,7 +208,8 @@ zero value is the plain call (`connect`, `startTLS`, `lookup`,
 def struct net.ConnectOptions {
     timeoutMs as int,           # bound on the connect, the TLS handshake or the lookup
     tls as bool,                # connectWith: TLS handshake on connect (as connectTLS)
-    tlsOptions as net.TLSOptions
+    tlsOptions as net.TLSOptions,
+    dnsServers as list of string # lookupWith: ask these DNS servers only
 };
 ```
 
@@ -217,6 +218,7 @@ def struct net.ConnectOptions {
 | `timeoutMs` | the default, 30000 (30 s) | all four | `math.MAX_INT` is no deadline; a negative value throws `"runtime"`. A deadline past is kind `"timeout"`. |
 | `tls` | `false`: plaintext | `connectWith` | `startTLSWith` ignores it (the call is the request for TLS); the lookups ignore it. |
 | `tlsOptions` | verify against the system roots | `connectWith` with `tls`, `startTLSWith` | See [`net.TLSOptions`](#nettlsoptions). |
+| `dnsServers` | `[]`: the [configured resolver](#resolver-configuration) (hosts file, then the resolv.conf nameservers, with the search list) | `lookupWith` | Each entry is `"ip"` or `"ip:port"` (port 53 by default); at most 16. `lookupWith` asks only these, each in turn (UDP, TCP when the answer is truncated, at most 5 s each, all within `timeoutMs`): no hosts file, no search list, the IPv4 addresses then the IPv6 ones. A host name instead of an address, or more than 16 entries, throws `"runtime"` in every call that takes the options. `connectWith`, `startTLSWith` and `reverseLookupWith` ignore it and resolve through the configured resolver. |
 
 The deadline bounds the connect together with its TLS handshake, a
 `startTLS` handshake, or a lookup; it never carries over to the reads and
@@ -389,9 +391,9 @@ A client binds to `:0` (kernel picks a port) and sends to the remote peer.
 | Call                             | Returns          | Notes                                                                     |
 | -------------------------------- | ---------------- | ------------------------------------------------------------------------- |
 | `net.lookup(host)`               | `list of string` | Resolve `host` to a list of IP addresses (v4 and v6 mixed), within the default 30 s. |
-| `net.lookupWith(host, net.ConnectOptions)` | `list of string` | `lookup` within the options' `timeoutMs`; the other fields are ignored. |
+| `net.lookupWith(host, net.ConnectOptions)` | `list of string` | `lookup` within the options' `timeoutMs`; with `dnsServers`, ask those DNS servers only (no hosts file, no search list, the IPv4 addresses then the IPv6 ones). `tls` and `tlsOptions` are ignored. |
 | `net.reverseLookup(ip)`          | `list of string` | Reverse DNS: IP address to a list of hostnames, within the default 30 s. |
-| `net.reverseLookupWith(ip, net.ConnectOptions)` | `list of string` | `reverseLookup` within the options' `timeoutMs`. |
+| `net.reverseLookupWith(ip, net.ConnectOptions)` | `list of string` | `reverseLookup` within the options' `timeoutMs`, through the configured resolver; the other fields are ignored. |
 
 ```jennifer
 use io;
@@ -405,6 +407,53 @@ for (def ip in $ips) {
 
 DNS lookups block until the answer or the deadline (kind `"timeout"`).
 Compose with `spawn` to overlap resolution with other work.
+
+`dnsServers` asks named servers only, for a diagnostic or a split-horizon
+name (see [Connect options](#connect-options)):
+
+```jennifer
+use io;
+use net;
+
+# What does this server answer?
+def ips as list of string init net.lookupWith("intranet.example",
+    net.ConnectOptions{dnsServers: ["192.0.2.53", "[2001:db8::53]:5353"], timeoutMs: 2000});
+io.printf("%v\n", $ips);
+```
+
+### Resolver configuration
+
+The default `jennifer` binary is built without cgo, so it resolves names
+itself, from a resolv.conf (the nameservers) and a hosts file. Each file is
+the first of:
+
+| Order | resolv.conf | hosts |
+| --- | --- | --- |
+| 1 | `$JENNIFER_RESOLV_CONF` | `$JENNIFER_HOSTS` |
+| 2 | `<PREFIX>/etc/resolv.conf` | `<PREFIX>/etc/hosts` |
+| 3 | `/etc/resolv.conf` | `/etc/hosts` |
+
+`<PREFIX>` is the install prefix the binary was built for (`make
+PREFIX=<dir>`); the default `/usr` keeps its configuration in `/etc`, so a
+default build reads exactly the system files. `jennifer version -v` shows the
+files in effect and the ones looked for.
+
+- A variable that names a missing file fails every lookup with a `NetError`
+  of reason `"dns"` naming the variable; it is never skipped.
+- With no resolv.conf at all, lookups go to the loopback default
+  (`127.0.0.1:53`, `[::1]:53`), as Go's resolver does; the interpreter never
+  falls back to a public resolver. A failed lookup's message then names the
+  files looked for and `JENNIFER_RESOLV_CONF`.
+- From a file other than the system's only the `nameserver` lines and the
+  hosts entries are used, and every lookup in the process follows them
+  (`net`, `http` and the other network modules, `sql`'s drivers). The search
+  list, `ndots`, `timeout` and `attempts` still come from `/etc/resolv.conf`
+  (or Go's defaults without it), and `/etc/hosts`, when it exists, is read
+  before `$JENNIFER_HOSTS`.
+- `lookupWith` with `dnsServers` reads none of these files.
+- On Windows only the variables apply; the adapters' DNS settings are the
+  system configuration. `jennifer-tiny` has no network library and reads none
+  of the files.
 
 ## Close
 
@@ -535,6 +584,7 @@ Windows the Winsock error numbers map to the same reasons.
 | Use after close | `net.readBytes: net.Conn id 3 is not open (already closed, or never opened)` |
 | Wrong type on polymorphic close | `net.close: argument must be a net.Conn, net.Listener, or net.UDPSocket; got net.Datagram` |
 | DNS misconfig | `net.lookup: whatever: lookup whatever: no such host` |
+| No resolver configuration | `net.lookup: example.com: lookup example.com on 127.0.0.1:53: ...: connection refused (no resolver configuration: JENNIFER_RESOLV_CONF is not set and /etc/resolv.conf does not exist, so lookups go to the loopback default 127.0.0.1:53 / [::1]:53; set JENNIFER_RESOLV_CONF to a resolv.conf naming your DNS servers)` |
 | Peer address parse | `net.sendTo: bogus: address bogus: missing port in address` |
 
 Every error is catchable with `try` / `catch`:
@@ -610,7 +660,8 @@ Each ships if a concrete workload needs it.
   `SO_BROADCAST` (`net.setBroadcast`) and `SO_BINDTODEVICE`
   (`net.bindToDevice`) ship, both for UDP.
 - **DNS record-type helpers** (`net.lookupMX`, `net.lookupTXT`,
-  `net.lookupSRV`).
+  `net.lookupSRV`). `lookupWith`'s `dnsServers` asks for A and AAAA records
+  only.
 - **Explicit IPv6 control.** The resolver picks the family; force one
   by writing `"[::1]:port"` or `"127.0.0.1:port"`.
 

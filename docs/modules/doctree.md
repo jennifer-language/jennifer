@@ -32,6 +32,7 @@ Rendering:
 | `doctree.renderHtml(doc, opts)` | `string` | HTML with an `HtmlOptions`: `allowRawHtml` passes `html_block` nodes through (trusted input only), `xhtml` writes XHTML. |
 | `doctree.renderPdf(doc, opts)` | `bytes` | Lay the tree out to a paginated PDF. |
 | `doctree.renderPdfDoc(doc, opts)` | `pdf.Document` | Lay the tree out to a `pdf.Document` (not yet serialized), so document-level work (a running header / footer, extra metadata) can happen before `pdf.render`. |
+| `doctree.layoutPdf(doc, opts)` | `PdfResult` | `renderPdfDoc` plus the list of characters that could not be drawn (`missing`, a `list of MissingGlyph`); see [Fonts](#fonts-standard-14-and-embedded-truetype). |
 | `doctree.pdfDefaults()` | `PdfOptions` | US Letter, 54-pt margins, Helvetica / Courier; copy it and tweak the fields. |
 | `doctree.gray(level)` / `doctree.rgb(r, g, b)` / `doctree.noFill()` | `Fill` | A background colour (or none) for headings, table headers, code and quotes. |
 | `doctree.headingStyle(fill)` | `HeadingStyle` | One heading level's style, for `PdfOptions.headingStyles`. |
@@ -211,9 +212,10 @@ untrusted Markdown cannot emit its own escape sequences;
 layout primitives (`pdf` pulls in `font`, so importing `doctree`, and with it
 `markdown` or `rst`, carries that weight even for an HTML-only program; see
 [design-decisions.md](../technical/design-decisions.md)). `markdown.toPdf(md)` /
-`markdown.toPdfWith(md, opts)` are the Markdown-text shortcuts. Text outside the
-WinAnsi range the standard-14 fonts encode is replaced per the `unencodable`
-option (below) rather than aborting the render. `PdfOptions` comes from
+`markdown.toPdfWith(md, opts)` are the Markdown-text shortcuts. Text a font
+cannot draw (outside WinAnsi for a standard-14 font, missing from an embedded
+face) is replaced per the `unencodable` option (below) rather than aborting the
+render, and `layoutPdf` lists every replaced character. `PdfOptions` comes from
 `doctree.pdfDefaults()` (US Letter 612 x 792 pt, 54-pt margins, Helvetica 11 pt /
 Courier, `tablePad` 4); copy it and tweak the fields (`pageWidth` /
 `pageHeight` / `margin` / `bodyFont` / `boldFont` / `italicFont` / `monoFont` /
@@ -258,9 +260,10 @@ off by default) draw a background and / or border behind every code block, and
 `quoteFill` / `quoteRule` do the same behind a blockquote (`quoteRule` is the
 vertical bar down its left edge), the way `tableHeaderFill` shades a table
 header. A long code line or an unbreakable table token is folded to the column
-instead of running off the page. A character the standard-14 fonts cannot encode
-is replaced by `unencodable` (default `"?"`, `""` drops it) so one stray glyph
-never fails the whole document. The substitution is for what is *drawn*: a
+instead of running off the page. A character the role's font cannot draw (outside
+WinAnsi for a standard-14 font, missing from every embedded face of the role) is
+replaced by `unencodable` (default `"?"`, `""` drops it) so one stray glyph
+never fails the whole document; `layoutPdf` reports each one. The substitution is for what is *drawn*: a
 bookmark is read by the viewer rather than set in a font, so it keeps the
 heading whole in every script, and the Info dictionary keeps its values whole
 too.
@@ -328,6 +331,72 @@ def lbl as pdf.PageLabel init pdf.pageLabel();
 $lbl.right = "%page%/%pages%";
 def out as bytes init pdf.render(pdf.setFooter($doc, $lbl));
 ```
+
+### Fonts: standard-14 and embedded TrueType
+
+Each of the five font roles (body, bold, italic, mono, heading) draws in one of
+three ways:
+
+| The role has | It draws | It measures with |
+| ------------ | -------- | ---------------- |
+| nothing set (the default) | its standard-14 font (`bodyFont`, ...), WinAnsi only; output is byte-identical to a render without the face fields | the Adobe AFM metrics |
+| a face (`bodyFace`, `boldFace`, `italicFace`, `monoFace`, `headingFace`) | that face, then each face of its fallback list for a character the face lacks | each face's own advance widths |
+| only fallbacks (`bodyFallbacks`, ...) | its standard-14 font for what WinAnsi covers, the fallbacks for the rest | the AFM metrics and the fallbacks' advances |
+
+A face is a `pdf.LoadedFont` from `pdf.loadFont(name, ttfBytes)`: a TrueType
+(`glyf`) font, which `pdf` embeds whole as a Type0 font with a ToUnicode map, so
+the text stays selectable. `doctree` ships no font; the caller reads the
+`.ttf` bytes. The tested choice is DejaVu (Sans, Sans Bold, Sans Oblique, Sans
+Mono), which covers Latin, Greek, Cyrillic, arrows and many symbols but no CJK;
+add a CJK TrueType face as a fallback for that. Line breaking, code folding and
+table columns use the drawing font's widths, so they stay exact, and in a face a
+run of CJK ideographs may break between any two of them. The same face may serve
+several roles (it is embedded once), and only faces some page drew from are
+embedded. Each face needs its own resource name, not a standard-14 font's
+(`Helvetica`, `Courier`, `Symbol`, `ZapfDingbats`); two different fonts under
+one name are a kind `"doctree"` error.
+
+```jennifer
+import "markdown.j" as markdown;
+import "doctree.j" as doctree;
+import "pdf.j" as pdf;
+use fs;
+use io;
+def o as doctree.PdfOptions init doctree.pdfDefaults();
+$o.bodyFace = pdf.loadFont("Sans", fs.readBytes("/usr/share/fonts/TTF/DejaVuSans.ttf"));
+$o.boldFace = pdf.loadFont("SansBold", fs.readBytes("/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"));
+$o.italicFace = pdf.loadFont("SansIt", fs.readBytes("/usr/share/fonts/TTF/DejaVuSans-Oblique.ttf"));
+$o.monoFace = pdf.loadFont("Mono", fs.readBytes("/usr/share/fonts/TTF/DejaVuSansMono.ttf"));
+$o.headingFace = $o.boldFace;
+def res as doctree.PdfResult init doctree.layoutPdf(markdown.parse($md), $o);
+for (def m in $res.missing) {
+    io.printf("page %d: cannot draw %s in '%s'\n", $m.pageNr, $m.char, $m.context);
+}
+fs.writeBytes("book.pdf", pdf.render($res.doc));
+```
+
+**What could not be drawn.** A character no font of its role has is drawn as
+`unencodable` (default `"?"`; only the part of it the role can draw) and
+reported, never dropped silently. `layoutPdf` returns a `PdfResult`: `doc`, the
+`pdf.Document`, and `missing`, one `MissingGlyph` per such character in layout
+order:
+
+| Field | Meaning |
+| ----- | ------- |
+| `char` / `codepoint` | the character and its code point |
+| `role` | `"body"`, `"bold"`, `"italic"`, `"mono"` or `"heading"` |
+| `pageNr` | the 1-based page it falls on |
+| `y` | the baseline of its line (a table row's first line), in points from the page bottom |
+| `context` | the word, code line, heading or table cell it sits in, as written |
+
+The report is a list in the result rather than a callback in `PdfOptions`: the
+options stay plain data, the caller decides whether a missing glyph is a warning
+or a failure (and can group the entries by page), and no function value is
+called from inside the layout, where it would make every layout call copy its
+arguments for a program with a mutable top-level variable. `renderPdf` and
+`renderPdfDoc` lay out the same way and drop the list. Bookmarks and the
+metadata fields are PDF text strings, written as UTF-16 when not ASCII, so they
+keep every script whatever font the page uses.
 
 ## See also
 

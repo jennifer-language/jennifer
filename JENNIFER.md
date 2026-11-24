@@ -109,14 +109,13 @@ Where Jennifer differs from Python/JS/Go and an assistant usually guesses wrong:
    copy is a semantic guarantee, not always a cost: a compound parameter the
    function never writes is passed without a copy where that cannot be observed,
    so read-only struct / list / map parameters (a recursive evaluator's context)
-   are cheap and need no workaround. Three exceptions copy on every call: a
+   are cheap and need no workaround. Two exceptions copy on every call: a
    nested-collection parameter (`list of list`, `map of K to list`, ...; wrap it
    in a struct to get the borrow); any compound parameter of a function that can
    reach a callback builtin (`lists.sortBy`, `map`, `filter`, ...) or a func-value
    call, when the entry file has a mutable top-level `def` (prefer `lists.sort` on
-   keys, or `def const`); and every argument or result of a call into a module
-   that holds one of that module's own structs (it is rebuilt both ways).
-   `jennifer profile --allocs` shows each place a copy or rebuild still happens.
+   keys, or `def const`). A call into a module costs what a local call does.
+   `jennifer profile --allocs` shows each place a copy still happens.
 10. **Logical operators are words: `and`, `or`, `not`** (not `&&`/`||`/`!`).
     `&` `|` `^` `~` are the *bitwise* operators.
 
@@ -145,8 +144,11 @@ Where Jennifer differs from Python/JS/Go and an assistant usually guesses wrong:
   type or `for`-each). `channel` is the one contextual word - a type only
   in `channel of T`, a valid identifier elsewhere. So `from`/`to` as a parameter
   pair fails on `to`; use `to2` / `hi` / `end` instead.
-- A leading `#!` line is allowed (shebang): `#!/usr/bin/env -S jennifer run`. A
-  file with a shebang may also be run **without a `.j` extension** (as an
+- A leading `#!` line is allowed (shebang): `#!/usr/bin/env -S jennifer run`,
+  or `#!<PREFIX>/bin/jennifer run` where there is no `/usr/bin/env` (Android).
+  The built-in module dir is `<PREFIX>/share/jennifer/modules` (`make
+  PREFIX=<dir>`, default `/usr`); `jennifer version -v` prints every path and
+  its source. A file with a shebang may also be run **without a `.j` extension** (as an
   executable installed under a bare command name); `import` / `include` targets
   still require `.j`.
 
@@ -362,10 +364,10 @@ raise (out-of-range, missing key, etc.), wrapped into `Error` with `kind:
 cannot parse, invalid UTF-8 read from a file, stdin or a child process) is the
 library's own kind instead: `"json"`, `"xml"`, `"toml"`, `"yaml"`, `"asn1"`,
 `"encoding"`, `"compress"`, `"archive"`, `"images"`, `"crypto"`, `"time"`,
-`"uuid"`, `"decimal"`, `"convert"`, `"kv"`, `"fs"`, `"io"`, `"os"`. A builtin
+`"uuid"`, `"decimal"`, `"convert"`, `"kv"`, `"fs"`, `"io"`, `"os"`, `"sql"`, `"serial"`. A builtin
 may also raise a generic kind: `"limit"` (a size / count / depth cap),
-`"timeout"` (a deadline), `"closed"` (a closed socket or handle, or a peer that
-closed mid-read), `"net"` (a network failure, always a `net.NetError`),
+`"timeout"` (a deadline), `"closed"` (any use of a closed socket or handle, or a peer
+that closed mid-read; a second `close` does nothing), `"net"` (a network failure, always a `net.NetError`),
 `"cancelled"` (the task was cancelled; message `task
 cancelled`), `"value"` (an invalid input value, in some modules). Match `kind`,
 never the message.
@@ -535,8 +537,17 @@ Catch it inside the body for a clean partial result; `task.cancel` plus
 `task.discard` is stop-and-forget. A program that runs to its end waits for
 every undiscarded task; one that ends by `exit` or an uncaught error does not.
 `task.cancelled()` is a non-raising poll.
-`task.waitTimeout($t, ms)` / `task.waitAnyTimeout($ts, ms)` are bounded waits that
-throw a catchable `Error{kind: "timeout"}`.
+`task.waitTimeout($t, ms)` / `waitAnyTimeout($ts, ms)` / `waitAllTimeout($ts,
+ms)` are bounded waits that throw a catchable `Error{kind: "timeout"}` and leave
+the tasks running. An xTimeout's `ms` `0` polls; negative or oversized throws.
+
+**Allocation budget.** `task.setAllocBudget(bytes)` makes the calling task count
+what it allocates (copies, appends, growing writes, string `+` and
+interpolation, literals, builtin results; cumulative, an estimate); past
+`bytes` its next such operation throws a catchable `Error{kind: "limit"}` in
+that task only. Tasks it spawns share the budget; a second call changes the
+limit and keeps the count; `math.MAX_INT` lifts it; 0 / negative throws.
+`task.allocated()` reads the count. Off unless set.
 
 **Channels.** `channel of T` streams values between goroutines (the counterpart to
 `task`'s single result). `channel.make(capacity)` (0 = unbuffered), `send`
@@ -545,7 +556,7 @@ kind `"closed"` on a closed+drained channel, as `send` / `select` on a closed
 one - drain with `while ($open) { try { process(channel.recv($ch)); } catch (e)
 { if ($e.kind != "closed") { throw $e; } $open = false; } }`), `close`, `select([...])` (fan-in:
 next value from any open channel), `recvTimeout(ch, ms)` (kind `"timeout"`,
-nothing taken), `len` / `capacity`. A channel is a shared
+nothing taken), `selectTimeout(chs, ms)`, `len` / `capacity`. A channel is a shared
 handle but the values through it are copied, so no-shared-mutable-state holds.
 `channel` is a contextual keyword (a type only in `channel of T`; a valid
 identifier elsewhere).
@@ -576,8 +587,8 @@ import "./util.j" as u; # load util.j as a module, addressed u.fn(...) / u.CONST
   free-standing statements. `use` is not transitive across the boundary.
 - `export` publishes a top-level `def const` / `def struct` / `func` from a
   module; unmarked names are private (reaching one from outside errors). A
-  module struct type keeps its identity `(module, name)` at the consumer (thrown
-  ones too), so
+  module struct type has one identity `(module, name)` inside the module and at
+  the consumer (thrown ones too; it prints as `NAME.Struct` on both sides), so
   `def p as NAME.Struct init NAME.make();` type-checks and `a.Point` /
   `b.Point` are distinct. An exported struct/func may not expose a private
   struct. `export` is only valid in a module (a parse error in a `run`
@@ -659,11 +670,13 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `typeOf`, `objectType`, `fromCodepoint` / `toCodepoint`. Text to bytes is
   `encoding.encode("utf-8", s)`. `toInt(s, radix)` takes bare digits in base
   2 / 8 / 10 / 16 (strip `0x` first); the inverse is `io.sprintf("%d|base=16", n)`.
+  `toInt(float)` truncates but is deprecated: `math.trunc` / `round` /
+  `floor` / `ceil` return the int.
 - **`math`** - `abs min max sqrt pow floor ceil round trunc sign cbrt hypot`;
   `sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh`; `exp
   expm1 ln log10 log2 log1p log`(x, base); `factorial comb perm gcd lcm`; `rand
   randInt randSeed` (not crypto-grade); `erf erfc gamma lgamma beta lbeta
-  regGammaP regGammaQ regBetaI`; `PI E TAU`. Radians; `floor` / `ceil` /
+  regGammaP regGammaQ regBetaI`; `PI E TAU MAX_INT MIN_INT`. Radians; `floor` / `ceil` /
   `round` / `trunc` return int; undefined results throw (no NaN).
 - **`decimal`** - exact base-10 numbers in an opaque `decimal.Decimal`;
   operands are a Decimal, an `int` or a decimal string (`"12.34"`), never a
@@ -673,7 +686,8 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `"half-down"`, `"up"`, `"down"`, `"ceiling"`, `"floor"`. `==` is numeric
   (`1.0 == 1.00`), `%v` keeps the scale; order with `compare(a, b)` (`<`
   throws); `sign` / `scale` / `isInteger` / `normalize` / `neg` / `abs`;
-  `toString` / `toInt` (exact only) / `toFloat`. Big integers are scale-0
+  `toInt` (exact only) / `toFloat`; text via `convert.toString` / `%v`
+  (`toString` deprecated). Big integers are scale-0
   Decimals; over 1,000,000 digits (tiny 100,000) is kind `"limit"`.
 - **`stats`** - over `list of int` / `float`: `mean median mode modes
   geometricMean harmonicMean weightedMean variance stddev sampleVariance
@@ -683,15 +697,19 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `sum` keep the input kind, `describe -> Summary`). Distributions:
   `normalPdf/Cdf/Quantile/Sample`, `tPdf/tCdf/tQuantile`,
   `chiSquareCdf/Quantile`, `fCdf/fQuantile`, `binomialPmf/Cdf`,
-  `poissonPmf/Cdf`. Inference: `linearRegression` / `multipleRegression`,
+  `poissonPmf/Cdf`. Inference: `linearRegression` (`multipleRegression`
+  deprecated: `ml.linearRegression`),
   `confidenceInterval`, `proportionCi` (wald / wilson / clopper-pearson),
   `tTest` / `tTest2`, `chiSquareTest`, `fTest`, `anova`, `histogram` ->
   `Regression` / `Interval` / `Test` structs. Undefined results throw. There
   is no `prob` library: distributions live here.
-- **`ml`** - classical ML on tabular data: a fit returns an opaque `ml.Model`
+- **`ml`** - classical ML on tabular data: a fit returns an `ml.Model`, an
+  immutable value (copies share it, the GC frees it; `free` deprecated),
   used with `predict` / `transform` / `predictProba`. `linearRegression`
   `ridge` `lasso` `kNNRegressor` `decisionTreeRegressor`
   `randomForestRegressor`; `kNN` `naiveBayes` `logisticRegression`
+  (hyper-parameters in `xWith(X, y, LogisticOptions` / `TreeOptions` /
+  `ForestOptions` / `KMeansOptions)`; the trailing arguments deprecated)
   `decisionTree` `randomForest`; `kMeans` `pca` `standardScaler`
   `minMaxScaler`. `coefficients` `intercept` `centroids` `components`
   `explainedVariance` `featureImportances`; `trainTestSplit -> Split`, `kFold
@@ -732,12 +750,16 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
 - **`maps`** - `keys values has delete merge`, `without(m, keys)` (several
   keys, one copy). `has` before reading a key that may be missing.
 - **`os`** - `getEnv` / `setEnv` / `unsetEnv` / `hasEnv` (true even when set to
-  `""`), `hasFlag` / `flag`, `isTerminal`, `cwd` / `homeDir` / `tempDir`.
+  `""`), `getEnvBytes`, `argsBytes()` (`getEnv` / reading `ARGS` throw
+  `"os"` on non-UTF-8; `hasFlag` / `flag` deprecated: the `args` module),
+  `isTerminal`, `cwd` / `homeDir` / `tempDir`.
   Processes: `run(argv[, stdin]) -> Result{exitCode, stdout, stderr}`
-  (blocking) and `spawn(argv[, options]) -> Process{handle, pid}` with `wait` /
-  `poll` / `kill` / `release`; `runBytes` / `waitBytes` return
-  `BytesResult{exitCode, stdout, stderr as bytes, truncated}`; `options` maps `"stdout"` / `"stderr"` to
-  `"capture"` (default), `"inherit"`, `"discard"` or a path containing `/`.
+  (blocking) and `spawn(argv)` / `spawnWith(argv, SpawnOptions{stdout, stderr})` ->
+  `Process{handle, pid}` with `wait` / `waitTimeout(p, ms)` (`"timeout"`, the
+  child keeps running) / `poll` / `kill` / `release`; `runBytes` / `waitBytes`
+  / `waitBytesTimeout` return `BytesResult{exitCode, stdout, stderr as bytes,
+  truncated}`; a stream is `""` (capture), `"inherit"`, `"discard"` or a path
+  containing `/` (the `spawn(argv, map)` form is deprecated).
   Signals: `catchSignal(name)` / `gotSignal(name)` for `"int"` / `"term"` / `"hup"` /
   `"usr2"` (`"usr1"` is reserved). Constants `PLATFORM ARCH NCPU EOL DIRSEP
   PATHSEP ARGS`.
@@ -754,29 +776,34 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   item. `encodeWith(v, EncodeOptions{indent sortKeys rawHtml canonical})`
   (canonical = RFC 8785); `mergePatch(target, patch)` is RFC 7386.
   `decodeWith(s, DecodeOptions{maxDepth, maxNodes})` only lowers the caps
-  (1000 / 2M, 0 = default). A reached cap is kind `"limit"` (also `toml`,
-  `yaml`, `xml`, `asn1`).
-- **`asn1`** - BER decode / DER encode, shaped like `json`: `decode(bytes) ->
-  asn1.Value` with child-index pointers (`typeOf` / `tagClass` / `tagNumber` /
+  (1000 / 2M, 0 = default). A reached cap is kind `"limit"`; `toml`, `yaml`, `xml`
+  and `asn1` have the same `decodeWith` (asn1 takes bytes, xml adds
+  `namespaces`).
+- **`asn1`** - BER decode / DER encode, shaped like `json`: `decode(bytes)` / `decodeWith`
+  `-> asn1.Value` with child-index pointers (`typeOf` / `tagClass` / `tagNumber` /
   `isConstructed` / `get` / `has` / `length` / `asInt` / `asBool` / `asString`
   / `asBytes` / `asOid` / `isNull`); build with `integer` / `enumerated` /
   `boolean` / `null` / `octetString` / `utf8String` / `printableString` /
   `ia5String` / `oid` / `sequence` / `set`, `tagged` (explicit) / `retag`
   (implicit), then `encode(v)`.
 - **`toml`** - TOML 1.0 `encode` / `encodePretty` / `decode`, the `json` API
-  name for name, plus `asDatetime`. Jennifer's config format.
+  name for name, plus `asDatetime` (an offset date-time only) and `asLocal ->
+  toml.Local{year, month, day, hour, minute, second, nanosecond}` for the
+  local forms (`typeOf` `"local-datetime"` / `"local-date"` / `"local-time"`).
+  Jennifer's config format.
 - **`xml`** - `decode` / `encode` / `encodePretty` over an `xml.Value` element
   tree: `tag` / `text` / `attr` / `hasAttr` / `attrs` / `children` / `typeOf`;
   paths `name`, `name[k]` (1-based), `*`, `*:local` in `get` / `findAll` /
   `has`; build with `element` / `setAttr` / `setText` / `append`. Namespaces:
   `localName` / `namespace` / `lookupPrefix` / `attrNS` / `hasAttrNS`; match by
   URI with a prefix map as the third path argument (`xml.findAll($r,
-  "k:Document", {"k": KML_URI})`); `xml.decode($frag, {"p": URI})` decodes a
-  fragment with bindings; `elementNS` / `setAttrNS` build. A C0 control
+  "k:Document", {"k": KML_URI})`); `xml.decodeWith($frag, xml.DecodeOptions{namespaces:
+  {"p": URI}})` decodes a fragment with bindings (two-argument `decode`
+  deprecated); `elementNS` / `setAttrNS` build. A C0 control
   other than tab / LF / CR, U+FFFE or U+FFFF is an error in decode and build.
 - **`yaml`** - YAML 1.2 `decode` (one document) / `decodeAll` / `encode` (flow)
   / `encodePretty` (block), the `json` API name for name, plus `asDatetime` /
-  `isDatetime` / `isNull`. Anchors, aliases and `<<` merges resolve. YAML 1.1
+  `isDatetime` / `isNull` / `asBytes` (`!!binary`). Anchors, aliases and `<<` merges resolve. YAML 1.1
   numbers (`012`, `0b11`, `1_000`) are errors: quote them.
 - **`intl`** - message catalogs: `load(lang, catalog)` (first is the default),
   `setLocale` / `locale`, `tr(key[, params])` with `%name%` placeholders (`%%`
@@ -788,39 +815,57 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `setLocale` needs a catalog for the tag or its language; misuse throws
   `"runtime"`.
 - **`httpd`** `[full]` - HTTP/1.1 server engine, a pull loop: `listen(addr) -> Server` /
-  `listenTLS(addr, cert, key)` (+ HTTP/2), or `listenWith` / `listenTLSWith`
-  with `Options{maxBodyBytes, maxInFlight, respondTimeoutMs, bodyTimeoutMs,
-  writeTimeoutMs, maxHeaderBytes, dirListing, followSymlinks}` (0 = default: 10 MiB body, 256
+  `listenWith(addr, Options{maxBodyBytes, maxInFlight, respondTimeoutMs,
+  bodyTimeoutMs, writeTimeoutMs, maxHeaderBytes, dirListing, followSymlinks,
+  etag, certPem, keyPem})` (`certPem` + `keyPem`: TLS + HTTP/2; `etag`:
+  content-hash ETags from `serveFile` / `serveDir`; 0 = default: 10 MiB body, 256
   in flight, 60 s respond -> `503`, 60 s body -> `408`). `maxInFlight x
   maxBodyBytes` must fit a process budget (4 GiB; `setMaxBufferBudget(bytes)` /
   `setMaxBufferBudgetFromRAM(fraction)`). Loop `accept($srv) -> Request` and
   `respond($req, status, body)`; `method` / `path` / `query` / `rawQuery` /
-  `header` / `body` / `remoteAddr`, `setHeader`, `serveFile` / `serveDir`
-  (`serveFileEtag` / `serveDirEtag` add a content-hash `ETag`), `etag($req,
+  `header` / `body` / `remoteAddr`, `setHeader`, `serveFile` / `serveDir`, `etag($req,
   tag)` (true = 304 sent, stop), `isOpen` / `timedOut`, per-request
   `setRequestValue` / `requestValue`, `shutdown`. Paths never contain `.` /
   `..`, and path / query / headers are valid UTF-8 (else 400); `serveDir` hides dotfiles except `.well-known/` and answers
   a symlink out of `root` 404 (`followSymlinks` follows it). `spawn` several
-  accept loops for a pool.
+  accept loops for a pool. After `shutdown` (a second does nothing), and on a
+  finished request, calls throw `"closed"`. Deprecated: `listenTLS`,
+  `listenTLSWith`, `serveFileEtag`, `serveDirEtag`.
 - **`term`** `[full]` - `makeRaw(stream) -> State` / `restore(state)`,
   `size(stream) -> Size{rows, cols}` (throws off a terminal), `readByte()`
-  (`-1` at EOF), `readByteTimeout(ms)` (`-2` on timeout, `0` polls). Not in the
+  / `readByteTimeout(ms)` (`0` polls): `"closed"` at end of input,
+  `"timeout"` when no byte came; a second `restore` does nothing. Not in the
   REPL. Output-only TUIs need just `ansi` + `os.isTerminal`.
 - **`serial`**, **`spi`**, **`i2c`**, **`gpio`** `[full]`, Linux only -
-  `serial.open(path, baud) -> Port` (raw 8N1, exclusive; `read` / `write` /
-  `flush` / `close`; `openWith(path, Options)` adds `flowControl`
+  `serial.open(path, baud) -> Port` (raw 8N1, exclusive; `read` / `write`
+  (-> null) / `flush` / `close`; with parity, a bad byte throws `"serial"`
+  naming its offset; `openWith(path, Options)` adds `flowControl`
   `"none"|"rtscts"|"xonxoff"`, `shared`; `setReadDeadline` /
   `setWriteDeadline` ms as in `net`; kinds `"timeout"`, `"closed"` also on
-  hangup); `spi.open(path) -> Device`, `configure(dev, mode, speedHz)`,
-  `transfer(dev, bytes)` (over spidev bufsiz: `"limit"`, not split);
+  hangup); `spi.open(path)` = `openWith(path, Options{mode, speedHz, bitsPerWord})` ->
+  `Device` (`configure` deprecated), `transfer(dev, bytes)` (over spidev
+  bufsiz: `"limit"`, not split);
   `i2c.open(path, addr) -> Bus`, `read` / `write` / `readReg(bus, reg, n)` /
-  `writeReg` / `writeRead(bus, data, n)` (repeated start); `gpio` over
-  `/dev/gpiochipN` (`setup` / `read` / `write` / `release`, `IN` / `OUT`).
+  `writeReg` / `writeRead(bus, data, n)` (repeated start; over 8192 bytes:
+  `"limit"`); `gpio.open(path) -> Chip` over `/dev/gpiochipN`, then
+  `setup(chip, pin, IN | OUT)` / `read` / `write` / `release` / `close(chip)`
+  (`gpio.chip`, `JENNIFER_GPIO_CHIP` and the pin-only forms deprecated).
 - **`sql`** `[full]` - MySQL / MariaDB / PostgreSQL (no SQLite):
-  `open(driver, dsn) -> Connection`, `query` / `exec` on a Connection or Tx,
-  cursor `next` + `asInt` / `asFloat` / `asString` / `asBool` / `asBytes` /
-  `isNull`, `begin` / `commit` / `rollback`, prepared statements. Values bind
-  only through placeholders.
+  `open(driver, dsn)` = `openWith(driver, dsn, Options{allowInsecure,
+  queryTimeoutMs})`, driver `"mysql"` / `"postgres"` (`queryTimeoutMs` 0 =
+  30 s, `math.MAX_INT` none). A DSN to another host gets verified TLS added
+  (`sslmode=verify-full` / `tls=true`); a weaker mode is refused unless
+  `allowInsecure`; a Unix socket or loopback host is used as written. `query`
+  / `exec` on a Connection or Tx, cursor `next` + `asInt` / `asFloat` /
+  `asString` / `asBool` / `asBytes` / `isNull`, `begin` / `commit` /
+  `rollback`, prepared statements. Values bind only through placeholders.
+  A closed Connection / Statement / Rows or an ended Tx throws `"closed"`;
+  `close` / `closeStmt` / `closeRows` and `rollback` of an ended Tx do
+  nothing (defer-safe), a second `commit` throws.
+  Errors: `"sql"`, always a `SqlError{kind, message, code, sqlState}` (server
+  errors, text not UTF-8, NaN, a bool not 0 / 1), `"timeout"`, `"net"`.
+  Deprecated (removed in 0.29.0): `"mariadb"` / `"postgresql"`,
+  `setQueryTimeout`.
 - **`time`** - `Time` / `Duration` / `Zone`. `now`; `unix` / `unixMilliseconds` /
   `unixNanos` and `fromUnix` / `fromUnixMilliseconds` / `fromUnixNanos`
   (`unixMillis` / `fromUnixMillis` deprecated, removed in 0.29.0); `year`
@@ -828,7 +873,7 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `fromSeconds` / `fromMilliseconds` / `fromMinutes` / `fromHours` and
   `seconds` / `milliseconds` / `minutes` / `hours` (not `toMillis`); `add` /
   `sub` / `before` / `after` / `equal`; `zone` / `inZone` / `local` / `utc`;
-  `sleep`; strftime `format` / `parse` (`%d|pad=0` unpadded); `iso` / `fromIso`; `UTC`,
+  `sleep` (`0` returns at once, negative throws); strftime `format` / `parse` (`%d|pad=0` unpadded); `iso` / `fromIso`; `UTC`,
   `PROGRAM_START`. Fixed-offset zones only (no IANA / DST).
 - **`fs`** - `read` / `write` / `append` (String / Bytes forms),
   `writeNew(path, content)` (fails if it exists: the lock primitive),
@@ -837,66 +882,91 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   group / other write bits: kind `"fs"`; over 1 MiB `"limit"`), `exists` /
   `isFile` / `isDir` / `stat` / `realpath` / `readlink` / `symlink`, `mkfifo`,
   `chmod` / `chown`, `mkdir` / `mkdirAll` / `remove` / `removeAll` / `rename`
-  (atomic replace: write a temp file, then rename) / `list` / `walk`,
+  (atomic replace: write a temp file, then rename) / `list` / `walk` (a name
+  that is not UTF-8 throws `"fs"`, also `readlink` / `realpath`;
+  `listBytes` / `walkBytes` give names as `bytes`),
   `makeTempFile` / `makeTempDir`, `fs.File` handles (`open` / `readLine` / ... /
-  `sync` / `close`), polling `watch -> Watcher` (`next` / `hasEvent` /
-  `close`).
-- **`net`** `[full]` - TCP `connect(addr[, timeoutMs])` / `listen` / `accept` /
+  `sync` / `close`), polling `watch(path)` / `watchWith(path,
+  WatchOptions{intervalMs})` -> `Watcher` (`next` / `hasEvent` / `close`).
+- **`net`** `[full]` - TCP `connect(addr)` / `connectWith(addr,
+  ConnectOptions{timeoutMs, tls, tlsOptions, dnsServers})` / `listen` / `accept` /
   `readBytes` (empty once the peer closed) / `writeBytes` / `readAll` / `readN`
-  (per-call size over 256 MiB: kind `"limit"`, also `recvFrom`);
-  `setReadDeadline` / `setWriteDeadline` (ms, `0` clears; arm both to bound an
-  exchange). Errors: kind `"timeout"`, `"closed"`, or `"net"`, a
-  `NetError{kind, message, op, reason, sent, replied}` (reason `refused` /
-  `reset` / `unreachable` / `dns` / `tls` / `closed` / `other`); a bad
-  address is `"runtime"`. `abort(conn)` closes with a reset (RST). TLS `connectTLS` / `startTLS` (+ `TLSOptions{
+  (per-call size over 256 MiB: kind `"limit"`, also `recvFrom`). `timeoutMs`
+  bounds connect + handshake or a lookup, never later reads: `0` = 30 s (the
+  plain calls too), `math.MAX_INT` = none, negative throws. Streams:
+  `setReadDeadline` / `setWriteDeadline` (ms, bound the whole exchange) and
+  `setIdleTimeout` (a stall of ms); `0` clears, the first to pass fires.
+  Errors: `"timeout"`, `"closed"`, or `"net"`, a `NetError{kind, message, op,
+  reason, sent, replied}` (reason `refused` / `reset` / `unreachable` / `dns` /
+  `tls` / `closed` / `other`); a bad address is `"runtime"`. `abort(conn)`
+  resets. TLS `connectTLS(addr[, TLSOptions])` / `startTLS(conn[,
+  TLSOptions])` / `startTLSWith(conn, ConnectOptions)` (+ `TLSOptions{
   skipVerify, caCert}`); UDP `listenUDP` / `sendTo` / `recvFrom -> Datagram{data,
-  peer, truncated}` / `setBroadcast` / `bindToDevice` (Linux); DNS
-  `lookup` / `reverseLookup`; `close` / `address`.
+  peer, truncated}` / `setBroadcast` / `bindToDevice` (Linux); DNS `lookup` /
+  `reverseLookup` / `lookupWith` / `reverseLookupWith`; `lookupWith` with
+  `dnsServers` (`"ip"` / `"ip:port"`, at most 16) asks only those servers (no
+  hosts file, no search list), the other calls ignore it; `close` / `address`. Name
+  resolution reads `$JENNIFER_RESOLV_CONF` / `$JENNIFER_HOSTS`, else
+  `<PREFIX>/etc`, else `/etc` (`jennifer version -v` shows which); a named
+  file that is missing, or a lookup failing with no resolv.conf at all, is a
+  `NetError` reason `"dns"` naming the files; never a public fallback.
+  Deprecated (removed in 0.29.0): a trailing timeout int on connect /
+  connectTLS / startTLS / readAll / readN, and `eof`.
 - **`regex`** - RE2: `matches` / `find` / `findAll` / `replace` / `split` /
   `escape`; `Match{text, start, end, groups, groupsNamed}` (rune indices,
   `start == -1` = no match). Patterns are cached.
 - **`hash`** - `compute(algo, b)` (`"md5"` / `"sha256"` / `"sha3-256"` /
   `"blake2b-256"` / ...), `hmac(algo,
   message, key)`, constant-time `equal`, streaming `stream` / `update` /
-  `finalize`.
+  `finalize` / `discard` (after `finalize` or `discard`, `update` / `finalize`
+  throw `"closed"`; `discard` does nothing).
 - **`crc`** - CRC-32 / CRC-64 over `bytes`, shaped like `hash`.
 - **`crypto`** - `randBytes(n)` / `randInt(lo, hi)` (crypto-grade),
-  `deriveKey(algo, secret, salt, length, KdfParams{...})` (`"hkdf-sha256"` `info`,
-  `"pbkdf2-sha256"` `iterations`, `"argon2id"` `time memoryKiB threads`,
+  `deriveKey(algo, secret, salt, length, KdfParams{...})` (`"hkdf-<hash>"` `info`,
+  `"pbkdf2-<hash>"` `iterations` (any `hash` name but md5), `"argon2id"` `time memoryKiB threads`,
   `"scrypt"` `n r p`; no defaults); `hashPassword(algo, pw) -> string`
-  (`"argon2id"` / `"bcrypt"` / `"scrypt"`) / `verifyPassword(pw, hash) -> bool`;
+  (`"argon2id"` / `"bcrypt"` / `"scrypt"`) / `verifyPassword(pw, hash) -> bool`
+  (`pw` is `bytes`; a `string` is deprecated);
   one function per operation, the algorithm first: `encrypt(algo, plaintext,
   key, nonce, aad)` / `decrypt` (`"aes-gcm"` / `"chacha20-poly1305"` nonce 12,
   `"xchacha20-poly1305"` nonce 24; never reused under a key, tag appended), `blockEncrypt(algo, data,
   key, iv)` / `blockDecrypt` (`"aes-ecb-nopad"` / `-pkcs7`, `"aes-cbc-*"`,
   `"aes-ctr"`, `"aes-cfb"`; no MAC, interop only), `sign(algo, msg, priv)` /
-  `verify(algo, msg, sig, pub)` (`"ed25519"`, `"rsa-sha256"`..,
-  `"ecdsa-sha256"`.. JOSE R||S), `keypair(algo) -> Keypair{public, private}` /
+  `verify(algo, msg, sig, pub)` (`"ed25519"`, `"rsa-pkcs1-sha256"`..,
+  `"rsa-pss-sha256"`.. (salt = hash length), `"ecdsa-sha256"`.. JOSE R||S;
+  `"rsa-sha*"` deprecated), `keypair(algo) -> Keypair{public, private}` /
   `publicKey(algo, priv)` (`"ed25519"` / `"x25519"` / `"mlkem768"` raw bytes,
   `"rsa2048"`.. / `"p256"`.. PEM), `agree("x25519", priv, peerPub)` (run through
   HKDF), `encapsulate("mlkem768", pub)` / `decapsulate`, `wrap(algo,
   plaintext, pub)` / `unwrap` (`"rsa-oaep-sha256"` / `-sha1`, `"nacl-sealedbox"`
   with X25519 keys), `jwkPublic` /
-  `jwkToPem` / `csr`. `[full]`: RSA, ECDSA, ML-KEM, JWK and CSR.
+  `jwkToPem -> bytes` / `csr`. Weak names (`sha1` KDFs, `rsa-oaep-sha1`,
+  `aes-ecb-*`) are for interop, tagged "(weak)". `[full]`: RSA, ECDSA,
+  ML-KEM, JWK and CSR.
 - **`compress`** - `pack` / `unpack` for `"gzip"` / `"zlib"` / `"deflate"`
-  (level `"fast"` / `"default"` / `"best"`), streaming `compress.Stream`.
-  `unpack(algo, b[, maxBytes])` caps output (256 MiB default, kind `"limit"`):
-  pass `maxBytes` for untrusted input.
-- **`images`** - opaque immutable 8-bit RGBA `images.Image`. `decode(bytes[,
-  maxPixels])` (PNG / JPEG / GIF; 64 Mpx default, 8 Mpx on `jennifer-tiny`, kind `"limit"`), `info(bytes)
+  (level `"fast"` / `"default"` / `"best"`), streaming `compress.Stream`
+  (the same finalize / discard rules as `hash`).
+  `unpack(algo, b)` caps output at 256 MiB (kind `"limit"`); `unpackWith(algo,
+  b, UnpackOptions{maxBytes})` sets the cap. zlib / deflate refuse bytes after
+  the stream; gzip reads every member.
+- **`images`** - opaque immutable 8-bit RGBA `images.Image`. `decode(bytes)` /
+  `decodeWith(bytes, DecodeOptions{maxPixels})` (PNG / JPEG / GIF; 64 Mpx
+  default, 8 Mpx on `jennifer-tiny`, kind `"limit"`), `info(bytes)
   -> Info{format, width, height}`, `encode("png" | "jpeg" | "gif", img[,
   quality])`; `create(w, h[, color])` / `fromPixels(w, h, rgba)`; `width` /
   `height` / `pixel(img, x, y) -> Color{r, g, b, a}` / `pixels(img)` (RGBA) /
   `colorPixels` (RGB) / `alphaPixels`; `rgb` /
-  `rgba` / `hex("#rrggbb[aa]")` (a `Color{}` literal's omitted `a` is 0);
+  `hex("#rrggbb[aa]")` (a `Color{}` literal's omitted `a` is 0; `rgba`
+  deprecated: the literal);
   `crop` / `resize(img, w, h[, "catmullrom" | "bilinear" | "nearest"])` (0 keeps
   the aspect) / `fit` / `rotate` / `flip` / `grayscale` / `threshold` / `dither`
   / `fill` / `draw(dst, src, x, y)`. No `setPixel`: edit `pixels` and use
   `fromPixels`.
-- **`archive`** - tar / zip / tar.gz over `bytes`: `pack` / `unpack` of `list
+- **`archive`** - tar / zip / tar.gz (`"tgz"` deprecated) over `bytes`: `pack` / `unpack` of `list
   of Entry{name, data, mode, mtime}`. `unpack` refuses absolute names, `..`
   and special files (`unpackWith(format, b, UnpackOptions{skipSpecial: true})` skips
-  them).
+  them). Caps in options structs everywhere: `0` default, `math.MAX_INT` none,
+  negative throws.
 - **`encoding`** - `isAscii` / `lenBytes` / `lenRunes`; `toText` / `fromText`
   with `hex` / `base32` / `base64` / `base64-url` / `ascii85` / `z85` /
   `quoted-printable` / `uri-percent` / `uri-form` (base32 / base64 decode takes
@@ -905,7 +975,7 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   text <-> bytes is
   `encode` / `decode(codec, ...)` only: `utf-8`, `utf-16` / `utf-32` (`le` / `be`
   fixed order, no mark; plain: a BOM, big-endian without), `ascii`, `iso-8859-*`,
-  `windows-*`, `ebcdic`; strict decode. Exact codec names. Bounded request parsers `parseForm(text)` /
+  `windows-*`, `macintosh`, `ebcdic`; strict decode. Exact codec names. Bounded request parsers `parseForm(text)` /
   `parseCookies(header)` / `parseMultipart(contentType, body)` (malformed
   `"encoding"`, caps `"limit"`).
 - **`uuid`** - `v4()` (122 random bits, crypto-grade) / `v7()` (time-ordered,
@@ -921,8 +991,8 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   builds on it.
 - **`kv`** - in-process key/value store with TTL: `open()` / `openFile(path)` ->
   `kv.Store`; `set(store, k, v, ttl)` / `add` / `get` / `has` / `keys(store[,
-  prefix])` / `delete` / `touch` / `incr(store, k, delta)` (signed delta, `-1`
-  when absent, never creates) / `close`; `setValue` / `getValue` share an opaque
+  prefix])` / `delete` / `touch` / `incr(store, k, delta)` (signed delta; an
+  absent key starts at 0, created without TTL) / `close`; `setValue` / `getValue` share an opaque
   value (a `json.Value`) without copying (in-memory only). A `Store` is a handle:
   copies, `spawn`ed tasks and modules share one map (thread-safe, `incr` atomic),
   the shared mutable state a `.j` module cannot hold. A malformed `openFile`
@@ -1031,9 +1101,13 @@ every entry below:
   `children` / `text` / `level` / `attr` / `get` / `findAll` / `has`.
   `render("html" | "xhtml" | "ansi", doc)`, `renderHtml(doc, HtmlOptions{
   allowRawHtml, xhtml})`; `renderPdf(doc, opts) -> bytes` / `renderPdfDoc ->
-  pdf.Document` with `pdfDefaults()` -> `PdfOptions` (page size, fonts,
-  metadata, `bookmarkLevel`, `headingStyles`, `admonitionLabels`, `images`,
-  `imageDpi`); `pageBreak()`. Kinds beyond Markdown: `line_block` / `line`,
+  pdf.Document` / `layoutPdf -> PdfResult{doc, missing}` with `pdfDefaults()`
+  -> `PdfOptions` (page size, standard-14 fonts, embedded faces `bodyFace` /
+  `boldFace` / `italicFace` / `monoFace` / `headingFace` (`pdf.LoadedFont`)
+  with `...Fallbacks` lists, metadata, `bookmarkLevel`, `headingStyles`,
+  `admonitionLabels`, `images`, `imageDpi`); a character no font of its role
+  has is drawn as `unencodable` and listed in `missing`
+  (`MissingGlyph{char, codepoint, role, pageNr, y, context}`); `pageBreak()`. Kinds beyond Markdown: `line_block` / `line`,
   `footnote` / `citation` / `footnote_ref` / `citation_ref`, `def_desc`, `figure` / `caption` / `legend`, `topic`,
   `rubric`, `container`, `span` / `cite` / `abbr` / `line_break` /
   `html_inline`; `id` / `class` attrs reach the HTML, lists take `start` /
@@ -1071,7 +1145,8 @@ every entry below:
   `descender` / `lineGap` / `capHeight` / `xHeight`; `glyphPath(f, cp)` (SVG
   `d`) / `glyph(f, cp) -> Glyph`. `glyf` and CFF outlines (incl. CID-keyed);
   no shaping, `CFF2`, variable axes or hinting.
-- **`gpio`** - Linux sysfs GPIO, pin-keyed: `setup(pin, "in" | "out")` /
+- **`gpio`** - Deprecated (removed in 0.29.0): use the `gpio` library
+  (`gpio.open(path) -> gpio.Chip`). Linux sysfs GPIO, pin-keyed: `setup(pin, "in" | "out")` /
   `write(pin, 0 | 1)` / `read(pin)` / `release(pin)`. A pin is the BCM number
   on the Pi header chip (found by label; its sysfs base, 512+ since Linux 6.2,
   is added); `useChip(label | GLOBAL | AUTO)` overrides. Root
@@ -1091,25 +1166,27 @@ every entry below:
   queried with `get(node, sel)` / `findAll` / `has` (`/`-paths, `*`,
   `name[k]`) + `attrOf` / `hasAttr`.
 - **`http`** `[full]` - HTTP/1.1 client; only `http://` / `https://` URLs.
-  `request(method, url, headers, body)` / `requestWith(..., timeoutMs)` and
-  `get` / `post(url, contentType, body, headers)` / `put` / `patch` / `delete`
-  / `head` / `options` -> `Response{status, statusText, headers, body}`
-  (headers lowercased; `header(resp, name)`). Bytes: `getBytes` /
-  `requestBytes` -> `BytesResponse`, upload `requestRawBody` /
-  `requestRawBodyTls`. Policy: `send(method, url, headers, body, Options{
-  timeoutMs, maxBytes, maxRedirects, maxRetries, backoffMs, tls,
-  allowCrossOriginRedirect, allowInsecureRedirect})` follows redirects, retries
-  429 / 5xx (`Retry-After`: seconds or HTTP-date), keeps cookies; `maxBytes`
-  caps the body; a positive `timeoutMs` also bounds the connect. A transport failure is a `net.NetError` with `sent` /
-  `replied` set (closed before any reply: reason `closed`); a reply cut
-  short is `"closed"`, a malformed one `"http"`.
-  Keep-alive: `connect(url, options) -> Session`, `exchange(s, method, path,
-  headers, body) -> Exchange{response, session}` (thread `$s = $x.session;`),
-  `close`. TLS: `requestTls` / `requestWithTls` + `TlsOptions{skipVerify,
-  caCert}`; `basic(user, pass)`; Digest (RFC 7616, SHA-256 / MD5):
-  `sendDigest(method, url, headers, body, options, user, password)` answers
-  a 401 challenge, `digestAuthorization(challenge, method, url, user,
-  password, body)` builds the header for any other call.
+  `request(method, url, headers, body)` and `get` / `post(url, contentType,
+  body, headers)` / `put` / `patch` / `delete` / `head` / `options` ->
+  `Response{status, statusText, headers, body}` (headers lowercased;
+  `header(resp, name)`). Policy: `send(method, url, headers, body, Options{
+  timeoutMs, maxBytes, maxRedirects, maxRetries, backoffMs, tlsOptions,
+  allowCrossOriginRedirect, allowInsecureRedirect})` follows redirects,
+  retries 429 / 5xx (`Retry-After`: seconds or HTTP-date), keeps cookies;
+  `sendBytes(..., body as bytes, Options) -> BytesResponse` is its bytes twin,
+  `getBytes(url, headers)` the download shortcut. `timeoutMs` / `maxBytes`: 0
+  the default (30 s / 64 MiB), `math.MAX_INT` none, negative throws `"http"`;
+  `tlsOptions` is a `net.TLSOptions` (`caCert` replaces the system roots). A
+  transport failure is a `net.NetError` with `sent` / `replied` set; a reply
+  cut short is `"closed"`, a malformed one `"http"`. Keep-alive:
+  `connect(url, options) -> Session`, `exchange(s, method, path, headers,
+  body) -> Exchange{response, session}` (thread `$s = $x.session;`),
+  `close`. `basic(user, pass)`; Digest (RFC 7616): `sendDigest(method, url,
+  headers, body, options, user, password)` answers a 401 challenge,
+  `digestAuthorization(challenge, method, url, user, password, body)` builds
+  the header. Deprecated (removed in 0.29.0): `requestWith`, `requestTls`,
+  `requestWithTls`, `requestRawBody`, `requestRawBodyTls`, `requestBytes`,
+  `requestWithBytes`, `TlsOptions` / `Options.tls` (both set throws).
 - **`ical`** - iCalendar (RFC 5545): a `Calendar` of `Event` / `Todo`.
   `calendar()`, `event(uid, start, end, summary)`, `describe` / `locate` / `withAllDay` / `withZone(ev, tzid)` /
   `recur(ev, ical.rule(...))` / `addRdate` / `addExdate` / `withOrganizer` /
@@ -1275,9 +1352,12 @@ every entry below:
 - **`pdf`** - PDF generation. `document()`, `page(w, h)`, `text(pg, x, y, font,
   size, str)` / `line` / `rect(pg, x, y, w, h, filled)` / `color(pg, r, g, b)`,
   `addPage`, `render(doc) -> bytes` (byte-identical, no timestamp); `info(doc,
-  key, value)` + `pdfDate(t)`, `bookmark(doc, page, y, title, level)`.
+  key, value)` + `pdfDate(t)`, `bookmark(doc, page, y, title, level)`; batch
+  forms `bookmarks(doc, list of OutlineEntry)` / `addImages` / `addFonts` /
+  `addPages` (one module call, not one per item).
   Standard-14 fonts; points, origin bottom-left. Non-Latin text: `loadFont` /
-  `addFont` / `textUnicode` (TrueType only). Images: `loadImage` / `addImage` /
+  `addFont` / `textUnicode` (TrueType only); `textGlyphs` / `DrawOp.Glyphs`
+  draw glyph ids already mapped. Images: `loadImage` / `addImage` /
   `drawImage` (PNG, JPEG, GIF), `imageFrom(name, images.Image)`. Layout:
   `measureText` / `measureTextUnicode`, `wrapText`, `textBlock(pg, x, y, width,
   font, size, leading, str, align)` / `textBlockUnicode` (left / right /
@@ -1435,7 +1515,9 @@ every entry below:
   values: `get($app, "/users/:id", showUser)` / `post` / `put` / `patch` /
   `delete` / `route` (`:param`, trailing `*rest`); `before` middleware,
   `notFound`, `onError` (a throw becomes a logged 500; a `WebError{kind: "web",
-  message, status}` its 4xx status, a `"limit"` 413); HEAD is served by GET.
+  message, status}` its 4xx status, a `"limit"` 413, or 500 when it is the
+  request's `allocBudget($app, bytes)`, a per-request
+  `task.setAllocBudget`); HEAD is served by GET.
   Handlers are `func name(ctx as web.Context)` and run concurrently: never let
   two write one top-level `def`. Context: `param` / `query` / `rawQuery` /
   `method` / `path` / `header` / `body` / `bodyJson` / `form` / `formValue` /

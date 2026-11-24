@@ -24,7 +24,7 @@ io.printf("Jennifer %s (%s build)\n",
 | -------------- | ------ | ------------------------------------------------------------------ |
 | `meta.VERSION`   | string | The interpreter's build version. See format below.                 |
 | `meta.BUILD`     | string | Which Go toolchain compiled the interpreter: `"go"` or `"tinygo"`. |
-| `meta.SYSMODDIR` | string | The resolved system module directory (where bare `import`s look). Resolved from `--sysmoddir` > `JENNIFER_SYSMODDIR` > the compile-time default; `jennifer version -v` shows the layers. |
+| `meta.SYSMODDIR` | string | The resolved system module directory (where bare `import`s look). Resolved from `--sysmoddir` > `JENNIFER_SYSMODDIR` > the build default, `<PREFIX>/share/jennifer/modules` (`make PREFIX=`, `/usr` by default); `jennifer version -v` shows the layers. |
 | `meta.CAPABILITIES` | list of string | The host capabilities this build was compiled with, sorted: `["exec", "net", "sql"]` on the standard `jennifer`, `[]` on `jennifer-tiny`. The same set the `# pragma-jennifer-capability:` header is checked against. |
 
 ## Capability query

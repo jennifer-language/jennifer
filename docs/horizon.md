@@ -67,7 +67,7 @@ pool** the same way a spawn snapshot is - the carve-outs are the ones the
 concurrency work already established, applied to a new node. Across a module
 boundary a closure carries its defining interpreter like `FnHome`
 (implementation-note 25) already lets a `func` value do, so a captured closure
-resolves its own namespaces and retags structs at the boundary.
+resolves its own namespaces.
 
 **The one teachable surprise** is the snapshot: a captured variable is frozen at
 creation, so a later mutation of the outer variable is invisible inside the closure
@@ -490,8 +490,11 @@ settles at the start of this work):
   `Install(in *Interpreter)` registration API that every stdlib library
   already uses, from `internal/runtime` and the evaluator. The `internal/`
   packages stay as the implementation; `pkg/` is the stable facade with
-  semver-covered surface once we ship 1.0. Publishing `Value` freezes its
-  representation, so the facade waits until M28 has settled it.
+  semver-covered surface once we ship 1.0. What it publishes of `Value` is
+  the accessor API of M29.11: constructors (`IntVal`, `StringVal`, `ListVal`,
+  `GenericListVal`, `MapVal`, `StructValOf`, `InternIdentity`) and getters
+  (`v.Int()`, `v.List()`, `v.Identity()`, ...). The packed fields stay
+  unexported, so the layout can change again without breaking embedders.
 - `pkg/lib/*` re-exports each shipped library (`convert`, `math`,
   `strings`, ...) so a host can install the ones it wants and leave out the
   rest. Non-breaking for the current CLI - `cmd/jennifer` picks up the same

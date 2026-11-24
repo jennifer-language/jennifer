@@ -98,7 +98,7 @@ body cap and the 64 KiB header cap.
 
 #### M29.3 - per-task memory budget (was M28.18)
 
-**Planned.** Nothing sets a Go memory limit, and the catchable `"limit"` guard
+**Done.** Nothing sets a Go memory limit, and the catchable `"limit"` guard
 (`MaxCopyChainBytes`) only counts copies along a recursive call chain, so one
 request that builds a huge value runs the process out of memory: a fatal Go
 error or an OOM kill that ends every request in flight. Two parts: at startup
@@ -109,9 +109,29 @@ string growth like the copy-chain counter, so a runaway request raises a
 catchable `"limit"` error in its own worker instead of taking the server down.
 Touches the interpreter's allocation paths, so it needs its own benchmarks.
 
+- **As built.** At startup the interpreter sets the Go soft memory limit to
+  90% of the machine or cgroup limit (`internal/memlimit`, shared with
+  `httpd.setMaxBufferBudgetFromRAM`); a `GOMEMLIMIT` in the environment wins,
+  and `jennifer-tiny` sets none.
+- The per-task budget is opt-in: `task.setAllocBudget(bytes)` /
+  `task.allocated()`, a pointer on the goroutine's `CallChain` (nil when off:
+  one pointer check per charged operation, no measurable cost). It counts
+  cumulatively, with an O(1) estimate (cells plus the next level sampled from
+  8 elements): eager and parameter copies, appends, growing index writes,
+  field writes, string `+` and interpolation, literals, materialised ranges
+  and slices, and every builtin result at the call site. Past the limit the
+  next charged operation throws a catchable `"limit"`, then allows 1 MiB of
+  room before throwing again, so the catch can run. Spawned tasks share the
+  budget; a task setting one under an inherited budget nests it.
+- `web.allocBudget($app, bytes)` applies one per request in the request's
+  worker task. An escaped overrun is answered 500, not 413: the request need
+  not be large, the server declines to spend more, and a retry trips again.
+  With the budget on, a loop made almost entirely of charged operations runs
+  5 to 10% slower; the benchmark suite shows no difference.
+
 #### M29.4 - install paths set at build time (was M28.62)
 
-**Planned.** The interpreter assumes an FHS layout: the system module
+**Done.** The interpreter assumes an FHS layout: the system module
 directory defaults to `/usr/share/jennifer/modules` (`internal/module/
 sysmoddir.go`, `compileDefaultSysmoddir`), the docs, man page and syntax
 files are packaged under `/usr/share`, and the shebang the docs recommend is
@@ -142,9 +162,24 @@ unless `JENNIFER_SYSMODDIR` is set on every run.
   packaging (Debian, Arch, Homebrew, OpenWrt, Docker) keeps `/usr` (or its
   own prefix) and passes it explicitly. Additive.
 
+- **As built.** `internal/version.Prefix` (default `/usr`) is written with
+  `Version` by `scripts/gen-version.sh` from `JENNIFER_PREFIX` (`make
+  PREFIX=`; absolute, no quotes or control characters). `internal/version/
+  paths.go` derives the module dir, the docs dir and `SysconfDir`
+  (`<PREFIX>/etc`, `/etc` for `/usr`); no other Go code names an install
+  path (the rest are kernel interfaces). `jennifer version -v` prints the
+  prefix, module dir, docs dir, resolver files and temp dir, each with its
+  source. The release, Arch, Docker and Homebrew builds pass their prefix
+  explicitly (Homebrew `-X version.Prefix`). `make` takes `PREFIX` from the
+  environment too, the usual convention (Termux relies on it).
+- `jvc app install` writes a `/bin/sh` shim running the resolved interpreter
+  (`$JVC_JENNIFER`, else `jennifer` / `jennifer-tiny` on `PATH`) when the
+  entry's `#!` names an `env` that does not exist; otherwise its output is
+  unchanged.
+
 #### M29.5 - DNS without `/etc/resolv.conf` (was M28.63)
 
-**Planned.** Release binaries are built with `CGO_ENABLED=0`, so name
+**Done.** Release binaries are built with `CGO_ENABLED=0`, so name
 resolution is Go's pure resolver, which reads `/etc/resolv.conf` and
 `/etc/hosts`. On a system without them (some minimal containers, and
 userlands whose `/etc` lives under another prefix, see M29.4) every
@@ -160,18 +195,34 @@ userlands whose `/etc` lives under another prefix, see M29.4) every
 - **No silent public fallback.** Go's default of `127.0.0.1:53` /
   `[::1]:53` when no config exists stays; the interpreter never invents a
   public resolver (privacy, and corporate networks).
-- `net.resolve(host) -> list of string` and `net.resolveWith(host,
-  servers)` for programs that need a lookup against named servers (also
-  useful for diagnostics).
+- A lookup against named servers (`lookupWith`'s `dnsServers`), also useful
+  for diagnostics.
 - Implemented with a custom `net.Resolver` (`PreferGo`, `Dial` pointing at
   the configured servers) parsed from the chosen file, since Go's own
   config path is not settable. Tested against a loopback DNS fake in `.j`
   (UDP) and a container without `/etc/resolv.conf`. Default binary only
   for the custom resolver; the tiny build keeps the system behaviour.
 
+- **As built.** `internal/dnsconf` picks resolv.conf and hosts
+  (`JENNIFER_RESOLV_CONF` / `JENNIFER_HOSTS`, `<PREFIX>/etc`, `/etc`). A
+  non-system choice routes `net.DefaultResolver` (PreferGo) through an
+  in-process stub on a `net.Pipe` that answers from the chosen hosts file and
+  forwards everything else to the chosen nameservers, so `net`, `http` and
+  `sql` all follow it. Go's resolver cannot read other files, so search,
+  ndots and options still come from `/etc/resolv.conf` or Go's defaults, and
+  an existing `/etc/hosts` is consulted first. A variable naming a missing
+  file throws `NetError` reason `dns` on every lookup; with no configuration
+  at all the loopback default stays and a failed lookup's message names the
+  files looked for and the variable.
+- `net.ConnectOptions.dnsServers` (`"ip"` or `"ip:port"`, at most 16; a host
+  name is `"runtime"`): `net.lookupWith` with it asks only those servers
+  through its own A / AAAA client, with no hosts file and no search list;
+  every other call that takes the options ignores it. Tested against Go and
+  Jennifer loopback DNS fakes; `jennifer-tiny` keeps the system behaviour.
+
 #### M29.6 - more release architectures (was M28.64)
 
-**Planned.** Releases ship `linux/amd64`, `linux/arm64`, `darwin/amd64`,
+**Done.** Releases ship `linux/amd64`, `linux/arm64`, `darwin/amd64`,
 `darwin/arm64`, `windows/amd64` and `windows/386` (`release.yml`). Small
 boards, older phones and tablets, and 32-bit x86 machines are left out,
 though Go and TinyGo target them without cgo.
@@ -193,6 +244,25 @@ though Go and TinyGo target them without cgo.
   Debian, Docker's platforms) is extended to the new names.
 - Depends on M29.4 for the Android-style prefix and M29.5 for name
   resolution there.
+
+- **As built.** Release rows linux/arm (GOARM 7, `armv7`, deb `armhf`),
+  linux/386 and linux/riscv64 (no TinyGo target there: `jennifer` only); each
+  runs `version`, hello, `recursion_limit`, a loopback DNS check and every
+  module test under QEMU (386 natively). Only android/arm64 links without
+  cgo (android/amd64 does not either); it ships as an unsupported build for
+  Termux's prefix, without a smoke test. .deb, .ipk, the OpenWrt feed and
+  the Docker platforms are extended (distroless has arm/v7 only).
+- GOARM 6 is its own row, `armv6`, with both binaries (TinyGo builds ARMv6
+  with VFPv2). Its QEMU smoke and module tests run with `QEMU_CPU=arm1176`,
+  so an ARMv7-only instruction faults. The single `armhf` .deb carries the
+  armv6 binaries (Raspberry Pi OS's armhf baseline is ARMv6; they also run on
+  ARMv7); armv7 ships as a tarball and .ipk. The OpenWrt package arch is
+  `arm_arm1176jzf-s_vfp` (bcm2708). Docker adds `linux/arm/v6` for the alpine
+  variant only: Debian slim has arm/v5 and v7, distroless arm/v7.
+- A `GOARCH=386` test job guards 32-bit Go `int`. The review fixed unaligned
+  64-bit atomics in the profiler (`profile --trace` panicked), the
+  `CallChain` padding, and int64-to-int narrowing before range checks in ml,
+  sql column indexes, `term` state ids, decimal exponents and archive caps.
 
 #### M29.7 - `strings` cutset / affix trim (was M28.5)
 
@@ -238,7 +308,7 @@ geodata decks pay the same.
 
 #### M29.9 - scope-rule and binder diagnostics (was M28.8)
 
-**Planned.** Three small, independent refinements at the edges of the scope rules.
+**Done.** Three small, independent refinements at the edges of the scope rules.
 
 - **A parameter may shadow a global (decide: forbid, or formally allow).** The
   no-shadowing rule rejects a `def` local, a for-each iterator, a `catch` binding,
@@ -284,9 +354,18 @@ tracking.
 
 ---
 
+- **As built.** A parameter may shadow a global (allowed; the
+  spec, the scoping guide and the grammar notes say so, a test pins it).
+  A write to a `match` binder, direct or in place (`$c.r = `, `$c[] = `), is a
+  parse error ("the match binder `c` is read-only; its payload is a copy")
+  through a read-only flag on the resolver's binding. A global variable read,
+  assigned or changed through a hoisted function before its `def` has run
+  throws `variable $x is read before its definition has run` (an unset slot
+  has no name; the constant case already said so).
+
 #### M29.10 - compile-time validation of literal `printf` format strings (was M28.10)
 
-**Planned.** `io.printf` / `sprintf` / `eprintf` parse their format string at
+**Done.** `io.printf` / `sprintf` / `eprintf` parse their format string at
 runtime, so a malformed verb or modifier in a string literal fails on the line that
 runs rather than when the file is checked: an unknown verb (`%x`), a modifier the
 verb does not take (`%d|prec=2`), a bad value (`%d|base=3`), a duplicate key, or a
@@ -303,12 +382,20 @@ parse-time error for a statically-known format whose spec cannot parse (the
 lower-risk first step and turns a whole class of runtime surprise into a pre-commit
 finding.
 
+- **As built.** Lint rule L117 (warning) runs `io`'s own parser
+  (`iolib.ParseFormat`, which `printf` shares through `scanFormat`) over a
+  string-literal format: a malformed verb or modifier, a verb count other
+  than the value count, and a value whose static type its verb does not take.
+  Its first run over the workspace found 37 C-style formats (`%-20s`,
+  `%.1f`, `%7d`) in the tmdb, routeros and vmware deck examples, each a
+  runtime error; they use modifiers from those decks' next releases on.
+
 **Requires:** none hard; builds on the existing `io`/`format.go` spec parser and the
 `jennifer lint` framework.
 
 #### M29.11 - a smaller `Value` (was M28.45)
 
-**Planned.** Every value is one `interpreter.Value` struct with a field for
+**Done.** Every value is one `interpreter.Value` struct with a field for
 each kind: `Kind`, `Bool`, `Int`, `Float`, `Str`, four slices (`List`, `Map`,
 `Bytes`, `Fields`), four strings (`Variant`, `StructName`, `StructNS`,
 `ModPath`) and eight pointers (types, task, object, function, channel), about
@@ -332,9 +419,38 @@ size, with value semantics unchanged. It touches every constructor and
 `Kind` switch, so it needs the benchmark suite before and after, and it sets
 the representation `pkg/interpreter` will publish (see `horizon.md`).
 
+- **As built.** `Value` is 48 bytes on 64-bit targets (was 272): one word
+  for `Kind`, a tag byte and the nesting and rune-count caches; one scalar
+  word (int64, float64 bits or bool); one slice header shared by the string,
+  list, map entries, bytes and struct fields; one pointer to the out-of-line
+  part (the interned `*Identity` of a struct or enum, a list's element type,
+  a map's `mapDesc` with its key and value types and key index, or the task,
+  channel, object or func handle). Every payload goes through accessors in
+  `value_layout.go` (`Int`, `List`, `SetList`, `Identity`, ...), which check
+  the tag before reading the words. `Identity` is interned and immutable, so
+  type equality is a pointer comparison.
+- Measured on the Go build, same programs before and after:
+
+  | Case | Before | After |
+  |---|---|---|
+  | 921,600-element `list of float` built by appending, peak RSS | 0.87-1.05 GB | 170-200 MB |
+  | 1 MiB split into 1,048,576 empty fields | 600 MB | 139 MB |
+  | 65,530 one-field records as structs | 209-232 MB | 60-64 MB |
+  | `examples/benchmark.j --suite all`, Go / TinyGo | 28.0 s / 39.9 s | 13.6 s / 16.2 s |
+
+- The element caps sized in values are four times larger, at or below their
+  old memory budgets: `MaxRangeElements` 16,777,216 (4,194,304 on
+  `jennifer-tiny`), which also sizes `strings.split` / `chars`, `lists`,
+  `binary.split` / `readInts`, `io.readLines`, regex `findAll` and ml's
+  `kFold` / `polynomialFeatures`; `MaxChannelCapacity` and
+  `MaxMatrixElements` 4,194,304 (262,144). `MaxDecodedNodes` counts native
+  decoder nodes, not values, and is unchanged. `MaxCopyChainBytes` and
+  `profile --allocs` read the real cell size. The decks' own `MAX_*` caps
+  are theirs to raise.
+
 #### M29.13 - string positions without a rescan on non-ASCII text (was M28.44)
 
-**Planned.** `strings.indexOf(s, sub, from)` and slicing `$s[a..b]` take rune
+**Done.** `strings.indexOf(s, sub, from)` and slicing `$s[a..b]` take rune
 positions. ASCII text has a fast path (`TestOneByteRunePath`) and a string's
 rune count is cached (`strRunes`), but once the text holds one non-ASCII rune,
 each call converts rune positions to byte offsets by walking the string from
@@ -352,9 +468,18 @@ or after it resumes the walk from there; a forward scan then costs O(n) in
 all. Measure with the 40,000-escape repro and a `strings.indexOf` loop over a
 mixed-script text; the `strings` and slicing tests cover the semantics.
 
+- **As built.** The cursor is not a `Value` field (a builtin receives a copy
+  of the binding, which would lose it): a process-wide 16-slot table keyed by
+  the string's data pointer and length (`runecursor.go`) remembers each
+  string's last rune-to-byte position, so a match is never stale. A walk
+  resumes at, after or shortly before it; strings under 256 bytes skip the
+  table. `strings.indexOf` leaves the cursor at its hit, a slice at its upper
+  end. The 40,000-escape repro takes 0.21 s (was 22 s), an `indexOf` loop
+  over 460,000 mixed-script runes 0.17 s (was 79 s).
+
 #### M29.14 - cheaper calls into another module (was M28.28)
 
-**Planned.** A call into another module costs more than a local call: 200,000
+**Done.** A call into another module costs more than a local call: 200,000
 calls of a one-line function take 115 ms locally and 169 ms across a module
 boundary, and 142 ms against 310 ms with a two-field struct argument. Thin
 wrapper modules then cost more than the work they wrap; inlining one made a
@@ -397,21 +522,40 @@ crossing flips the identity, so the marker never matches on the next call.)
 A second measured case is a streaming cursor. `@deckyard/sheets`' `RowReader`
 holds the sheet's XML bytes, the shared string table and the date styles, and
 the calling shape is `while (hasRow($r)) { $r = nextRow($r); }`. Reading 694
-rows of a 17,350-cell Excel file (a 2026-11-23 report against 0.3.0) rebuilt
+rows of a 17,350-cell Excel file (a report against 0.3.0) rebuilt
 the cursor three times per row at the boundary (`hasRow` in, `nextRow` in and
 out), about 10 MiB per site over the read, on top of the 715 MiB `nextRow`
 copied inside the deck (`def out as RowReader init $r`). The deck now keeps
 the cursor's large parts in `bytes`, whose copy is one block move (M30.2 has
 the copy itself); the boundary rebuilds remain, and a cursor whose caller
 passes it back on every step pays them until the identities match. Measured on
-0.4.0 (a second report, 2026-11-23): five crossings per row in the usual loop
+0.4.0 (a second report): five crossings per row in the usual loop
 (`hasRow`, `nextRow` in and out, `rowNumber`, `rowValues`), about 15 KB each
 for the cursor's maps and the row, 53 MiB over 694 rows: the largest cost left
 in a streaming read.
 
+- **As built.** One identity on both sides: `resolveDeclaredStructNS` stamps a
+  module's bare type names with `(module stem, canonical path)` at load, and
+  struct and enum literals, zero values and constants inside the module carry
+  it. A value crosses a module call, a func value call, `meta.callMain` or a
+  constant read unchanged. `Error` stays bare. Inside a module a bare name
+  other than `Error` does not resolve to the module's own type, so a
+  consumer's same-named struct never binds to it; `findImpostorStruct` only
+  words the error once an argument check has failed. `dispatchModuleMethod`
+  binds each argument into the callee frame as it is evaluated, as
+  `evalCall` does. `retagStructs` and its helpers are gone, and with them
+  `profile --allocs`'s *module-boundary rebuilds* section.
+- Inside a module its own struct now prints with the stem, as its importers
+  saw it already (`geo.Point{x: 1}`).
+- 200,000 calls (Go build): a one-line function 285 to 181 ms across a module
+  (175 ms locally), with a two-field struct argument 477 to 231 ms (217 ms
+  locally); 200 `has` calls on a 6,400-node module tree 1,139 ms to 0 ms. The
+  `module handle call` row of `examples/benchmark.j` went from 3.3-5.1 s to
+  0 ms. The sheets cursor's crossings rebuild nothing.
+
 #### M29.15 - `html.parse` without a per-character copy
 
-**Planned.** `html.parse` turns the whole source into a list of characters
+**Done.** `html.parse` turns the whole source into a list of characters
 before tokenizing, so a document costs several times its size in memory: a
 36 MB EPUB's navigation document (mahabharata, found validating
 `@deckyard/epub`) needs about 100 MB, which exhausts `jennifer-tiny`'s
@@ -421,27 +565,24 @@ M29.13 helps), keeping the parse result and its caps unchanged; measure
 before and after with `jennifer profile --allocs` on a large page, and run
 the epub deck's 73-book comparison as a regression check.
 
+- **As built.** The tokenizer finds text runs, end tags and start-tag extents
+  with `strings.indexOf` from the current position and slices every piece
+  out of the source; the character list and the two position lists are gone.
+  On a 3.4 MB non-ASCII page, values copied drop from 4.0 to 2.6 GiB, peak
+  memory from 3.0 to 1.8 GB and the time by about a third, with node-for-node
+  identical trees. `jennifer-tiny` parses pages its memory guard refused
+  before (334 KB in the measurement). The epub deck's suite passes. The tree
+  build's copies when an element closes are now the largest cost.
+
 #### M29.16 - telling a wrong return type from a fault inside a callback
 
-**Planned.** A module that calls a caller's `func` value and needs a
-particular result type (a guard must return `bool`, a hook a `json.Value`)
-cannot tell "the callback returned the wrong type" from "the callback itself
-failed" without matching messages: both are kind `"runtime"`, and Jennifer
-has no untyped local or `any` to hold the result and inspect it first.
-`@deckyard/fsm` works around it by checking the caught error's source
-position (inside fsm.j means the assignment failed), which is correct but
-indirect. Pick one of:
-
-- **Typed func values checked at the call:** a parameter typed with a
-  signature (`guard as func(string, json.Value) -> bool`) makes the
-  interpreter check the result when the value is called and throw a
-  distinct error kind (e.g. `"type"`) or a `reason` on the error.
-- **A structured reason on type errors:** every "value of type X where Y
-  was declared" error carries `reason: "type"` (and the two type names), so
-  a caller branches on a field instead of a message.
-
-Either lets fsm drop the position check (a deck change after the release
-that ships it). Decide which fits the type system before implementing.
+**Retired**: merged into M30.21. A module calling a caller's
+`func` value (a guard that must return `bool`) cannot tell "the callback
+returned the wrong type" from "the callback failed": both are `"runtime"`.
+Typed `func` values checked at the call, with a distinct kind, belong to the
+same design as declared return types, so they are built there; a separate
+`reason` field on type errors was rejected as a second mechanism.
+`@deckyard/fsm` keeps its source-position check until then.
 
 #### M29.17 - local halves of network modules on `jennifer-tiny`
 
@@ -453,14 +594,15 @@ to load on tiny, and `session` and `ratelimit`, which import `kvstore`, fail wit
 it. `s3.presign` and `webhook.sign` / `verify` are pure computation, but `s3` and
 `webhook` import `http`. The docs mark all of these `[full]` since 0.26.0.
 
-- Decide the mechanism:
-  - capability pragmas per function instead of per file, checked at call time on
-    tiny;
-  - or a lazy import that loads the network module at first use;
-  - or splitting each module into a local part and a network part (`kvstore` and
-    `kvstore_net`, `webhook` signing apart from delivery).
-
-  Splitting needs no interpreter change, but it changes imports for users.
+- **Split each module** into a local part and a network
+  part (`kvstore`'s in-process and file stores apart from the `redis` /
+  `memcache` ones, `webhook` signing apart from delivery, `s3.presign` apart
+  from requests). No interpreter change; capabilities stay per file and
+  explicit. Users of the network halves change an import, named in the
+  CHANGELOG. Rejected: capability pragmas per function (the import of `http`
+  itself would have to stop failing on tiny, making imports conditional) and
+  a lazy import (a missing capability would surface at the first call
+  instead of at load).
 - Whichever is chosen, a network call on tiny stays a clear "needs capability
   net" error at the point of use.
 - Tests: on `jennifer-tiny-dev`, `kvstore.inProcessStore`, `session` and
@@ -471,7 +613,7 @@ it. `s3.presign` and `webhook.sign` / `verify` are pure computation, but `s3` an
 
 #### M29.18 - `doctree.renderPdf` without a document rebuild per bookmark
 
-**Planned.** `renderPdfDoc` (`modules/doctree.j`, the block loop) calls
+**Done.** `renderPdfDoc` (`modules/doctree.j`, the block loop) calls
 `$outdoc = pdf.bookmark($outdoc, ...)` once for every bookmarked heading. `pdf.Document` is the `pdf` module's own struct, so every
 call rebuilds the whole document at the module boundary, in and out, outline
 and embedded image bytes included. The outline grows with every call, so the
@@ -490,6 +632,14 @@ cantrip 0.1.0.
   per-page calls whether or not M29.14 lands first.
 - Test: `profile --allocs` on a generated 500-page document shows no
   per-page `pdf.Document` rebuild; the output PDF is byte-identical.
+
+- **As built.** `layoutPdf` collects bookmarks, images, used faces and pages
+  and hands each over once (`pdf.bookmarks`, `pdf.addImages`, `pdf.addFonts`,
+  `pdf.addPages`); text goes over as one `pdf.draw` per paragraph, code
+  block, table row or marker instead of one call per word. A 500-page
+  document with 2,500 bookmarks: module-boundary copies 8.4 GiB to 337 MiB
+  (measured before M29.14 removed the rest), layout about 30% faster, the
+  output byte-identical (a golden digest test pins it).
 
 #### M29.19 - `io.printf` `%f`: zero fill and digit grouping
 
@@ -510,7 +660,7 @@ refused (`option "fill" not valid for verb %f`).
 
 #### M29.20 - `doctree` PDF with embedded TrueType fonts
 
-**Planned.** `doctree.PdfOptions` takes only standard-14 font names
+**Done.** `doctree.PdfOptions` takes only standard-14 font names
 (`bodyFont`, `boldFont`, `italicFont`, `monoFont`, `headingFont`). Those use
 WinAnsi (cp1252), so any other character prints as `?` without a warning: an
 arrow, an emoji, Greek, Cyrillic, CJK. Grimoire's PDF books and cantrip's slide
@@ -538,6 +688,21 @@ Type0 font subset to the glyphs used); `doctree` does not use that path.
   available, else the content stream's glyph ids); width measurement matches
   the face; the report lists an unsupported glyph; the standard-14 path
   produces byte-identical output to before.
+
+- **As built.** `PdfOptions` gains `bodyFace`, `boldFace`, `italicFace`,
+  `monoFace`, `headingFace` (`pdf.LoadedFont`, an empty name keeps the
+  standard-14 font) and a `...Fallbacks` list per role. `layoutPdf(doc,
+  opts)` returns `PdfResult{doc, missing}`; each `MissingGlyph{char,
+  codepoint, role, pageNr, y, context}` is a character no font of its role
+  has, drawn as `unencodable`. A list rather than a callback: `doctree`'s
+  options are plain data, and the caller can group, dedupe or fail. Layout
+  measures with the face's advances, a CJK run may break between
+  ideographs, and only faces a page drew from are embedded. `pdf` gains
+  `textGlyphs` / `DrawOp.Glyphs` (pre-mapped glyph ids, so the font bytes
+  never cross per call). Without faces the output is byte-identical. Tests
+  use a 1 KB fixture face (`scripts/gen-font-fixture.py`) and DejaVu with
+  `pdftotext` where installed. A face-only document is about 3.5 times slower
+  to lay out than the standard-14 path (per-character run splitting).
 
 #### M29.21 - the built-in libraries raise their own kind for bad input data
 
@@ -746,8 +911,8 @@ for `bytes` only.
 - **Add** `lists.replicate(xs, n)`: `n` copies of `xs` concatenated, as
   `strings.repeat(s, n)` does for strings. A filled list is
   `lists.replicate([false], $n)`, a repeating pattern `lists.replicate([1, 0], 4)`.
-  `n` must be non-negative; a result over the `lists.concat` cap (4194304
-  elements, 1048576 on `jennifer-tiny`) is kind `"limit"`, checked before
+  `n` must be non-negative; a result over the `lists.concat` cap (16777216
+  elements, 4194304 on `jennifer-tiny`) is kind `"limit"`, checked before
   anything is built.
 - Elements are deep copies: `lists.replicate([[0, 0]], 3)` is three independent
   rows.
@@ -1057,8 +1222,8 @@ stance 8); and the two-bound `lists.range(a, b)`, which is `a..b` (or the step
   write; L301 entries go.
 - Migrate the callers first, mechanically. Done in 0.27.0 for the bundled
   modules (213 calls, and 499 of the convert pair), the examples and the
-  docs; the nine deprecated modules keep the pair and go with it. Done on
-  2026-11-23 for `decks/`, `deckyard/`, `apps/`, the rosetta solutions, the
+  docs; the nine deprecated modules keep the pair and go with it. Done for
+  `decks/`, `deckyard/`, `apps/`, the rosetta solutions, the
   website and the academy's tools and talks (about 2,700 calls in 71
   repositories, `jennifer lint` 0.27.0 reporting no L301 after it); each
   raised its floor to `>=0.27.0`, which `encoding.encode("utf-8", ...)` and
@@ -1075,7 +1240,7 @@ stance 8); and the two-bound `lists.range(a, b)`, which is `a..b` (or the step
 
 #### M29.36 - `sql`: verified TLS by default, errors a caller can test
 
-**Planned.** Two gaps the stance review found (2026-11-21).
+**Done.** Two gaps the stance review found (2026-11-21).
 
 - **TLS.** Nothing requires it: go-sql-driver/mysql defaults to `tls=false`,
   so the password crosses in plaintext, and pgx to `sslmode=prefer`, which
@@ -1094,14 +1259,44 @@ stance 8); and the two-bound `lists.range(a, b)`, which is `a..b` (or the step
   `mariadb` / `postgresql` aliases), `asString` validates UTF-8, `asFloat`
   refuses NaN and infinity, `asBool` takes only 0 / 1, and the process-wide
   `setQueryTimeout` becomes `Options.queryTimeoutMs`.
-- **Breaking** (TLS refusal, kinds, aliases); named in the CHANGELOG. Tests
+- **Breaking** (TLS refusal, kinds); named in the CHANGELOG. Tests
   against the CI database containers.
+- A loopback address (`localhost`, 127.0.0.0/8, `::1`) is exempt like a
+  Unix socket: the traffic never leaves the host. A container's service
+  name (`db:5432`) is not.
+- A DSN without a TLS parameter gets verified TLS (`sslmode=verify-full`,
+  `tls=true`); one naming a weaker mode (`disable`, `allow`, `prefer`,
+  `require`, `false`, `skip-verify`, `preferred`) is refused unless
+  `allowInsecure`.
+- `sql.openWith(driver, dsn, sql.Options{allowInsecure, queryTimeoutMs})`:
+  `queryTimeoutMs` 0 is the 30 s default, a negative value throws, MaxInt
+  is none, per connection.
+- The aliases `mariadb` / `postgresql` and `setQueryTimeout` are
+  deprecated (L301), removed in 0.29.0.
+- `sql.SqlError{kind: "sql", message, code, sqlState}`: `code` the MySQL
+  error number (0 on Postgres), `sqlState` the five-character SQLSTATE.
+- `asString` on invalid UTF-8 is kind `"sql"` (M29.21), naming the byte
+  offset (with M29.50).
+
+- **As built.** The TLS policy reads hosts and modes through the drivers'
+  own parsers (`pgconn.ParseConfig`, `mysql.ParseDSN`); a missing parameter
+  is added, MySQL opens through `mysql.NewConnector`, so the DSN is never
+  re-serialised; `verify-ca` is accepted; a multi-host DSN is judged by its
+  first non-loopback host; no message carries the password. Driver errors
+  map to `SqlError`, `"timeout"` or `net.NetError` (with a copy of `net`'s
+  errno / TLS classification). `asBool` also takes the text `"0"` / `"1"`
+  (MySQL's text protocol sends TINYINT as digits). No MySQL registered-CA
+  option: Jennifer has no API to register one. L301 on a literal
+  `"mariadb"` / `"postgresql"` and on `setQueryTimeout`. Not run against a
+  database: CI has no database containers; the mapping is unit-tested on
+  constructed driver errors, timeouts and `NetError` against a closed or
+  silent loopback port.
 
 **Requires:** none.
 
 #### M29.37 - `net`: a default deadline for every connect and lookup
 
-**Planned.** The catalogue says every network call has a default deadline.
+**Done.** The catalogue says every network call has a default deadline.
 `net.connect` / `connectTLS` / `startTLS` without `timeoutMs` (or with 0) have
 none, and `net.lookup` / `reverseLookup` cannot be bounded at all; the `http`
 module adds its own `DEFAULT_TIMEOUT_MS` to make up for it.
@@ -1114,21 +1309,42 @@ module adds its own `DEFAULT_TIMEOUT_MS` to make up for it.
   type-sniffing optional arguments of `connectTLS` (see M29.45).
 - Docs: `net.md`; tests with an unroutable address and a stalled handshake.
 
+- **As built.** `net.ConnectOptions{timeoutMs, tls, tlsOptions}` with
+  `connectWith`, `startTLSWith` (ignores `tls`) and `lookupWith` /
+  `reverseLookupWith` (read `timeoutMs` only). `timeoutMs` 0 is 30 s,
+  `math.MAX_INT` none, negative `"runtime"`; past it is `"timeout"` (a lookup
+  too). It bounds connect + TLS handshake, a `startTLS` handshake or a
+  lookup, never later reads; the plain calls take the default, so
+  `connect(addr, 0)` no longer means "no deadline". `startTLS` restores the
+  deadlines armed before it. The trailing timeout ints are deprecated (L301,
+  by argument count and the second argument's static type) and join M30.25.
+  Eleven bundled modules use the new calls (`>=0.28.0`). `math.MAX_INT` /
+  `MIN_INT` added (M29.44's decision).
+
 **Requires:** none.
 
 #### M29.38 - `kv.incr` on an absent key
 
-**Planned.** `kv.incr` returns -1 for an absent key, but a signed delta makes
+**Done.** `kv.incr` returns -1 for an absent key, but a signed delta makes
 -1 a real count as well (a decrement to -1 and an absent key read the same).
 Throw for an absent key, as `getValue` does, with `has` as the test; the
 module stores built on `kv` (`kvstore`, `session`, `ratelimit`) follow.
 **Breaking** for code reading -1.
 
+- an absent key starts at 0, as Redis's INCR:
+  `incr(absent, 5)` stores and returns 5, so a counter needs no `has` check
+  and two tasks cannot race between check and increment. -1 is an ordinary
+  count. A key holding something other than an int still throws.
+
+- **As built.** An absent or expired key starts at 0 and is created
+  without TTL; a non-int value throws. `kvstore.incrWindow` arms a window
+  with `add(key, "0", ttl)` before `incr`.
+
 **Requires:** none.
 
 #### M29.39 - `ml` models as values
 
-**Planned.** An `ml.Model` is a handle into a per-run registry, so copies
+**Done.** An `ml.Model` is a handle into a per-run registry, so copies
 share one entry and `ml.free` on a copy kills the original (verified
 2026-11-21), against value semantics and `ml.md`'s "safe to share across
 value-copies". Make a model an immutable value the garbage collector owns,
@@ -1137,6 +1353,15 @@ While the signatures change, the hyper-parameters (`logisticRegression`'s
 learning rate and epochs, the trees' `nTrees` / `maxDepth`, `kMeans`'s
 `maxIter`) move from chained optional arguments into options structs
 (`randomForestWith(X, y, ml.ForestOptions{...})`, zero = default).
+
+- **As built.** `ml.Model` is a native object value (shared payload,
+  GC-owned, `==` is identity, the zero value refused); the registry is gone.
+  `ml.free` is a no-op (L301). `logisticRegressionWith` / `decisionTree
+  [Regressor]With` / `randomForest[Regressor]With` / `kMeansWith` with
+  `LogisticOptions` / `TreeOptions` / `ForestOptions` / `KMeansOptions`: 0
+  default, negative `"runtime"`, past the ceiling `"limit"`; the trailing
+  arguments are L301 by count. Breaking: `$m.id` and `ml.Model{...}`
+  literals no longer exist; `%v` prints `<ml.Model kind>`.
 
 **Requires:** none.
 
@@ -1164,27 +1389,44 @@ round-trip, instead of rounding.
 
 #### M29.41 - `compress` refuses data after the stream
 
-**Planned.** `compress.unpack("zlib" | "deflate", ...)` ignores bytes after
+**Done.** `compress.unpack("zlib" | "deflate", ...)` ignores bytes after
 the end of the stream and silently drops a second concatenated stream, while
 `"gzip"` reads every member and refuses trailing junk (verified 2026-11-21).
 Throw on unread input after the stream for zlib and deflate; document gzip's
 multi-member rule. Tests: trailing junk, two streams, an exact stream.
 
+- gzip keeps reading every member (RFC 1952 allows
+  concatenated members; `gzip -d` reads them) and refuses only trailing
+  bytes that are not a member; zlib and deflate have no members, so any byte
+  after the stream is kind `"compress"`.
+
+- **As built.** zlib / deflate refuse any byte after the stream (a second
+  stream included), kind `"compress"`; gzip's member rule was already right,
+  now pinned and documented.
+
 **Requires:** none.
 
 #### M29.42 - strict quoted-printable
 
-**Planned.** `encoding.fromText("quoted-printable", ...)` keeps a malformed
+**Done.** `encoding.fromText("quoted-printable", ...)` kept a malformed
 `=XX` escape as literal text (verified 2026-11-21), while base32 and base64
-accept only canonical text. Refuse a malformed escape; decide whether hex
-accepts only lowercase (canonical) as base64 does, or record why it takes
-both cases.
+accept only canonical text. Refuse a malformed escape.
+
+- **Hex accepts both cases**, recorded in
+  `docs/libraries/encoding.md` and `conventions.md`: hex from other tools is
+  often uppercase (MAC addresses, digests, RFC 4648's own base16 alphabet),
+  and case carries no bits, unlike base64's padding bits, so it opens no
+  second meaning. `toText("hex", ...)` keeps writing lowercase.
+- **As built.** Every `=` must be `=XX` (hex in either case, RFC 2045 6.7)
+  or a soft line break (`=`, optional spaces / tabs, then LF, CRLF or the end);
+  anything else is kind `"encoding"`, naming the byte offset. `mime` relies on
+  it instead of a pre-check of its own, which refused a CRLF soft break.
 
 **Requires:** none.
 
 #### M29.43 - `http`: one request function
 
-**Planned.** `http.send(method, url, headers, body, Options)` with zero
+**Done.** `http.send(method, url, headers, body, Options)` with zero
 `Options` is a one-shot request, and `Options` holds `timeoutMs`, `maxBytes`
 and `tls`, so `requestWith`, `requestTls` and `requestWithTls` are second ways
 to call it. `requestRawBody*` and `requestBytes*` exist because `send` has no
@@ -1197,12 +1439,36 @@ bytes form.
 - `http.TlsOptions` becomes `net.TLSOptions`, ending the field copy, and the
   docblock's "in addition to the system roots" is corrected (a `caCert`
   replaces them, as in `net`).
+- **The switch completes in 0.29.0.** 0.28.0 adds `Options.tlsOptions as
+  net.TLSOptions` beside `tls`; setting both throws. `Options.tls` and
+  `http.TlsOptions` are documented as deprecated (lint cannot flag a field
+  type) and removed by M30.25. 18 deckyard decks put `http.TlsOptions` in
+  their own options structs: each moves to `net.TLSOptions` in a release
+  with floor `>=0.28.0`, a breaking change for its callers.
+- `sendBytes(method, url, headers, body as bytes, Options) ->
+  BytesResponse`; `getBytes` stays with the verb shortcuts.
+- M29.44's cap rule applies to `Options` here: `maxBytes` and
+  `timeoutMs` 0 are the defaults, a negative value throws, MaxInt is
+  unlimited (`maxBytes: -1` used to mean unlimited).
+
+- **As built.** `send` and `sendBytes` share one policy core; `request` /
+  `getBytes` are them with zero `Options`, and the seven deprecated functions
+  wrap them (their positional `timeoutMs` 0 maps to `math.MAX_INT`). Both
+  `tls` and `tlsOptions` set throws `"http"`. In `Options` (also `connect` /
+  `exchange`) any negative field throws `"http"` (also `maxRedirects`,
+  `maxRetries`, `backoffMs`), `maxBytes` / `timeoutMs` 0 is the default and
+  `math.MAX_INT` none; the connect still gives up after `net`'s 30 s. Lint
+  L301 now reads `@deprecated` from module function docblocks
+  (`lint.ModuleDeprecations`). s3, webdav, oauth and rest moved off the
+  deprecated calls (`>=0.28.0`); rest's `withCA` / `withSkipVerify` write
+  `tlsOptions`. `oauth.Config`, `soap.Client` and `webdav.Client` keep
+  public `http.TlsOptions` fields until M30.25.
 
 **Requires:** none.
 
 #### M29.44 - one shape for a caller-set cap
 
-**Planned.** Three shapes for "the caller sets a cap" (stance review,
+**Done.** Three shapes for "the caller sets a cap" (stance review,
 2026-11-21): `archive.unpackWith(..., UnpackOptions)` where 0 is the default
 and a negative value means unlimited; `compress.unpack(..., maxBytes)` and
 `images.decode(..., maxPixels)` as positional optional ints that refuse
@@ -1215,12 +1481,22 @@ unlimited. The catalogue says a negative count throws.
 - `compress.unpackWith` / `images.decodeWith` with options; the positional
   forms deprecated. `archive`'s negative = unlimited and its `"tgz"` alias
   (two names for `"tar.gz"`) go.
+- `math.MAX_INT` / `math.MIN_INT` name the int
+  range, so "unlimited" reads `maxBytes: math.MAX_INT` (also the `net`,
+  `sql` and `http` options' "none"). `"tgz"` is deprecated (L301) and joins
+  M30.25, as do the positional `compress.unpack` / `images.decode` caps.
+
+- **As built.** `compress.unpackWith(..., UnpackOptions{maxBytes})`,
+  `images.decodeWith(..., DecodeOptions{maxPixels})`; the positional caps
+  are deprecated (L301) and keep refusing values below 1. `archive`'s
+  negative cap now throws (breaks `@deckyard/epub`, which passes -1); `"tgz"`
+  deprecated (L301 on a literal). The rule is a `conventions.md` row.
 
 **Requires:** none.
 
 #### M29.45 - timeouts: the shapes a wait may take
 
-**Planned.** "Bound this wait" has five shapes today: a separate
+**Done.** "Bound this wait" has five shapes today: a separate
 `xTimeout(ms)` function (`task`, `channel`), an optional trailing `timeoutMs`
 (`net.connect`, `readAll`, `readN`), stateful `setRead/WriteDeadline` (`net`,
 `serial`), an options field (`httpd`, `http`), and a global setter
@@ -1234,14 +1510,59 @@ unlimited. The catalogue says a negative count throws.
   `fs.watch` / `os.spawn` optional arguments to options structs.
 - Timeouts for `channel.select`, `task.waitAll` and `os.wait`, so no one
   spawns a waiter to bound them.
-- Decide `time.sleep(ms)` against `Duration`, and make negative or oversized
-  values throw everywhere (record `time.sleep(0)` returning at once).
+- **`time.sleep` keeps its `Duration`**, recorded in
+  `conventions.md`: a sleep is a length of time, not a bound on a wait, and
+  `Duration` is the type for lengths (the 155 calls in the workspace already
+  pass `time.fromMilliseconds` / `fromSeconds`). Negative or oversized values
+  throw everywhere; `time.sleep(0)` returns at once.
+
+- **As built (net).** `net.setIdleTimeout(conn, ms)`: every `readBytes` /
+  `readAll` / `readN` re-arms the read deadline before each underlying read,
+  so a stall throws `"timeout"` and a steady transfer is never cut; with
+  `setReadDeadline` the first to pass fires; `0` or `math.MAX_INT` clears;
+  `net.Conn` only. The trailing idle timeout of `readAll` / `readN` is
+  deprecated (L301, pointing to it). http, imap, redis and amqp set it.
+  `conventions.md` records the wait shapes.
+
+- `term.readByteTimeout` throws `"timeout"` when no byte arrives, and both
+  `readByte` and `readByteTimeout` throw `"closed"` at the end of input,
+  in 0.28.0 (a return value cannot be deprecated); `screen.j` moves with
+  it; named in the CHANGELOG.
+- New blocking-primitive timeouts, shaped like `task.waitTimeout`:
+  `channel.selectTimeout(chs, ms)`, `task.waitAllTimeout(ts, ms)`,
+  `os.waitTimeout(p, ms)` / `waitBytesTimeout`. Each throws `"timeout"` and
+  leaves the work running (the caller kills or waits again).
+- An `xTimeout(ms)`'s `ms` is the wait itself: `0` checks once (polls),
+  as `recvTimeout(ch, 0)` does today. `conventions.md` states both
+  meanings: an options field's `0` is its default, an `xTimeout`'s `0`
+  polls. Negative or oversized values throw everywhere.
+- `fs.watchWith(path, fs.WatchOptions{intervalMs})` and
+  `os.spawnWith(argv, os.SpawnOptions{stdout, stderr})`; the positional
+  interval and the options map are deprecated and join M30.25.
+
+- **As built (sql).** `sql.Options.queryTimeoutMs` per connection: 0
+  follows the process default (30 s, or what the deprecated
+  `setQueryTimeout` set), an explicit value wins, `math.MAX_INT` none,
+  negative throws. Transactions, statements and cursors use their
+  connection's.
+
+- **As built (the rest).** `term.readByte` / `readByteTimeout` throw
+  `"closed"` at end of input and `readByteTimeout` `"timeout"` (breaking);
+  `screen.j` maps them in a private `readRaw` (`>=0.28.0`).
+  `channel.selectTimeout`, `task.waitAllTimeout` (one deadline for the list,
+  nothing observed on timeout) and `os.waitTimeout` / `waitBytesTimeout`
+  throw `"timeout"`, leave the work running and wake on `task.cancel`. Every
+  xTimeout takes `ms` 0 (polls) to 9,223,372,036,854 and throws `"runtime"`
+  outside it (`term.readByteTimeout`'s 24 h cap raised to match).
+  `time.sleep(0)` returns at once, a negative Duration throws (breaking).
+  `fs.watchWith` and `os.spawnWith` (`mcp` uses it); `fs.watch`'s interval
+  and `os.spawn`'s map are deprecated (L301).
 
 **Requires:** M29.36, M29.37 for their parts.
 
 #### M29.46 - handles: one rule for use after close
 
-**Planned.** `net` throws `"closed"` for a closed handle; `fs`, `kv`,
+**Done.** `net` throws `"closed"` for a closed handle; `fs`, `kv`,
 `serial`, `sql`, `i2c` and `httpd` throw `"runtime"`, so `httpd.accept` after
 `shutdown` cannot be told from a failure the way `net.accept` can. And
 `close` is idempotent in `sql` and `kv` but throws on a second call in `fs`,
@@ -1254,11 +1575,36 @@ unlimited. The catalogue says a negative count throws.
 - `net.eof` (a 20 ms guess, named like the exact `fs.eof`) deprecated:
   an empty `readBytes` is the answer.
 
+- a second `close` of a handle does nothing,
+  everywhere (kind to `defer` and to cleanup that may run twice); any other
+  use after close throws `"closed"`.
+
+- **As built (`net.eof`).** Deprecated through libsig (L301); an empty
+  `readBytes` is the end of the stream. The rest of the entry is planned.
+
+- **As built (fs, kv, serial, i2c, spi, gpio, term, channel, crc, net,
+  httpd).** A second `close` / `restore` / `discard` / `shutdown` does
+  nothing; any other use after close throws `"closed"`, including `httpd`
+  `accept` after `shutdown`, a finished or double-answered request, and
+  `crc` after `finalize`. `kv.openFile` gives each opener its own handle, so a
+  double close keeps another opener's store.
+
+- **As built (sql, compress, hash).** A closed Connection, a closed or
+  exhausted Rows, a closed Statement (also once its Connection is closed), a
+  committed or rolled-back Tx, a finalized or discarded hash / compress
+  stream throw `"closed"`. `close`, `closeStmt`, `closeRows`, `discard` and
+  `rollback` of an ended Tx do nothing (so `defer sql.rollback($tx)` works
+  after a commit); a repeated `finalize` or `commit` throws `"closed"` (a
+  second commit would hide a rollback). An open Tx or Rows outlives
+  `sql.close` of its Connection (`database/sql` keeps the pinned
+  connection). sql's `"closed"` is a plain kinded error, so `"sql"` is
+  still always a `SqlError`.
+
 **Requires:** none.
 
 #### M29.47 - decoders: the same options and accessors
 
-**Planned.** `json.decodeWith(s, DecodeOptions{maxDepth, maxNodes})` lowers
+**Done.** `json.decodeWith(s, DecodeOptions{maxDepth, maxNodes})` lowers
 the caps; `toml`, `yaml`, `xml` and `asn1` have fixed caps only, and `xml`
 takes namespaces as a second positional map.
 
@@ -1270,12 +1616,28 @@ takes namespaces as a second positional map.
   returns their fields.
 - `toml.decode`'s messages get the `toml.decode:` prefix, the column, and
   "unexpected end of input" for EOF.
+- each library has its own `DecodeOptions` with
+  `json`'s fields (`maxDepth`, `maxNodes`; `xml` adds `namespaces`). A local
+  TOML value: `typeOf` reports `"local-datetime"` / `"local-date"` /
+  `"local-time"` (TOML 1.0's names), and `toml.asLocal(v[, ptr]) ->
+  toml.Local{year, month, day, hour, minute, second, nanosecond}` reads any
+  of them (parts the form lacks are 0); `asDatetime` reads only the offset
+  form. The two-argument `xml.decode` joins M30.25.
+
+- **As built.** One reader of the options, `doctree.ReadDecodeOptions`
+  (json uses it too). `toml.isDatetime` is also false for the local forms,
+  `asLocal` on an offset date-time throws naming `asDatetime`, and encode
+  keeps every form; `toml.set` with a `toml.Local` struct makes a map (only a
+  copied node keeps the local form). yaml's text pre-scan (depth 128) and
+  4 MiB input cap stay fixed: they guard yaml.v3 itself. An empty
+  `namespaces` map is none. The two-argument `xml.decode` is deprecated (L301
+  by argument count).
 
 **Requires:** none.
 
 #### M29.48 - second ways that remain
 
-**Planned.** Smaller duplicates from the stance review (2026-11-21), each
+**Done.** Smaller duplicates from the stance review (2026-11-21), each
 deprecated in favour of the one way, removed in 0.29.0:
 
 - `stats.multipleRegression` -> `ml.linearRegression` (same numbers; stats
@@ -1291,11 +1653,34 @@ deprecated in favour of the one way, removed in 0.29.0:
 - `decimal.toString` -> `convert.toString` / `%v`; `images.rgba` -> the
   `images.Color` literal.
 
+- `httpd.Options` gains `certPem` / `keyPem`
+  (bytes, as `listenTLS` takes them; set both or neither) and `etag` (bool,
+  for `serveFile` / `serveDir`), so `listen` / `listenWith` cover TLS and
+  ETags. All replaced forms join M30.25.
+
+- **As built (stats, convert, os, decimal).** `stats.multipleRegression`
+  (equal to `ml.linearRegression` to 1e-9), `os.hasFlag` / `os.flag` (the
+  `args` module), `decimal.toString` (`convert.toString` / `%v`) are L301.
+  `convert.toInt(float)` keeps truncating with L301 on a statically float
+  argument other than an integral literal; `math.trunc` / `round` / `floor`
+  / `ceil` return the int.
+
+- **As built (httpd, gpio module).** `httpd.Options` gains `certPem` /
+  `keyPem` (both or neither; `listenWith` serves TLS) and `etag`;
+  `listenTLS`, `listenTLSWith`, `serveFileEtag`, `serveDirEtag` deprecated.
+  The `gpio` module is deprecated (module `@deprecated`, a migration table in
+  its guide) for the library's `Chip`; the library has no `useChip`-style
+  selection by label (a `gpio.label(chip)` would close it).
+
+- **As built (images).** `images.rgba` is L301 (the `images.Color{r, g, b,
+  a}` literal); `images.rgb` stays: a literal's omitted `a` is 0, so `rgb`
+  is the short opaque form, not a duplicate.
+
 **Requires:** none.
 
 #### M29.49 - hardware libraries: errors, caps and handles alike
 
-**Planned.**
+**Done.**
 
 - `serial` with parity on reads a byte with a parity error as `0x00`, which a
   real NUL also is: throw a `"serial"` error (or report it with `PARMRK`).
@@ -1309,22 +1694,59 @@ deprecated in favour of the one way, removed in 0.29.0:
 - `serial.write` returns `null` like `net.writeBytes` and `fs.writeBytes`
   (the count is always the length).
 
+- a read that meets a parity error throws kind
+  `"serial"` naming the byte offset; the bytes before it come back from the
+  next read. `spi.open` + `configure` and the process-wide `gpio.chip` /
+  `JENNIFER_GPIO_CHIP` are deprecated and join M30.25.
+
+- **As built.** With parity on, the port sets `INPCK|PARMRK` and decodes
+  the marks; a marked byte (parity or framing error, a break) throws
+  `"serial"` naming its offset, the bytes before it come back from the next
+  read (`"serial"` is serial's data kind). i2c `read` / `write` / `readReg` /
+  `writeReg` throw `"limit"` past 8192 bytes. `spi.openWith(path,
+  spi.Options{mode, speedHz, bitsPerWord})`, `spi.open` its zero form,
+  `configure` deprecated. `gpio.open(path) -> gpio.Chip` (checked with
+  `GPIO_GET_CHIPINFO`), chip-first `setup` / `read` / `write` / `release`,
+  `gpio.close`; `gpio.chip`, `JENNIFER_GPIO_CHIP` and the pin-only forms
+  deprecated. `serial.write` returns null. No hardware here: parity is
+  tested on fed byte sequences and a pty, gpio and spi through ioctl stubs.
+
 **Requires:** none.
 
 #### M29.50 - outside text is validated UTF-8
 
-**Planned.** The catalogue returns outside text as a string only after UTF-8
+**Done.** The catalogue returns outside text as a string only after UTF-8
 validation (as `fs.readString` and `httpd` do). `os.getEnv`, `os.ARGS`,
 `fs.list` (and `walk`, `readlink`, `realpath`) and `sql.asString` pass
 invalid bytes through (verified with `\xff` names and values). Validate,
 naming the byte offset, and add bytes forms where a caller needs the raw
 value (`os.getEnvBytes`, `sql.asBytes` exists).
 
+- reading invalid text throws (kind `"os"` /
+  `"fs"`, naming the entry and the byte offset), and raw forms exist for a
+  caller that must handle any name: `os.argsBytes()`, `os.getEnvBytes`,
+  `fs.listBytes` / `walkBytes` (names as `bytes`). `os.ARGS` throws when read
+  if an argument is not UTF-8.
+
+- **As built (sql).** `sql.asString` on invalid UTF-8 throws `SqlError`
+  (kind `"sql"`) naming the column and byte offset; `asBytes` is the raw
+  form.
+
+- **As built (os).** `os.getEnv` throws `"os"` naming the variable and the
+  byte offset; reading `os.ARGS` throws on every read site through
+  `Interpreter.RegisterNamespacedConstError` (a program that never reads it
+  is unaffected); `os.getEnvBytes` (unset: empty) and `os.argsBytes()`.
+
+- **As built (fs).** `fs.list`, `walk`, `readlink`, `realpath` throw
+  `"fs"` for a name that is not UTF-8, naming the entry and byte offset;
+  `fs.listBytes -> list of bytes`, `fs.walkBytes -> list of fs.StatBytes`
+  (`path as bytes`); their path argument is a `string`.
+
 **Requires:** none.
 
 #### M29.51 - `crypto`: names and types that say what they do
 
-**Planned.**
+**Done.**
 
 - `"rsa-sha256"` / `384` / `512` in `sign` / `verify` hide PKCS#1 v1.5
   padding, while `wrap` spells `"rsa-oaep-sha256"`: rename to
@@ -1339,17 +1761,44 @@ value (`os.getEnvBytes`, `sql.asBytes` exists).
 - Weak algorithms are offered by name for interop, never as a default, and
   tagged "(weak)" in every unknown-name list, as `hash` tags md5 / sha1;
   record the rule in `design-decisions.md`.
+- Passwords are `bytes` everywhere: `hashPassword` / `verifyPassword` take
+  the password as `bytes`, like `deriveKey`; a `string` password keeps
+  working until 0.29.0 with lint L301 (by the argument's static type),
+  then joins M30.25. `verifyPassword`'s stored hash stays a `string`.
+- `jwkToPem` returns `bytes` in 0.28.0 (a return type cannot be
+  deprecated); its two bundled callers move with it; named in the
+  CHANGELOG.
+- `hkdf` / `pbkdf2` in `deriveKey` take every `hash` name except `md5`;
+  `sha1` stays for interop (legacy PBKDF2 stores) and is tagged "(weak)".
+- `"rsa-pss-sha256"` / `384` / `512` are added to `sign` / `verify` with
+  the rename. The old `"rsa-sha*"` names keep working until 0.29.0, with
+  L301 on a literal algorithm argument, then join M30.25.
+
+- **As built.** `sign` / `verify` take `"rsa-pkcs1-sha256"` / `384` / `512`
+  and `"rsa-pss-sha256"` / `384` / `512` (MGF1 with the message hash, salt
+  as long as the hash; `verify` takes no other salt length). `"rsa-sha*"`
+  runs as `rsa-pkcs1-*` (L301 on a literal). `hashPassword` / `verifyPassword`
+  take a `bytes` password; a `string` one counts as its UTF-8 bytes (L301 by
+  static type). `jwkToPem` returns `bytes`. `deriveKey`'s HKDF / PBKDF2 take
+  sha1, sha256/384/512, sha3-224/256/384/512, blake2b-256/384/512 and
+  blake2s-256; `-md5` is refused by name. Unknown-name lists tag `"(weak)"`
+  (sha1 KDFs, `rsa-oaep-sha1`, `aes-ecb-*`); the rule is a section in
+  `design-decisions.md`. `jwt` gained `PS256` / `PS384` / `PS512`; jwt and
+  acme need `>=0.28.0`. Checked against RFC 5869, RFC 6070 and RFC 7914
+  vectors.
 
 **Requires:** none.
 
 #### M29.52 - small consistency fixes from the stance review
 
-**Planned.** Each small, each found 2026-11-21:
+**Done.** Each small, each found 2026-11-21:
 
 - `strings.replace` with an empty `old` inserts between every rune; refuse
   it, as `count` and `split` do.
 - `regex.find` returns a sentinel `Match` (`start == -1`) while `lists.find`
-  throws on no match: align, or record why.
+  throws on no match. **Record why** in `conventions.md`: a sentinel
+  where the result type has one (`regex.find`'s `Match`, `indexOf`'s -1), a
+  throw where it cannot (`lists.find` returns an element of any type).
 - `strings` and `convert` messages without the `lib.fn:` prefix (`count():`,
   `toInt("abc"):`) get it.
 - `intl`: one locale-normalisation rule for `tr` / `setLocale` /
@@ -1357,14 +1806,37 @@ value (`os.getEnvBytes`, `sql.asBytes` exists).
   `"runtime"`.
 - `meta.hasCapability` throws on an unknown name and documents `"sql"`.
 - `time` names: `fromSeconds` (a Duration) beside `fromUnix` (a Time), and
-  `Millis` / `Milliseconds` in one API; one spelling each.
+  `Millis` / `Milliseconds` in one API. **`Milliseconds`
+  everywhere**: add `fromUnixMilliseconds` / `unixMilliseconds`, deprecate
+  `fromUnixMillis` / `unixMillis` (L301, removed in 0.29.0). `fromUnix` and
+  `fromSeconds` stay: the `Unix` prefix marks the `Time` side.
 - `kv.openFile` loses writes across processes silently where `flatdb.save`
-  refuses a lost update: detect a changed file on flush, or record it.
+  refuses a lost update. **Detect and refuse**: a flush checks the
+  file is unchanged since it was read and throws kind `"kv"` if another
+  writer changed it, as `flatdb` does.
 - `httpd.serveDir` follows a symlink out of `root`: contain the resolved path
   by default, `Options.followSymlinks` to opt in.
 - `%f|prec` rounds the binary float while `intl.formatNumber` rounds the
-  shortest decimal (`1002.675`: `1002.67` against `1,002.68`): align, or
-  document the difference.
+  shortest decimal (`1002.675`: `1002.67` against `1,002.68`). **`printf`
+  rounds the decimal**: `%f|prec` rounds the shortest round-trip
+  decimal, as `intl` and `decimal` do (`1002.68`); only values on a binary
+  rounding edge print differently.
+
+- **As built.** `strings.replace` with an empty `old` throws; every
+  `strings` / `convert` message starts `strings.fn:` / `convert.fn:`.
+  `intl` normalises a tag one way (`_` is `-`, `zh-Hant-TW` case; a malformed
+  tag throws) in `load`, `setLocale` and `formatNumber`; `setLocale` needs a
+  loaded catalog for the tag or its language; misuse is `"runtime"` (kind
+  `"intl"` is gone). `meta.hasCapability` throws on a name other than
+  `net` / `exec` / `sql`. `time.fromUnixMilliseconds` / `unixMilliseconds`
+  added, the `Millis` names deprecated (L301, removed in 0.29.0);
+  `fromUnixNanos` / `unixNanos` keep their abbreviation. A `kv` flush hashes
+  the file under `<path>.lock` and throws `"kv"` if another writer changed,
+  deleted or created it since this store read or wrote it (a lock held past
+  15 s: `"timeout"`). `httpd.serveDir` opens through an `os.Root` on `root`,
+  so a symlink out of it is 404; `Options.followSymlinks` follows it.
+  `%f|prec` (and `%a`, `sci=`) round the shortest decimal half to even, as
+  `intl` and `decimal` do, which also moves decimal ties (`2.345` -> `2.34`).
 
 **Requires:** none.
 
@@ -1435,7 +1907,7 @@ rather than being truncated):
 **Planned.** M29.35 removes builtins that the decks' latest releases still
 call, and a consumer installs a release, not `main`: a program using one of
 them stops working the day 0.28.0 is released. `main` of every deck was
-migrated on 2026-11-23 (no removed call left, floor `>=0.27.0`); the releases
+migrated (no removed call left, floor `>=0.27.0`); the releases
 were not. 57 decks (11 `@jennifer`, 1 `@mplx`, 45 `@deckyard`) have a removed call
 in code, not only in comments, in their newest `N.N.N` tag.
 
@@ -1536,6 +2008,24 @@ eleven `@jennifer` decks in the table make their "Next" release as
 
 **Requires:** M29.35.
 
+#### M29.56 - `encoding` Mac OS Roman
+
+**Done.** `encoding` had no codec for Mac OS Roman, the character set of
+classic Mac OS text, PDF's `MacRomanEncoding`, TrueType platform-1 name
+records and code page 10000 in older Office files. It is registered with
+IANA (`macintosh`) and in the WHATWG Encoding Standard, so it meets the
+registered-sets rule in `design-decisions.md`.
+
+- **As built.** `encoding.encode` / `decode` with `"macintosh"`, generated
+  like the Windows codecs from Apple's `ROMAN.TXT` (Unicode Consortium
+  mappings). The file leaves out the controls `0x00..0x1F` and `0x7F`,
+  which Mac OS Roman uses unchanged; the generator fills them in as
+  identity, so all 256 bytes are defined and round-trip. `0xDB` is the euro
+  sign (Apple's mapping since Mac OS 8.5, as WHATWG has it), `0xF0` the
+  Apple logo `U+F8FF`. Only the exact name, no `mac` alias. Other Mac code
+  pages (`x-mac-cyrillic` and the like) are added only when a format needs
+  one. Tests: `macintosh_test.go`.
+
 ## M30 - 0.29.0
 
 The removal of the deprecated bundled modules, copy elision, streaming and
@@ -1567,7 +2057,7 @@ immutable source is identical to a copy).
   way to build a changed copy of a parameter the function never writes,
   deep-copies every field it reads, because `literalElementValue` copies all
   but fresh literals and moved variables. A row cursor carrying a 17,500-string
-  table paid 1.2 ms a row for it (`@deckyard/sheets`, 2026-11-23), and moved
+  table paid 1.2 ms a row for it (`@deckyard/sheets`), and moved
   its table into `bytes`, whose copy is one block move. Reading a field off a
   borrowed parameter into a literal that is then returned has one live
   reference, like the return hand-off above. (Profiling it needs M29.53.)
@@ -2186,7 +2676,7 @@ comes back:
 - `jennifer lint`'s call checks (M28.9: L110 argument type, L111 binding
   type) skip every call to a user function;
 - `match` cannot destructure a call result (M29.28 keeps it refused);
-- typed `func` values (one of M29.16's options) and generic functions
+- typed `func` values (M29.16, now part of this entry) and generic functions
   (DRAFT#33) have no way to state the result;
 - the bundled modules state 1,228 return types in `@return {type}` tags that
   nothing checks.
@@ -2210,6 +2700,11 @@ comes back:
   `@return` tags.
 - One type only: several values still travel in a struct (multiple returns
   stay rejected, [rejected.md](technical/rejected.md)).
+- **Typed `func` values** (from M29.16): a parameter typed with a signature,
+  `guard as func(string, json.Value) as bool`, is checked when the value is
+  called; a result of another type throws a kind of its own (not
+  `"runtime"`), so a module tells a callback's wrong result from a fault
+  inside it. `@deckyard/fsm` then drops its source-position check.
 - **Optional for now.** Whether a return type becomes required is decided at
   the 1.0.0 cut, once the modules and decks are typed: required is a
   breaking change for every untyped function.
@@ -2221,8 +2716,8 @@ comes back:
   boundary, recursion, a `func` value of a typed function, lint on typed and
   untyped calls.
 
-**Requires:** none. Unblocks M29.16's typed-`func` option and call results
-in M29.28; DRAFT#33 uses the same spelling for `as T`.
+**Requires:** none. Unblocks call results in M29.28; DRAFT#33 uses the same
+spelling for `as T`.
 
 #### M30.22 - a sampling profiler
 
@@ -2323,10 +2818,83 @@ Not this milestone: the public `pkg/` facade (`DRAFT#1` step 2, after
 
 **Requires:** M30.3, M30.5, M30.6, M29.14, M30.8, M28.37, which reshape
 `Value` and the evaluator; land them first so the move does not conflict
-with them. Moved from M29 (2026-11-23): four of them are M30 entries, so it
+with them. Moved from M29: four of them are M30 entries, so it
 cannot land in 0.28.0.
 
+#### M30.25 - remove what 0.28.0 deprecated
+
+**Planned.** Every name and call shape 0.28.0 deprecates (lint L301 reports
+each, naming the replacement) is removed, moving it to L302:
+
+- `time.fromUnixMillis` / `unixMillis` (M29.52);
+- `net.connect(addr, ms)`, `connectTLS(..., ms)`, `startTLS(..., ms)`,
+  `readAll` / `readN` with a trailing timeout (`setIdleTimeout` instead),
+  `net.eof` (M29.37, M29.45, M29.46);
+- the `sql` driver aliases `mariadb` / `postgresql` and `setQueryTimeout`
+  (M29.36);
+- `http.requestWith`, `requestTls`, `requestWithTls`, `requestRawBody`,
+  `requestRawBodyTls`, `requestBytes`, `requestWithBytes`, `Options.tls` and
+  `http.TlsOptions` (M29.43), moving the public `tls` fields of
+  `oauth.Config`, `soap.Client` and `webdav.Client` to `net.TLSOptions`;
+- `crypto`'s `"rsa-sha*"` names and `string` passwords (M29.51);
+- the two-argument `xml.decode` (M29.47), the positional caps of
+  `compress.unpack` / `images.decode` and `archive`'s `"tgz"` (M29.44);
+- `ml.free` and the trailing ml hyper-parameters (M29.39); the frozen v2
+  suite of `examples/benchmark.j` calls `ml.free` inside its timed code,
+  so removing it needs a decision there (keep a no-op until the suite is
+  retired, or end the v2 series);
+  `stats.multipleRegression`, `convert.toInt(float)` truncation (then only
+  an integral float), `os.hasFlag` / `os.flag`, `decimal.toString`
+  (M29.48);
+- `httpd.listenTLS` / `listenTLSWith` / `serveFileEtag` / `serveDirEtag`,
+  the `gpio` module (M29.48); `spi.configure`, `gpio.chip`,
+  `JENNIFER_GPIO_CHIP` and the pin-only `gpio` forms (M29.49);
+- `images.rgba` (M29.48);
+- `fs.watch(path, intervalMs)` and the `os.spawn` options map (M29.45).
+
+Before the tag, the decks and apps are checked for each removed name, as
+M29.55 did for 0.28.0.
+
+**Requires:** the deprecations above, shipped in 0.28.0.
+
 ---
+
+#### M30.26 - `crypto` RC4 for interop
+
+**Planned.** PDF's standard security handler revisions 2 to 4 encrypt with
+RC4, and many PDFs are encrypted with an empty user password only to carry
+permissions, so a PDF reader (the `pdfread` deck idea in `decks.md`) cannot
+read their text without it. `crypto` has no RC4.
+
+- `"rc4"` in `crypto.blockEncrypt` / `blockDecrypt`, beside `"aes-ctr"`: a
+  stream cipher, so both directions are the same keystream XOR. Key 1 to 256
+  bytes (PDF uses 5 to 16), no IV (an `iv` argument is an error), any data
+  length.
+- Tagged "(weak)" in the docs and the algorithm table, like `md5` and `sha1`:
+  for reading and writing legacy formats only; new encryption uses AES-GCM or
+  the `sealbox` deck.
+- Go's `crypto/rc4` (still in the standard library; check the TinyGo build).
+- Tests: the RFC 6229 vectors (40-bit to 256-bit keys, offsets 0 and 1536),
+  encrypt then decrypt round trip, key length 0 and 257 refused.
+
+#### M30.27 - `compress` LZW as PDF and TIFF use it
+
+**Planned.** PDF's `LZWDecode` filter (common in older files) and TIFF's LZW
+compression use the variable-width MSB-first LZW with "early change": the code
+width grows one code early. Go's `compress/lzw` has no early-change mode, so
+it reads neither.
+
+- `"lzw"` in `compress.unpack` / `unpackWith` / `pack`, MSB-first, 8-bit
+  literals, clear code 256, end code 257, codes up to 12 bits. `pack` writes
+  the early-change form.
+- `earlyChange` in `compress.UnpackOptions` (`true` by default, as PDF's
+  `/EarlyChange 1` and TIFF), `false` for the late-change variant.
+- The output cap and `"limit"` of `unpackWith` apply; a code past the table, a
+  missing end code or bytes after it are an error of kind `"compress"`.
+- Implemented in Go in `internal/lib/compress` (no dependency); both builds.
+- Tests: PDF 32000-1 section 7.4.4.2's example, TIFF 6.0 sample strips,
+  round trips at the 9 / 10 / 11 / 12-bit boundaries with both settings, a
+  table-full stream without a clear code, the cap.
 
 ## M32 - project governance, licensing, and contribution policy
 

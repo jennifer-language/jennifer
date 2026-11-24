@@ -81,7 +81,7 @@ dimension problem and a numerically undefined result are both catchable errors.
 | A non-square matrix where one is required (`determinant` / `inverse` / `solve`), a non-rectangular matrix, a `cross` on a non-3 vector, an empty vector or matrix | Positioned error |
 | A singular matrix in `inverse` / `solve` (no inverse, no unique solution) | Positioned error; `determinant` returns `0`, its correct value. This includes a matrix singular up to rounding, such as `[[1,2,3],[4,5,6],[7,8,9]]`: a pivot no larger than `n * 2.2e-16` times the smaller of its row's and its column's largest entry counts as zero. `determinant` does not apply that test and returns the rounding residue. |
 | Input magnitudes near the float64 ceiling (`~1.8e308`) pushing an intermediate to `+/-Inf` or `NaN` | The non-finite result is rejected, so a `NaN` never escapes into the type system |
-| A vector or matrix over 1,048,576 elements (65,536 on `jennifer-tiny`): a constructor with an oversized dimension (`identity(100000)`, `zeros(100000, 100000)`), an oversized input, or a `matmul` result over the limit (`linalg.matmul: result too large (MxP exceeds the N-element limit)`, such as a long column times a long row) | Kind `"limit"`. The ceiling also bounds the work of the `O(n^3)` routines (`matmul` / `inverse` / `solve`). |
+| A vector or matrix over 4,194,304 elements (262,144 on `jennifer-tiny`): a constructor with an oversized dimension (`identity(100000)`, `zeros(100000, 100000)`), an oversized input, or a `matmul` result over the limit (`linalg.matmul: result too large (MxP exceeds the N-element limit)`, such as a long column times a long row) | Kind `"limit"`. The ceiling also bounds the work of the `O(n^3)` routines (`matmul` / `inverse` / `solve`). |
 
 ```jennifer
 use io;

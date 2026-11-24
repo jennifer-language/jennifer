@@ -10,8 +10,9 @@ library prefix links to the per-library doc, which is authoritative.
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | [`archive`](archive.md)`.pack(format, entries)`      | Bundle a `list of archive.Entry` into `bytes`; `format` `"tar"`/`"zip"`/`"tar.gz"`.                                              |
 | [`archive`](archive.md)`.unpack(format, b)`          | Read a bundle back into a `list of archive.Entry` (256 MiB / 65536-entry caps; over a cap raises `Error{kind:"limit"}`).            |
-| [`archive`](archive.md)`.unpackWith(format, b, opts)`| `unpack` with caller caps (`archive.UnpackOptions{maxTotalBytes, maxEntryBytes, maxEntries, skipSpecial}`; `0`=default, `<0`=unlimited). |
+| [`archive`](archive.md)`.unpackWith(format, b, opts)`| `unpack` with caller caps (`archive.UnpackOptions{maxTotalBytes, maxEntryBytes, maxEntries, skipSpecial}`; `0` = default, `math.MAX_INT` = unlimited, negative throws). |
 | [`asn1`](asn1.md)`.decode(b)` / `.encode(v)`         | Parse BER `bytes` into an opaque `asn1.Value` / serialise one back to DER `bytes`.                                                 |
+| [`asn1`](asn1.md)`.decodeWith(b, o)` | `decode` under lower caps (`asn1.DecodeOptions{maxDepth, maxNodes}`; `0` = default). |
 | [`asn1`](asn1.md)`.typeOf/tagClass/tagNumber/isConstructed(v[, ptr])` | Element type name / class / numeric tag / constructed-ness; pointer tokens are child indices (`"/0/2"`).       |
 | [`asn1`](asn1.md)`.get(v[, ptr])` / `.has(v, ptr)` / `.length(v[, ptr])` | Sub-element as `asn1.Value` / whether a pointer resolves / child count of a constructed node.               |
 | [`asn1`](asn1.md)`.asInt/asBool/asString/asBytes/asOid/isNull(v[, ptr])` | Read a leaf: integer/enum, boolean, string type or octets, raw octets, dotted OID, or whether `NULL`.       |
@@ -35,38 +36,39 @@ library prefix links to the per-library doc, which is authoritative.
 | [`channel`](channel.md)`.send(ch, value)`            | Deep-copy `value` in and send (blocks per capacity); send on a closed channel is a catchable error.                                 |
 | [`channel`](channel.md)`.recv(ch)`                   | Block and return the next value; throws (catchable) on a closed and drained channel.                                                |
 | [`channel`](channel.md)`.recvTimeout(ch, ms)`        | `recv` waiting at most `ms`; else `Error{kind: "timeout"}`, nothing taken; `0` polls.                                               |
-| [`channel`](channel.md)`.close(ch)`                  | Close the channel; double-close is a catchable error. Buffered values still drain.                                                  |
+| [`channel`](channel.md)`.close(ch)` | Close the channel; a second close does nothing. Buffered values still drain. |
 | [`channel`](channel.md)`.select(chs)`                | Fan-in: next value from any open channel; throws when all are closed and drained.                                                   |
+| [`channel`](channel.md)`.selectTimeout(chs, ms)` | `select` waiting at most `ms`; else `Error{kind: "timeout"}`, nothing taken; `0` polls. |
 | [`channel`](channel.md)`.len(ch)` / `.capacity(ch)`  | Buffered value count / buffer capacity.                                                                                             |
-| [`compress`](compress.md)`.discard(stream)`          | Drop a streaming compressor without returning output; releases its state.                                                          |
+| [`compress`](compress.md)`.discard(stream)`          | Drop a streaming compressor without returning output; releases its state. A no-op on a finalized or discarded stream. |
 | [`compress`](compress.md)`.finalize(stream)`         | Close a streaming compressor; returns all compressed `bytes`.                                                                      |
 | [`compress`](compress.md)`.pack(algo, b[, level])`  | Compress `bytes`; `algo` `"gzip"`/`"zlib"`/`"deflate"`, optional level `"fast"`/`"default"`/`"best"`.                                |
 | [`compress`](compress.md)`.stream(algo [, level])`   | Start a streaming compressor -> `compress.Stream`.                                                                                 |
-| [`compress`](compress.md)`.unpack(algo, b[, maxBytes])` | Decompress `bytes` with `algo`; output past `maxBytes` (default 256 MiB) raises `Error{kind:"limit"}`.                        |
+| [`compress`](compress.md)`.unpack(algo, b)` / `.unpackWith(algo, b, o)` | Decompress `bytes`; output past 256 MiB, or `compress.UnpackOptions{maxBytes}` (`0` = default, `math.MAX_INT` = none), raises `Error{kind:"limit"}`. zlib / deflate refuse trailing bytes; gzip reads every member. |
 | [`compress`](compress.md)`.update(stream, b)`        | Feed one chunk into a streaming compressor.                                                                                        |
 | [`convert`](convert.md)`.fromCodepoint(n)`            | One-rune string for Unicode code point `n` (whole range, 1-4 UTF-8 bytes); errors on out-of-range / surrogate.                      |
 | [`convert`](convert.md)`.toBool(v)`                   | Canonical conversion to `bool` (`0`/`1`, `0.0`/`1.0`, `"true"`/`"false"`).                                                          |
 | [`convert`](convert.md)`.toCodepoint(char)`           | Unicode code point (int) of a one-rune string; errors unless exactly one code point (not a grapheme cluster).                       |
 | [`convert`](convert.md)`.toFloat(v)`                  | Convert to float (int→float, float identity, string parses, bool→1.0/0.0).                                                          |
-| [`convert`](convert.md)`.toInt(v [, radix])`          | Convert to int (float truncates, string parses, bool→1/0); optional `radix` 2/8/10/16 parses a string's bare digits (strip any `0x`/`0o`/`0b` prefix first). |
+| [`convert`](convert.md)`.toInt(v [, radix])`          | Convert to int (string parses, bool→1/0; a float truncates, deprecated: `math.trunc` / `round` / `floor` / `ceil` return the int); optional `radix` 2/8/10/16 for a string of bare digits. |
 | [`convert`](convert.md)`.toString(v)`                 | Convert to string (always succeeds; uses the value's display form).                                                                 |
 | [`convert`](convert.md)`.typeOf(v)`                   | Runtime kind as string (`"int"`, `"float"`, `"string"`, `"bool"`, `"null"`, `"list"`, `"map"`, `"object"`).                         |
 | [`convert`](convert.md)`.objectType(v)`               | Specific registered name of an opaque object (e.g. `"json.Value"`); errors on a non-object.                                         |
 | [`crc`](crc.md)`.compute(algo, b)`                    | One-shot checksum. `algo` is `"crc32"` or `"crc64"`. Returns big-endian bytes (4 or 8).                                             |
-| [`crc`](crc.md)`.discard($s)`                         | Drop a `crc.Stream` without computing its checksum; releases its state.                                                             |
-| [`crc`](crc.md)`.finalize($s)`                        | Final checksum as big-endian bytes; consumes the handle.                                                                            |
+| [`crc`](crc.md)`.discard($s)` | Drop a `crc.Stream` without computing its checksum; on a finished stream it does nothing. |
+| [`crc`](crc.md)`.finalize($s)`                        | Final checksum as big-endian bytes; consumes the handle (later use: kind `"closed"`).                                                                            |
 | [`crc`](crc.md)`.stream(algo)`                        | Allocate a `crc.Stream` for `algo`; feed chunks via `crc.update` then close with `crc.finalize`.                                    |
 | [`crc`](crc.md)`.update($s, $bytes)`                  | Feed one chunk into a `crc.Stream` (mutates by side effect).                                                                        |
-| [`crypto`](crypto.md)`.deriveKey(algo, secret, salt, length, crypto.KdfParams)` | Every key derivation: `"hkdf-sha256"` (`info`), `"pbkdf2-sha256"` (`iterations`), `"argon2id"` (`time`, `memoryKiB`, `threads`), `"scrypt"` (`n`, `r`, `p`); no defaults. |
+| [`crypto`](crypto.md)`.deriveKey(algo, secret, salt, length, crypto.KdfParams)` | Every key derivation: `"hkdf-<hash>"` (`info`), `"pbkdf2-<hash>"` (`iterations`), `"argon2id"` (`time`, `memoryKiB`, `threads`), `"scrypt"` (`n`, `r`, `p`); no defaults. |
 | [`crypto`](crypto.md)`.encrypt(algo, plaintext, key, nonce, aad)` / `.decrypt(algo, box, key, nonce, aad)` | Authenticated encryption, `"aes-gcm"` (key 16/24/32 bytes), `"chacha20-poly1305"` (key 32), both nonce 12, or `"xchacha20-poly1305"` (key 32, nonce 24) (never reuse one under a key), the 16-byte tag appended. A wrong key / nonce / aad or tampered box is an error. |
 | [`crypto`](crypto.md)`.blockEncrypt(algo, data, key, iv)` / `.blockDecrypt(algo, data, key, iv)` | Block modes with no MAC, for interop: `"aes-ecb-nopad"`/`"aes-ecb-pkcs7"`/`"aes-cbc-nopad"`/`"aes-cbc-pkcs7"`/`"aes-ctr"`/`"aes-cfb"`; `iv` 16 bytes, `null` for ECB. |
-| [`crypto`](crypto.md)`.sign(algo, msg, privateKey)` / `.verify(algo, msg, sig, publicKey)` | `"ed25519"` (raw keys), `"rsa-sha256/384/512"` (PKCS#1 v1.5, PEM), `"ecdsa-sha256/384/512"` (JOSE R\|\|S, PEM). `verify` -> `bool`. RSA / ECDSA default binary only. |
+| [`crypto`](crypto.md)`.sign(algo, msg, privateKey)` / `.verify(algo, msg, sig, publicKey)` | `"ed25519"` (raw keys), `"rsa-pkcs1-sha256/384/512"` (PKCS#1 v1.5, PEM), `"rsa-pss-sha256/384/512"` (PSS, salt = hash length, PEM); `"rsa-sha*"` deprecated, `"ecdsa-sha256/384/512"` (JOSE R\|\|S, PEM). `verify` -> `bool`. RSA / ECDSA default binary only. |
 | [`crypto`](crypto.md)`.keypair(algo)` / `.publicKey(algo, privateKey)` | `crypto.Keypair{public, private}` for `"ed25519"`, `"x25519"`, `"mlkem768"` (raw bytes), `"rsa2048/3072/4096"`, `"p256"/"p384"/"p521"` (PEM: PKCS#8 / SEC1 private, PKIX public). |
 | [`crypto`](crypto.md)`.agree("x25519", privateKey, peerPublic)` | X25519 shared secret (RFC 7748); run it through HKDF (`deriveKey`). A low-order peer key is an error. |
 | [`crypto`](crypto.md)`.encapsulate("mlkem768", publicKey)` / `.decapsulate("mlkem768", ct, privateKey)` | Post-quantum KEM (ML-KEM-768): `crypto.Encapsulation{ciphertext, sharedSecret}` / the 32-byte secret. Default binary only. |
 | [`crypto`](crypto.md)`.wrap(algo, plaintext, publicKey)` / `.unwrap(algo, ct, privateKey)` | RSAES-OAEP key wrapping, `"rsa-oaep-sha256"` / `"rsa-oaep-sha1"` with PEM keys (default binary only), or `"nacl-sealedbox"` with raw X25519 keys (a sealed box anyone can make with the public key). |
-| [`crypto`](crypto.md)`.hashPassword(algo, password)` / `.verifyPassword(password, hash)`| Store a password: a self-describing hash string (`"argon2id"`, `"bcrypt"`, `"scrypt"`, fresh salt) / check one in constant time; parameters past the caps are `"limit"`.|
-| [`crypto`](crypto.md)`.jwkPublic($privPem)` / `.jwkToPem($jwkJson)` / `.csr($privPem, domains)` | Canonical public JWK JSON (RFC 7638; SHA-256 it for the thumbprint); the inverse `jwkToPem` (public JWK -> `PUBLIC KEY` PEM for `crypto.verify`, so a JWKS `kid` resolves to a key); DER PKCS#10 CSR over a `list of string` of domains. For ACME / JWT. **Default binary only.** |
+| [`crypto`](crypto.md)`.hashPassword(algo, password)` / `.verifyPassword(password, hash)`| Store a password: a self-describing hash string (`"argon2id"`, `"bcrypt"`, `"scrypt"`, fresh salt) / check one in constant time; parameters past the caps are `"limit"`; `password` is `bytes` (`encoding.encode("utf-8", s)`; a string is deprecated) |
+| [`crypto`](crypto.md)`.jwkPublic($privPem)` / `.jwkToPem($jwkJson)` / `.csr($privPem, domains)` | Canonical public JWK JSON (RFC 7638; SHA-256 it for the thumbprint); the inverse `jwkToPem` (public JWK -> `PUBLIC KEY` PEM `bytes` for `crypto.verify`, so a JWKS `kid` resolves to a key); DER PKCS#10 CSR over a `list of string` of domains. For ACME / JWT. **Default binary only.** |
 | [`crypto`](crypto.md)`.mtweiKeygen()`                 | A client EC-SRP keypair (`crypto.Keypair`: 32-byte `private`, 33-byte `public`) for MikroTik MAC-Telnet login.                       |
 | [`crypto`](crypto.md)`.mtweiId(user, password, salt)` | The 32-byte EC-SRP validator from the credentials and the router's 16-byte salt.                                                    |
 | [`crypto`](crypto.md)`.mtweiClientKey(private, serverKey, clientKey, validator)` | The 32-byte EC-SRP login proof (RouterOS 6.43+/v7 MAC-Telnet).                                          |
@@ -78,7 +80,8 @@ library prefix links to the per-library doc, which is authoritative.
 | [`decimal`](decimal.md)`.round(d, scale[, mode])`    | Exactly `scale` places; modes `"half-even"` (default) / `"half-up"` / `"half-down"` / `"up"` / `"down"` / `"ceiling"` / `"floor"`. |
 | [`decimal`](decimal.md)`.compare(a, b)` / `.sign(d)` / `.scale(d)` / `.isInteger(d)` | Ordering (-1 / 0 / 1), sign, digits after the point, no fractional part. |
 | [`decimal`](decimal.md)`.neg` / `.abs` / `.normalize` / `.pow(d, n)` / `.sum(xs)` | Negate, absolute value, drop trailing zeros, exact integer power, sum of a list. |
-| [`decimal`](decimal.md)`.toString(d)` / `.toInt(d)` / `.toFloat(d)` | Plain text (as `%v`); an exact `int` (errors on a fraction / overflow); the nearest `float`. |
+| [`decimal`](decimal.md)`.toInt(d)` / `.toFloat(d)` | An exact `int` (errors on a fraction / overflow); the nearest `float`. |
+| [`decimal`](decimal.md)`.toString(d)` | Deprecated (removed in 0.29.0): `convert.toString(d)` / `%v`. |
 | [`encoding`](encoding.md)`.codecs()`                  | Canonical character-codec names in registration order.                                                                              |
 | [`encoding`](encoding.md)`.decode(codec, b)`          | Decode `bytes` from a character codec to a Jennifer string.                                                                         |
 | [`encoding`](encoding.md)`.encode(codec, s)`          | Encode a Jennifer string into a character codec's bytes.                                                                            |
@@ -94,13 +97,14 @@ library prefix links to the per-library doc, which is authoritative.
 | [`fs`](fs.md)`.appendString(path, content)`           | Append UTF-8 `string` to `path`; creates the file if missing.                                                                       |
 | [`fs`](fs.md)`.chmod(path, mode)`                     | Set permission bits (e.g. `0o600`); Unix/Linux. Rejected outside `[0, 0o7777]`.                                                     |
 | [`fs`](fs.md)`.chown(path, uid, gid)`                 | Set owner / group (`-1` leaves unchanged); Unix/Linux, usually needs privilege.                                                    |
-| [`fs`](fs.md)`.close($f)`                             | Close an `fs.File` handle; removes it from the registry.                                                                            |
+| [`fs`](fs.md)`.close($f)` | Close an `fs.File` handle; a second close does nothing, other use throws `"closed"`. |
 | [`fs`](fs.md)`.eof($f)`                               | True iff the next read on `$f` would error or return partial. Sticky.                                                               |
 | [`fs`](fs.md)`.exists(path)`                          | True if `path` resolves; permission errors still surface.                                                                           |
 | [`fs`](fs.md)`.hasEvent($w)`                          | Whether an `fs.Watcher` has a queued change event (non-blocking peek).                                                              |
 | [`fs`](fs.md)`.isDir(path)`                           | True iff `path` exists and is a directory.                                                                                          |
 | [`fs`](fs.md)`.isFile(path)`                          | True iff `path` exists and is a regular file.                                                                                       |
 | [`fs`](fs.md)`.list(path)`                            | Sorted entry names in `path`. Non-recursive; returns `list of string`.                                                              |
+| [`fs`](fs.md)`.listBytes(path)` / `.walkBytes(path)` | `list` / `walk` with names as `bytes` (`list of bytes` / `list of fs.StatBytes`); `list` / `walk` throw `"fs"` on a name that is not UTF-8. |
 | [`fs`](fs.md)`.mkdir(path)`                           | Create a single directory; errors if any parent is missing.                                                                         |
 | [`fs`](fs.md)`.mkdirAll(path)`                        | Create `path` and every missing parent (like `mkdir -p`).                                                                           |
 | [`fs`](fs.md)`.mkfifo(path[, mode])`                  | Create a named pipe (default `0600`); existing `path` errors. Unix only.                                                            |
@@ -120,42 +124,40 @@ library prefix links to the per-library doc, which is authoritative.
 | [`fs`](fs.md)`.stat(path)`                            | Returns `fs.Stat` (`path`, `size`, `isDir`, `mtimeNanos`, `mode`). Missing path errors.                                             |
 | [`fs`](fs.md)`.sync($f)`                              | Flush a write/append handle's data to the storage device (fsync); handle stays open. The "safe to remove the stick" step.          |
 | [`fs`](fs.md)`.walk(path)`                            | Depth-first, sorted, includes `path`. Returns `list of fs.Stat`. Skips symlinks; unreadable subdirectories are not descended.          |
-| [`fs`](fs.md)`.watch(path[, intervalMs])`             | Watch a file / dir (recursive) for changes -> `fs.Watcher`; pull with `fs.next` / `fs.hasEvent`, stop with `fs.close`. mtime polling. |
+| [`fs`](fs.md)`.watch(path)` / `.watchWith(path, fs.WatchOptions{intervalMs})` | Watch a file / dir (recursive) for changes -> `fs.Watcher` (`intervalMs` 0 = ~300 ms, else >= 20); pull with `fs.next` / `fs.hasEvent`, stop with `fs.close`. `watch(path, intervalMs)` deprecated. |
 | [`fs`](fs.md)`.writeBytes(path, content)` / `.writeBytes($f, b)` | Whole-file overwrite (path form) or write via handle (fs.File form).                                                      |
 | [`fs`](fs.md)`.writeString(path, content)` / `.writeString($f, s)` | Whole-file overwrite (path form) or write via handle (fs.File form).                                                    |
 | [`fs`](fs.md)`.writeNew(path, content)`               | Create `path` with `content`, failing (catchable) if it exists (`O_EXCL`). Atomic test-and-set for a file lock.                     |
 | [`fs`](fs.md)`.makeTempFile([dir[, prefix[, suffix]]])` | Create a unique empty file (atomic, `0600`); returns its path. `dir=""` = system temp; parent must exist. |
 | [`fs`](fs.md)`.makeTempDir([dir[, prefix]])`          | Create a unique directory (atomic, `0700`); returns its path. Only the leaf is created (not `mkdir -p`).                            |
-| [`gpio`](gpio.md)`.setup(pin, direction)`            | Request line offset `pin` with `gpio.IN` / `gpio.OUT` on the current chip. Linux only. |
-| [`gpio`](gpio.md)`.read(pin)` / `.write(pin, value)` | Read a line (0/1) / drive an output line (0 or 1). |
-| [`gpio`](gpio.md)`.release(pin)` / `.chip(path)`     | Free a requested line / select the gpiochip device (default `/dev/gpiochip0`). |
+| [`gpio`](gpio.md)`.open(path)` / `.close(chip)` / `.setup(chip, pin, direction)` | Open a gpiochip -> `gpio.Chip` / release its lines and close it / request line `pin` with `gpio.IN` / `gpio.OUT`. Linux only. |
+| [`gpio`](gpio.md)`.read(chip, pin)` / `.write(chip, pin, value)` / `.release(chip, pin)` | Read a line (0/1) / drive an output line / free it. The pin-only forms and `gpio.chip` are deprecated. |
 | [`hash`](hash.md)`.compute(algo, b)`                  | One-shot digest. `algo` is `"md5"`, `"sha1"` (both non-cryptographic), `"sha256"`, `"sha384"`, `"sha512"`, `"sha3-224/256/384/512"`, `"blake2b-256/384/512"` or `"blake2s-256"`. Returns raw bytes.                             |
 | [`hash`](hash.md)`.hmac(algo, message, key)`          | Keyed-hash MAC (RFC 2104) over the same algorithms; raw bytes out. For JWT / TOTP / SigV4 / webhook signatures.                     |
 | [`hash`](hash.md)`.equal(a, b)`                       | Constant-time equality of two `bytes` (for MAC / token / digest checks); `false` on a length or content difference.                |
-| [`hash`](hash.md)`.discard($s)`                       | Drop a `hash.Stream` without computing its digest; releases its state.                                                             |
+| [`hash`](hash.md)`.discard($s)`                       | Drop a `hash.Stream` without computing its digest; releases its state. A no-op on a finalized or discarded stream. |
 | [`hash`](hash.md)`.finalize($s)`                      | Final digest as bytes; consumes the handle (later calls error).                                                                     |
 | [`hash`](hash.md)`.stream(algo)`                      | Allocate a `hash.Stream` for `algo`; feed chunks via `hash.update` then close with `hash.finalize`.                                 |
 | [`hash`](hash.md)`.update($s, $bytes)`                | Feed one chunk into a `hash.Stream` (mutates by side effect).                                                                       |
-| [`httpd`](httpd.md)`.listen(addr)` / `.listenTLS(addr, cert, key)` | Start an HTTP / HTTPS server -> `httpd.Server` (`":0"` = ephemeral port). Default binary only. |
-| [`httpd`](httpd.md)`.listenWith(addr, opts)` / `.listenTLSWith(addr, cert, key, opts)` | Same, with per-server limits via `httpd.Options{maxBodyBytes, maxInFlight, respondTimeoutMs, bodyTimeoutMs, writeTimeoutMs, maxHeaderBytes, dirListing}` (a `0` field = its default: 10 MiB / 256 / 60 s / 60 s; `dirListing` off). Guarded: `maxInFlight x maxBodyBytes` must stay under the memory budget. |
+| [`httpd`](httpd.md)`.listen(addr)` / `.listenWith(addr, opts)` | Start an HTTP server -> `httpd.Server`; `httpd.Options{maxBodyBytes, maxInFlight, respondTimeoutMs, bodyTimeoutMs, writeTimeoutMs, maxHeaderBytes, dirListing, followSymlinks, etag, certPem, keyPem}` (`certPem` + `keyPem`: HTTPS; `etag`: content-hash ETags from `serveFile` / `serveDir`; `0` = default). `listenTLS` / `listenTLSWith` deprecated. |
 | [`httpd`](httpd.md)`.setMaxBufferBudget(bytes)` | Move the process-wide memory-guard ceiling (default 4 GiB) `listenWith` enforces; raise it for a big-RAM host, lower it for a small one (floored at 10 MiB). |
 | [`httpd`](httpd.md)`.setMaxBufferBudgetFromRAM(fraction)` | Opt-in, cgroup-aware: set the budget to `fraction` of the detected machine limit (min of host RAM and cgroup limit) -> the bytes set; errors if undeterminable. |
 | [`httpd`](httpd.md)`.address($srv)` / `.shutdown($srv)`  | Bound address of a server / graceful drain (unblocks parked `accept`).                                                            |
 | [`httpd`](httpd.md)`.maxInFlight($srv)`                 | The server's in-flight request limit (bound a serve loop's workers to it).                                                         |
-| [`httpd`](httpd.md)`.accept($srv)`                    | Block for the next request -> `httpd.Request` (the pull loop). Errors once the server is shut down.                                |
+| [`httpd`](httpd.md)`.accept($srv)`                    | Block for the next request -> `httpd.Request` (the pull loop). Errors once the server is shut down. Throws `"closed"` once the server is shut down. |
 | [`httpd`](httpd.md)`.method($req)` / `.path($req)` / `.query($req, name)` / `.rawQuery($req)` / `.header($req, name)` / `.body($req)` / `.remoteAddr($req)` | Read the accepted request (`query` / `header` -> `""` if absent; `rawQuery` = the query string as sent, no `?`; `body` -> `bytes`). |
 | [`httpd`](httpd.md)`.requestValue($req, key)` / `.setRequestValue($req, key, value)` | Read / write a request-scoped note (`""` if unset); scratch space to memoize a value computed once per request, never sent to the client. |
 | [`httpd`](httpd.md)`.setHeader($req, name, value)` / `.respond($req, status, body)` | Set a response header / send the response once (`body` is string or bytes). |
 | [`httpd`](httpd.md)`.isOpen($req)` / `.timedOut($req)` | `bool`: the request still awaits its answer / the engine answered `503` itself after the respond timeout. |
 | [`httpd`](httpd.md)`.etag($req, tag)`                 | Set the `ETag` and honour a conditional GET -> `bool` (`true` = a `304` was sent, stop; handles `If-None-Match` list / `*` / `W/`).  |
 | [`httpd`](httpd.md)`.serveFile($req, path)` / `.serveDir($req, root)` | Answer with a file / the file under `root` for the request path (`..` cannot escape `root`).                    |
-| [`httpd`](httpd.md)`.serveFileEtag($req, path)` / `.serveDirEtag($req, root)` | Same, plus a content-hash `ETag` (SHA-256, cached by mtime+size) so a revalidating client gets a `304`. |
+| [`httpd`](httpd.md)`.serveFileEtag($req, path)` / `.serveDirEtag($req, root)` | Deprecated (removed in 0.29.0): `serveFile` / `serveDir` on a server with `httpd.Options{etag: true}`. |
 | [`i2c`](i2c.md)`.open(path, addr)`                   | Open an I2C bus and select 7-bit slave `addr` -> `i2c.Bus`. Linux only. |
 | [`i2c`](i2c.md)`.read($bus, n)` / `.write($bus, data)` | Read `n` raw bytes / write raw bytes to the selected slave. |
 | [`i2c`](i2c.md)`.readReg($bus, reg, n)` / `.writeReg($bus, reg, data)` | Register read (set pointer, read back) / register write. |
 | [`i2c`](i2c.md)`.writeRead($bus, data, n)`           | Write `data`, then read exactly `n` bytes in one combined transfer (repeated START, no STOP). |
 | [`i2c`](i2c.md)`.close($bus)`                        | Close the bus. |
-| [`images`](images.md)`.decode(data[, maxPixels])`     | Decode PNG / JPEG / GIF `bytes` -> `images.Image`; over `maxPixels` (default 64 Mpx, 8 Mpx on `jennifer-tiny`) raises `Error{kind:"limit"}` from the header alone. |
+| [`images`](images.md)`.decode(data)` / `.decodeWith(data, o)` | Decode PNG / JPEG / GIF `bytes` -> `images.Image`; over 64 Mpx (8 Mpx on `jennifer-tiny`), or `images.DecodeOptions{maxPixels}`, raises `Error{kind:"limit"}` from the header alone. |
 | [`images`](images.md)`.info(data)`                    | Format and size from the header without decoding -> `images.Info{format, width, height}`. |
 | [`images`](images.md)`.encode(format, img[, quality])` | Encode to `"png"` / `"jpeg"` (`quality` 1..100, default 90) / `"gif"` -> `bytes`. |
 | [`images`](images.md)`.create(w, h[, color])`         | A new image filled with `color` (default transparent). |
@@ -163,7 +165,7 @@ library prefix links to the per-library doc, which is authoritative.
 | [`images`](images.md)`.width(img)` / `.height(img)`   | The size in pixels. |
 | [`images`](images.md)`.pixel(img, x, y)`              | One pixel -> `images.Color{r, g, b, a}`. |
 | [`images`](images.md)`.colorPixels(img)` / `.alphaPixels(img)`| Export the RGB bytes (3 per pixel, alpha left out) / the alpha byte of each pixel, row by row.|
-| [`images`](images.md)`.rgb(r, g, b)` / `.rgba(r, g, b, a)` / `.hex(s)` | Build an `images.Color`; `hex` takes `"#rgb"` / `"#rrggbb"` / `"#rrggbbaa"`. |
+| [`images`](images.md)`.rgb(r, g, b)` / `.hex(s)` / `images.Color{r, g, b, a}` | Build an `images.Color`; `hex` takes `"#rgb"` / `"#rrggbb"` / `"#rrggbbaa"`; a literal's omitted `a` is 0. `.rgba` is deprecated. |
 | [`images`](images.md)`.crop(img, x, y, w, h)`         | A rectangle inside the image. |
 | [`images`](images.md)`.resize(img, w, h[, filter])`   | Scale; `0` for one side keeps the aspect; filter `"catmullrom"` (default) / `"bilinear"` / `"nearest"`. |
 | [`images`](images.md)`.fit(img, maxW, maxH[, filter])` | Shrink to fit the box, keeping the aspect; never enlarges. |
@@ -213,9 +215,9 @@ library prefix links to the per-library doc, which is authoritative.
 | [`kv`](kv.md)`.keys(store[, prefix])`                 | The unexpired keys, sorted, optionally only those with `prefix` (`list of string`).                                                 |
 | [`kv`](kv.md)`.delete(store, key)`                    | Remove the key; whether it existed (`bool`).                                                                                        |
 | [`kv`](kv.md)`.touch(store, key, ttl)`                | Re-arm the expiry; whether it existed (`bool`).                                                                                     |
-| [`kv`](kv.md)`.incr(store, key, delta)`               | Add signed `delta` to the numeric value; new value, or `-1` when absent (not created).                                             |
+| [`kv`](kv.md)`.incr(store, key, delta)` | Add signed `delta`; the new value (an absent key starts at 0 and is created, without TTL). |
 | [`kv`](kv.md)`.setValue(store, key, value, ttl)` / `.getValue(store, key)` | Store / read an opaque library value (`json.Value`, ...), shared not copied; in-memory stores only; `getValue` errors when absent. |
-| [`kv`](kv.md)`.close(store)`                          | Drop the store and free its handle.                                                                                                 |
+| [`kv`](kv.md)`.close(store)` | Close this handle (a second close does nothing; other use: `"closed"`). |
 | [`linalg`](linalg.md)`.dot(a, b)` / `.distance(a, b)` | Dot product / Euclidean distance of vectors (`list of float`) -> `float`. Length-checked.                                          |
 | [`linalg`](linalg.md)`.cross(a, b)` / `.normalize(v)` | 3-D cross product of length-3 vectors / the unit vector `v / norm(v)` (zero vector errors) -> `list of float`.                      |
 | [`linalg`](linalg.md)`.norm(x)`                       | L2 norm of a vector, or the Frobenius norm of a matrix -> `float` (polymorphic).                                                    |
@@ -257,14 +259,14 @@ library prefix links to the per-library doc, which is authoritative.
 | [`meta`](meta.md)`.callMain(name, args...)` / `.definedMain(name)` | Like `call` / `defined` but against the **entry program's** functions (a module reaching its host's handlers).             |
 | [`ml`](ml.md)`.linearRegression(X, y)` / `.ridge(X, y, alpha)` | Fit OLS / L2-ridge regression -> ml.Model (regressor). |
 | [`ml`](ml.md)`.kNN(X, y, k)` / `.naiveBayes(X, y)` | Fit a k-NN / Gaussian naive-Bayes classifier -> ml.Model. |
-| [`ml`](ml.md)`.logisticRegression(X, y [, lr [, epochs]])` | Fit a binary (0/1) logistic classifier (gradient descent) -> ml.Model. |
-| [`ml`](ml.md)`.decisionTree(X, y [, maxDepth])` / `.randomForest(X, y [, nTrees [, maxDepth]])` | Fit a CART tree / bagged forest classifier -> ml.Model. |
-| [`ml`](ml.md)`.kMeans(X, k [, maxIter])` | Fit k-means clustering (k-means++ seed) -> ml.Model. Uses `math.randSeed`. |
+| [`ml`](ml.md)`.logisticRegression(X, y)` / `.logisticRegressionWith(X, y, ml.LogisticOptions{learningRate, epochs})` | Fit a binary (0/1) logistic classifier (gradient descent) -> ml.Model. |
+| [`ml`](ml.md)`.decisionTree(X, y)` / `.randomForest(X, y)`, `...With(X, y, ml.TreeOptions{maxDepth} / ml.ForestOptions{nTrees, maxDepth})` | Fit a CART tree / bagged forest classifier -> ml.Model. |
+| [`ml`](ml.md)`.kMeans(X, k)` / `.kMeansWith(X, k, ml.KMeansOptions{maxIter})` | Fit k-means clustering (k-means++ seed) -> ml.Model. Uses `math.randSeed`. |
 | [`ml`](ml.md)`.pca(X, nComponents)` | Fit PCA (covariance eigendecomposition) -> ml.Model (transform). |
 | [`ml`](ml.md)`.standardScaler(X)` / `.minMaxScaler(X)` | Fit a z-score / [0,1] feature scaler -> ml.Model (transform). |
 | [`ml`](ml.md)`.predict(model, X)` | Predicted labels (int, classifier/cluster) or values (float, regressor) per row. |
 | [`ml`](ml.md)`.transform(model, X)` / `.predictProba(model, X)` | Transform features (scaler/PCA) / positive-class probability (logistic). |
-| [`ml`](ml.md)`.free(model)` | Drop a fitted model from the registry to free memory. |
+| [`ml`](ml.md)`.free(model)` | Deprecated no-op (removed in 0.29.0): a model is a value the GC frees. |
 | [`ml`](ml.md)`.trainTestSplit(X, y, testFraction)` | Shuffle + split -> ml.Split{trainX,trainY,testX,testY}. Uses `math.randSeed`. |
 | [`ml`](ml.md)`.kFold(nSamples, k)` | `k` contiguous CV folds -> list of ml.Fold{trainIdx, testIdx}. |
 | [`ml`](ml.md)`.accuracy(yTrue, yPred)` | Fraction of exact matches. |
@@ -274,7 +276,7 @@ library prefix links to the per-library doc, which is authoritative.
 | [`ml`](ml.md)`.rmse/mae/r2(yTrue, yPred)` | Regression error metrics (r2 = coefficient of determination). |
 | [`ml`](ml.md)`.lasso(X, y, alpha)` | Fit L1-regularized regression (coordinate descent; sparse coefficients) -> ml.Model. |
 | [`ml`](ml.md)`.kNNRegressor(X, y, k)` / `.decisionTreeRegressor(X, y [, maxDepth])` | Regression variants of k-NN / CART (predict a continuous value). |
-| [`ml`](ml.md)`.randomForestRegressor(X, y [, nTrees [, maxDepth]])` | Bagged regression trees -> ml.Model (regressor). |
+| [`ml`](ml.md)`.randomForestRegressor(X, y)` / `.randomForestRegressorWith(X, y, ml.ForestOptions{nTrees, maxDepth})` | Bagged regression trees -> ml.Model (regressor). |
 | [`ml`](ml.md)`.coefficients(model)` / `.intercept(model)` | Read a linear/logistic model's learned weights / bias. |
 | [`ml`](ml.md)`.centroids(model)` / `.components(model)` / `.explainedVariance(model)` | k-means centres / PCA axes / PCA per-component variance ratios. |
 | [`ml`](ml.md)`.featureImportances(model)` | Gini feature importances of a tree / forest (sum to 1). |
@@ -285,21 +287,25 @@ library prefix links to the per-library doc, which is authoritative.
 | [`net`](net.md)`.accept($listener)`                   | Block until a client connects to `$listener`; return the new `net.Conn`.                                                            |
 | [`net`](net.md)`.address($h)`                         | Polymorphic. Conn -> peer address; Listener / UDPSocket -> local bound address.                                                     |
 | [`net`](net.md)`.close($h)`                           | Polymorphic. Closes a `net.Conn`, `net.Listener`, or `net.UDPSocket`.                                                               |
-| [`net`](net.md)`.connect(address[, timeoutMs])`       | TCP client: dial `"host:port"` and return a `net.Conn`. Optional `timeoutMs` bounds connection establishment.                       |
-| [`net`](net.md)`.connectTLS(address[, net.TLSOptions][, timeoutMs])` | TLS client: dial `"host:port"` + handshake, verifying the cert against the host. `net.TLSOptions` for caCert / skipVerify; optional `timeoutMs` bounds the dial + handshake. |
-| [`net`](net.md)`.startTLS($conn[, net.TLSOptions][, timeoutMs])` | Upgrade an open plaintext `net.Conn` to TLS in place (STARTTLS); host reused from connect; same handle. Optional `timeoutMs` bounds the handshake. |
-| [`net`](net.md)`.eof($conn)`                          | True iff the next read on `$conn` would return partial or fail. Sticky.                                                             |
+| [`net`](net.md)`.connect(address)` | TCP client: dial `"host:port"` and return a `net.Conn`, within the default 30 s. |
+| [`net`](net.md)`.connectWith(address, net.ConnectOptions)` | Connect with options: `timeoutMs` (0 = 30 s, `math.MAX_INT` = none), `tls`, `tlsOptions`. |
+| [`net`](net.md)`.connectTLS(address[, net.TLSOptions])` | TLS client: dial `"host:port"` + handshake within the default 30 s, verifying the cert against the host. `net.TLSOptions` for caCert / skipVerify. |
+| [`net`](net.md)`.startTLS($conn[, net.TLSOptions])` | Upgrade an open plaintext `net.Conn` to TLS in place (STARTTLS) within the default 30 s; host reused from connect; same handle. |
+| [`net`](net.md)`.startTLSWith($conn, net.ConnectOptions)` | `startTLS` with the options' `timeoutMs` and `tlsOptions`. |
 | [`net`](net.md)`.listen(address)`                     | Bind TCP `"host:port"` (use `":0"` for ephemeral). Returns a `net.Listener`.                                                        |
 | [`net`](net.md)`.listenUDP(address)`                  | Bind a UDP socket. Returns a `net.UDPSocket`; usable as both client and server.                                                     |
-| [`net`](net.md)`.lookup(host)`                        | DNS: resolve `host` to a `list of string` IPs.                                                                                      |
-| [`net`](net.md)`.readAll($conn [, maxBytes [, idleTimeoutMs]])` | Read to EOF, returning the whole stream as one `bytes` in a single Go loop (whole-body / object download). `maxBytes>0` caps (catchable), `idleTimeoutMs>0` re-arms a per-chunk read deadline. |
+| [`net`](net.md)`.lookup(host)` | DNS: resolve `host` to a `list of string` IPs, within the default 30 s. |
+| [`net`](net.md)`.lookupWith(host, net.ConnectOptions)` | `lookup` within the options' `timeoutMs`; with `dnsServers`, ask those DNS servers only (no hosts file, no search list). |
+| [`net`](net.md)`.readAll($conn [, maxBytes])` | Read to EOF, returning the whole stream as one `bytes` in a single Go loop (whole-body / object download). `maxBytes>0` caps (catchable). |
 | [`net`](net.md)`.readBytes($conn, n)`                 | Read up to `n` bytes; blocks for at least one byte. Empty `bytes` once the peer closed (sticky EOF).                                |
-| [`net`](net.md)`.readN($conn, n [, idleTimeoutMs])`   | Read **exactly** `n` bytes for a length-prefixed frame; a close before `n` bytes is a catchable error, not a truncated return.      |
+| [`net`](net.md)`.readN($conn, n)` | Read **exactly** `n` bytes for a length-prefixed frame; a close before `n` bytes is a catchable error, not a truncated return. |
 | [`net`](net.md)`.recvFrom($sock, n)`                  | Block for one UDP datagram, up to `n` bytes. Returns `net.Datagram{data, peer, truncated}` (`truncated`: it was longer than `n`). |
 | [`net`](net.md)`.reverseLookup(ip)`                   | Reverse DNS: IP address to a `list of string` of hostnames.                                                                         |
+| [`net`](net.md)`.reverseLookupWith(ip, net.ConnectOptions)` | `reverseLookup` within the options' `timeoutMs`. |
 | [`net`](net.md)`.sendTo($sock, peer, bytes)`          | Send one UDP datagram to `peer` (`"host:port"`).                                                                                    |
 | [`net`](net.md)`.setBroadcast($sock, on)`             | Enable/disable `SO_BROADCAST` so a `sendTo` may target a broadcast address. Off by default; Linux/Unix only.                         |
 | [`net`](net.md)`.bindToDevice($sock, iface)`          | Pin a UDP socket's egress/ingress to one interface via `SO_BINDTODEVICE` (`""` clears). The multi-homed-host fix a wildcard bind can't give. Linux-only; unprivileged on 5.7+ for an unbound socket, else `CAP_NET_RAW`. |
+| [`net`](net.md)`.setIdleTimeout($conn, ms)` | Fail a read after `ms` without a byte, re-armed per underlying read (`0` clears); a steady transfer is never cut. With a read deadline, the first to pass fires. |
 | [`net`](net.md)`.setReadDeadline($conn, ms)`          | Arm a read deadline `ms` ms out (`0` clears). The poll-with-timeout primitive: a read past it throws `kind: "timeout"`; writes stay usable. |
 | [`net`](net.md)`.setWriteDeadline($conn, ms)`         | Arm a write deadline `ms` ms out (`0` clears). Bounds a slow send; reads untouched.                                                  |
 | [`net`](net.md)`.writeBytes($conn, bytes)`            | Blocking write of every byte to a `net.Conn`.                                                                                       |
@@ -310,17 +316,17 @@ library prefix links to the per-library doc, which is authoritative.
 | [`regex`](regex.md)`.replace(pattern, s, replacement)` | Replace every match. `$1`, `${name}` expand to captured groups; `$$` is a literal `$`.                                             |
 | [`regex`](regex.md)`.split(pattern, s)`               | Split `s` at every match; returns `list of string`.                                                                                 |
 | [`serial`](serial.md)`.open(path, baud)` / `.openWith(path, opts)` | Open a serial port (raw 8N1, or full `serial.Options`) -> `serial.Port`. Linux only. |
-| [`serial`](serial.md)`.read($port, n)` / `.write($port, data)` | Read up to `n` bytes (blocks for >=1) / write bytes (-> count). |
+| [`serial`](serial.md)`.read($port, n)` / `.write($port, data)` | Read up to `n` bytes (blocks for >=1; a parity error: kind `"serial"`) / write all bytes (-> null). |
 | [`serial`](serial.md)`.flush($port)` / `.close($port)` | Discard buffered I/O / close the port. |
 | [`serial`](serial.md)`.setReadDeadline($port, ms)` / `.setWriteDeadline($port, ms)` | Arm (or with 0 clear) a read / write deadline; past it the call throws kind `"timeout"`. |
-| [`spi`](spi.md)`.open(path)` / `.configure($dev, mode, speedHz)` | Open an SPI device -> `spi.Device` / set clock mode (0..3) and speed. Linux only. |
+| [`spi`](spi.md)`.open(path)` / `.openWith(path, spi.Options{mode, speedHz, bitsPerWord})` | Open an SPI device -> `spi.Device` (defaults mode 0, 500 kHz, 8 bits; `configure` deprecated). Linux only. |
 | [`spi`](spi.md)`.transfer($dev, data)` / `.close($dev)` | Full-duplex exchange (out and in together) / close the device. |
-| [`sql`](sql.md)`.open(driver, dsn)` / `.close($c)`   | Open a MySQL / Postgres connection -> sql.Connection / close it. Default binary only. |
+| [`sql`](sql.md)`.open(driver, dsn)` / `.openWith(driver, dsn, sql.Options{allowInsecure, queryTimeoutMs})` / `.close($c)` | Open a MySQL / Postgres connection -> sql.Connection / close it. Verified TLS to another host; a weaker DSN mode needs `allowInsecure`. Default binary only. |
 | [`sql`](sql.md)`.query(target, sql, params...)` / `.exec(target, sql, params...)` | Query -> sql.Rows / statement -> sql.Result{affected, lastId}. target = Connection or Tx; params bind through placeholders. |
 | [`sql`](sql.md)`.next($rows)` / `.columns($rows)` / `.closeRows($rows)` | Advance the cursor (false at end) / column names / close early. |
 | [`sql`](sql.md)`.asInt` / `.asFloat` / `.asString` / `.asBool` / `.asBytes($rows, col)` / `.isNull($rows, col)` | Read the current row's column (name or index), typed; a NULL column is an error (check isNull). |
 | [`sql`](sql.md)`.begin($c)` / `.commit($tx)` / `.rollback($tx)` | Transaction: begin -> sql.Tx (a query/exec target), then commit / rollback. |
-| [`sql`](sql.md)`.setQueryTimeout(ms)` | Set the client query/read deadline (ms); `0` disables it for a long cursor read. Default 30 000, process-wide. |
+| [`sql`](sql.md)`.setQueryTimeout(ms)` | Deprecated (removed in 0.29.0): use `sql.Options.queryTimeoutMs`. The process-wide deadline of connections opened with `queryTimeoutMs` 0. |
 | [`sql`](sql.md)`.prepare($c, sql)` / `.queryStmt($s, ...)` / `.execStmt($s, ...)` / `.closeStmt($s)` | Prepared-statement lifecycle. |
 | [`math`](math.md)`.acos(x)` | Arccosine (radians); errors outside [-1, 1]. |
 | [`math`](math.md)`.acosh(x)` | Inverse hyperbolic cosine; errors for x < 1. |
@@ -370,12 +376,14 @@ library prefix links to the per-library doc, which is authoritative.
 | [`math`](math.md)`.tan(x)` | Tangent (radians). |
 | [`math`](math.md)`.tanh(x)` | Hyperbolic tangent. |
 | [`math`](math.md)`.trunc(x)` | Round toward zero -> int; int argument is the identity. |
-| [`os`](os.md)`.flag(name)`                            | Value following `name` in `os.ARGS`, or `""` if absent / at end. Exact-match (no `--foo=bar` parsing).                              |
-| [`os`](os.md)`.getEnv(name)`                          | Read environment variable `name`. Unset → empty string, no error.                                                                   |
+| [`os`](os.md)`.flag(name)`                            | Deprecated (removed in 0.29.0): use the `args` module. |
+| [`os`](os.md)`.getEnv(name)`                          | Read environment variable `name`. Unset → empty string, no error. Non-UTF-8 value throws `"os"`.                                                                   |
+| [`os`](os.md)`.getEnvBytes(name)` | The raw value as `bytes` (unset → empty). |
+| [`os`](os.md)`.argsBytes()` | `os.ARGS` as `list of bytes`. |
 | [`os`](os.md)`.setEnv(name, value)`                   | Set environment variable `name` for this process (and children it spawns). Invalid name errors.                                     |
 | [`os`](os.md)`.unsetEnv(name)`                        | Remove environment variable `name` (not the same as setting it to `""`); no-op when unset.                                         |
 | [`os`](os.md)`.hasEnv(name)`                          | Whether `name` is set, even to `""` (`bool`).                                                                                       |
-| [`os`](os.md)`.hasFlag(name)`                         | True if `name` appears as an exact element of `os.ARGS`.                                                                            |
+| [`os`](os.md)`.hasFlag(name)`                         | Deprecated (removed in 0.29.0): use the `args` module. |
 | [`os`](os.md)`.isTerminal(stream)`                    | Is `stream` (`"stdout"`/`"stderr"`/`"stdin"`) an interactive terminal? Pipe/file -> false.                                         |
 | [`os`](os.md)`.cwd()`                                 | Absolute path of the current working directory.                                                                                     |
 | [`os`](os.md)`.homeDir()`                             | Current user's home directory (`$HOME` / `%USERPROFILE%`).                                                                          |
@@ -386,8 +394,9 @@ library prefix links to the per-library doc, which is authoritative.
 | [`os`](os.md)`.release(p)`                            | Drop a finished process handle from the registry (frees captured output); errors if `$p` still runs.                                |
 | [`os`](os.md)`.run(argv)`                             | Blocking: run `argv` to completion, return `os.Result{exitCode, stdout, stderr}`.                                                   |
 | [`os`](os.md)`.runBytes(argv)`                        | Like `run`, returns `os.BytesResult{exitCode, stdout, stderr as bytes, truncated}` for binary output.                               |
-| [`os`](os.md)`.spawn(argv)`                           | Non-blocking: start `argv`, return `os.Process{pid}` handle.                                                                        |
+| [`os`](os.md)`.spawn(argv)` / `.spawnWith(argv, os.SpawnOptions{stdout, stderr})` | Non-blocking: start `argv`, return an `os.Process`; each stream `""` (capture), `"inherit"`, `"discard"` or a path. The options-map form is deprecated. |
 | [`os`](os.md)`.wait(p)`                               | Block until spawned process `$p` exits; return `os.Result`. Idempotent.                                                             |
+| [`os`](os.md)`.waitTimeout(p, ms)` / `.waitBytesTimeout(p, ms)` | `wait` / `waitBytes` waiting at most `ms`; else `"timeout"`, the child keeps running; `0` polls. |
 | [`os`](os.md)`.waitBytes(p)`                          | Like `wait`, returns `os.BytesResult`. Either form may read the same handle.                                                        |
 | [`path`](path.md)`.base(p)`                           | Last element of `p`. `""` -> `"."`, `"/"` -> `"/"`. OS-aware; not a filename sanitizer.                                             |
 | [`path`](path.md)`.dir(p)`                            | All but the last element of `p`, cleaned. `"c.txt"` -> `"."`.                                                                       |
@@ -421,7 +430,7 @@ library prefix links to the per-library doc, which is authoritative.
 | [`stats`](stats.md)`.binomialPmf(k, n, p)` / `.binomialCdf(k, n, p)` | Binomial mass / CDF; `k`,`n` ints, `0<=p<=1`. |
 | [`stats`](stats.md)`.poissonPmf(k, lambda)` / `.poissonCdf(k, lambda)` | Poisson mass / CDF; `k` int, `lambda>0`. |
 | [`stats`](stats.md)`.linearRegression(xs, ys)` | Simple OLS -> `stats.Regression{slope, intercept, r, r2, stdErr, pValue, n}`. |
-| [`stats`](stats.md)`.multipleRegression(X, ys)` | Multiple OLS coefficients `[intercept, b1, ...]` (`list of float`). |
+| [`stats`](stats.md)`.multipleRegression(X, ys)` | Deprecated (removed in 0.29.0): `ml.linearRegression` + `ml.intercept` / `ml.coefficients` (same numbers). |
 | [`stats`](stats.md)`.confidenceInterval(data, level)` | t-based CI for the mean -> `stats.Interval{lower, upper}`; `level` in (0,1). |
 | [`stats`](stats.md)`.proportionCi(method, successes, n, level)` | Binomial-proportion CI; method `"wald"`/`"wilson"`/`"clopper-pearson"` -> `stats.Interval`. |
 | [`stats`](stats.md)`.tTest(data, mu)` / `.tTest2(a, b)` | One-sample / two-sample (Welch) t-test -> `stats.Test{statistic, df1, df2, pValue}`. |
@@ -431,8 +440,8 @@ library prefix links to the per-library doc, which is authoritative.
 | [`strings`](strings.md)`.chars(s)`                    | Split `s` into a `list of string`, one entry per Unicode code point.                                                                |
 | [`term`](term.md)`.makeRaw(stream)` / `.restore(state)` | Enter / leave raw mode (unbuffered, no-echo) on a terminal (`"stdin"`); `makeRaw` returns a single-use `term.State`. Non-terminal errors. |
 | [`term`](term.md)`.size(stream)`                      | The terminal's `term.Size{rows, cols}` (query `"stdout"`). **Errors** (catchable) off a terminal or when no window size is set; fall back. |
-| [`term`](term.md)`.readByte()`                        | Next raw byte from stdin (`0`-`255`), or `-1` at end of input. Bytes, not decoded keys. Refused in the REPL.                        |
-| [`term`](term.md)`.readByteTimeout(ms)`               | As `readByte`, or `-2` when no byte arrives within `ms` (`0` polls). Tells a lone Escape from an escape sequence. Refused in the REPL. |
+| [`term`](term.md)`.readByte()` | Next raw byte from stdin (`0`-`255`); throws `"closed"` at end of input. Bytes, not decoded keys. Refused in the REPL. |
+| [`term`](term.md)`.readByteTimeout(ms)` | As `readByte`, but throws `"timeout"` when no byte arrives within `ms` (`0` polls). Tells a lone Escape from an escape sequence. Refused in the REPL. |
 | [`testing`](testing.md)`.assertContains(hay, needle)` | Throw `Error{kind:"assertion"}` unless hay contains needle: substring / list element / map key.                                     |
 | [`testing`](testing.md)`.assertEqual(actual, expected)` | Throw unless deeply equal (lists / maps / structs compare by value).                                                              |
 | [`testing`](testing.md)`.assertFalse(cond)`           | Throw unless `cond` (a bool) is false.                                                                                              |
@@ -463,12 +472,15 @@ library prefix links to the per-library doc, which is authoritative.
 | [`strings`](strings.md)`.trimPrefix(s, prefix)` / `.trimSuffix(s, suffix)` | `s` without the exact affix, removed once; `s` unchanged when it does not carry it.                       |
 | [`strings`](strings.md)`.trimSet(s, cutset)` / `.trimLeftSet` / `.trimRightSet` | Strip leading and/or trailing runes that occur in `cutset` (`trimRightSet("1.500", "0")` -> `1.5`).   |
 | [`strings`](strings.md)`.upper(s)`                    | Uppercase `s` (Unicode-aware).                                                                                                      |
+| [`task`](task.md)`.allocated()`                       | Bytes the calling task's allocation budget has counted (0 without one).                                                              |
 | [`task`](task.md)`.cancel($t)`                        | Request cooperative cancellation of `$t`; the body stops at its next loop checkpoint. Non-blocking.                                 |
 | [`task`](task.md)`.cancelled()`                       | Non-raising poll: true if the current spawn body has been cancelled (false on main).                                                |
 | [`task`](task.md)`.discard($t)`                       | Mark a `task of T` fire-and-forget; suppresses exit-time loud-fail. Returns null.                                                   |
+| [`task`](task.md)`.setAllocBudget(bytes)`             | Opt-in: count what the calling task (and tasks it spawns) allocates; past `bytes` throws `"limit"`. `math.MAX_INT` lifts.            |
 | [`task`](task.md)`.poll($t)`                          | True if `$t` has finished (non-blocking).                                                                                           |
 | [`task`](task.md)`.wait($t)`                          | Block until `$t` finishes; return its value or re-raise its error.                                                                  |
 | [`task`](task.md)`.waitAll($ts)`                      | Block for all tasks in `$ts`; results in list order; re-raises the first error if any.                                              |
+| [`task`](task.md)`.waitAllTimeout($ts, ms)` | Like `waitAll`, but throws `Error{kind: "timeout"}` if not all finish within `ms`; the tasks keep running. |
 | [`task`](task.md)`.waitAny($ts)`                      | Block until any task in `$ts` is done; return its index.                                                                            |
 | [`task`](task.md)`.waitAnyTimeout($ts, ms)`           | Like `waitAny`, but throws a catchable `Error{kind: "timeout"}` if none finishes within `ms`.                                       |
 | [`task`](task.md)`.waitTimeout($t, ms)`               | Like `wait`, but throws a catchable `Error{kind: "timeout"}` if `$t` doesn't finish within `ms`.                                    |
@@ -500,7 +512,7 @@ library prefix links to the per-library doc, which is authoritative.
 | [`time`](time.md)`.parse(s, layout)`                  | Strict strftime-style parse. Same code set as format (`%j` / `%u` are format-only).                                                 |
 | [`time`](time.md)`.second($t)`                        | Second 0-59.                                                                                                                        |
 | [`time`](time.md)`.seconds($d)`                       | Span as whole seconds (int).                                                                                                        |
-| [`time`](time.md)`.sleep($d)`                         | Block the running task for `$d`. Negative / zero returns immediately. Returns null.                                                 |
+| [`time`](time.md)`.sleep($d)` | Block the running task for `$d`. Zero returns at once; negative throws `"runtime"`. Returns null. |
 | [`time`](time.md)`.sub($a, $b)`                       | Signed `time.Duration` between two `time.Time` values.                                                                              |
 | [`time`](time.md)`.unix($t)`                          | Unix-second instant of `$t` (int).                                                                                                  |
 | [`time`](time.md)`.unixMilliseconds($t)`              | Unix-millisecond instant of `$t` (int).                                                                                             |
@@ -510,6 +522,7 @@ library prefix links to the per-library doc, which is authoritative.
 | [`time`](time.md)`.year($t)`                          | Calendar year (int).                                                                                                                |
 | [`time`](time.md)`.zone(offset, name)`                | Build a `time.Zone` from an integer offset (seconds east of UTC) and a display name.                                                |
 | [`toml`](toml.md)`.decode(s)`                         | Parse TOML text into an opaque `toml.Value` handle (walk it with the accessors below).                                             |
+| [`toml`](toml.md)`.decodeWith(s, o)` | `decode` under lower caps (`toml.DecodeOptions{maxDepth, maxNodes}`; `0` = default). |
 | [`toml`](toml.md)`.encode(v)` / `.encodePretty(v)`    | TOML string for a `toml.Value` (or native map / list / scalar); `encodePretty` blank-lines sections. Null value / non-table root errors. |
 | [`toml`](toml.md)`.typeOf(v[, ptr])`                  | Node type at an optional JSON Pointer: `null` `bool` `int` `float` `string` `list` `map` `datetime`, or `missing`.                    |
 | [`toml`](toml.md)`.get(v[, ptr])`                     | Sub-node at a JSON Pointer, as a `toml.Value` (walk stays opaque; no pointer = the node itself).                                    |
@@ -517,7 +530,7 @@ library prefix links to the per-library doc, which is authoritative.
 | [`toml`](toml.md)`.keys(v[, ptr])` / `.length(v[, ptr])` | `list of string` table keys in document order / element count of a list or table.                                               |
 | [`toml`](toml.md)`.asInt(v[, ptr])` / `asFloat` / `asString` / `asBool` | Extract the addressed leaf as a typed value (strict; `asFloat` promotes an int).                                 |
 | [`toml`](toml.md)`.asFloats(v[, ptr])` / `asInts` / `asStrings`         | Read a whole list as `list of float` / `int` / `string` in one call, each element as the single reader does.     |
-| [`toml`](toml.md)`.asDatetime(v[, ptr])` / `.isDatetime(v[, ptr])` | A date-time node as a `time.Time` (needs `use time;`) / whether the node is a date-time.                            |
+| [`toml`](toml.md)`.asDatetime(v[, ptr])` / `.isDatetime(v[, ptr])` / `.asLocal(v[, ptr])` | An offset date-time as a `time.Time` (needs `use time;`) / whether the node is one / a local date-time, date or time as `toml.Local{year, month, day, hour, minute, second, nanosecond}`. |
 | [`toml`](toml.md)`.map()` / `.list()`                 | A fresh empty table / array `toml.Value`: the explicit start of a document (writes never auto-vivify).                            |
 | [`toml`](toml.md)`.map(m)` / `.list(xs)`              | A table / array `toml.Value` built from a Jennifer map / list in one step (linear; `toml.Value` elements shared). |
 | [`toml`](toml.md)`.set(v, ptr, val)` / `.insert` / `.append` / `.remove` / `.move` | Non-mutating edits by JSON Pointer; each returns a new `toml.Value` (strict / no missing intermediates). |
@@ -526,7 +539,7 @@ library prefix links to the per-library doc, which is authoritative.
 | [`uuid`](uuid.md)`.isValid(s)`                        | Whether `s` is a well-formed UUID string.                                                                                           |
 | [`uuid`](uuid.md)`.parse(s)`                          | The 16 `bytes` of a UUID string; errors on malformed input.                                                                         |
 | [`uuid`](uuid.md)`.version(s)`                        | Version digit (4, 7, ...; 0 for NIL); errors on malformed input.                                                                     |
-| [`xml`](xml.md)`.decode(s[, ns])`                     | Parse XML into an opaque `xml.Value` (root element); errors with line/column on malformed or not namespace-well-formed input. `ns` (prefix -> URI) seeds bindings for a fragment. |
+| [`xml`](xml.md)`.decode(s)` / `.decodeWith(s, o)` | Parse XML into an opaque `xml.Value` (root element); errors with line / column on malformed or not namespace-well-formed input. `xml.DecodeOptions{maxDepth, maxNodes, namespaces}` lowers the caps; `namespaces` (prefix -> URI) seeds bindings for a fragment. |
 | [`xml`](xml.md)`.encode(v)` / `.encodePretty(v)`      | Serialize an `xml.Value` (compact / 2-space indented).                                                                              |
 | [`xml`](xml.md)`.typeOf(node)`                        | `"element"` or `"text"`.                                                                                                            |
 | [`xml`](xml.md)`.tag(node)`                           | The element's tag name as written (with prefix).                                                                                    |
@@ -546,6 +559,7 @@ library prefix links to the per-library doc, which is authoritative.
 | [`xml`](xml.md)`.setText(node, s)`                    | The element with its children replaced by one text node (fresh handle).                                                            |
 | [`xml`](xml.md)`.append(parent, child)`               | The parent element with `child` appended (fresh handle).                                                                            |
 | [`yaml`](yaml.md)`.decode(s)` / `.decodeAll(s)`       | Parse one YAML document (multi-doc errors) / every document of a `---` stream (`list of yaml.Value`), into opaque handles.          |
+| [`yaml`](yaml.md)`.decodeWith(s, o)` | `decode` under lower caps (`yaml.DecodeOptions{maxDepth, maxNodes}`; `0` = default). |
 | [`yaml`](yaml.md)`.encode(v)` / `.encodePretty(v)`    | YAML string for a `yaml.Value` (or native map / list / scalar): flow (compact) vs block (readable) style.                           |
 | [`yaml`](yaml.md)`.typeOf(v[, ptr])`                  | Node type at an optional JSON Pointer: `null` `bool` `int` `float` `string` `bytes` `list` `map` `datetime`, or `missing`.             |
 | [`yaml`](yaml.md)`.get(v[, ptr])`                     | Sub-node at a JSON Pointer, as a `yaml.Value` (walk stays opaque; no pointer = the node itself).                                    |
@@ -554,6 +568,7 @@ library prefix links to the per-library doc, which is authoritative.
 | [`yaml`](yaml.md)`.asInt(v[, ptr])` / `asFloat` / `asString` / `asBool` / `isNull` | Extract the addressed leaf as a typed value (strict; `asFloat` promotes an int) / test for null.                    |
 | [`yaml`](yaml.md)`.asFloats(v[, ptr])` / `asInts` / `asStrings`                    | Read a whole list as `list of float` / `int` / `string` in one call, each element as the single reader does.        |
 | [`yaml`](yaml.md)`.asDatetime(v[, ptr])` / `.isDatetime(v[, ptr])` | A timestamp node as a `time.Time` (needs `use time;`) / whether the node is a timestamp.                            |
+| [`yaml`](yaml.md)`.asBytes(v[, ptr])` | A `!!binary` node as `bytes`. |
 | [`yaml`](yaml.md)`.map()` / `.list()`                 | A fresh empty mapping / sequence `yaml.Value`: the explicit start of a document (writes never auto-vivify).                        |
 | [`yaml`](yaml.md)`.map(m)` / `.list(xs)`              | A mapping / sequence `yaml.Value` built from a Jennifer map / list in one step (linear; `yaml.Value` elements shared). |
 | [`yaml`](yaml.md)`.set(v, ptr, val)` / `.insert` / `.append` / `.remove` / `.move` | Non-mutating edits by JSON Pointer; each returns a new `yaml.Value` (strict / no missing intermediates). |
@@ -563,14 +578,16 @@ library prefix links to the per-library doc, which is authoritative.
 | Name                                       | Type           | Value                                                                                            |
 | ------------------------------------------ | -------------- | ------------------------------------------------------------------------------------------------ |
 | [`math`](math.md)`.E`                      | `float`        | Euler's number, 2.718281828459045.                                                               |
+| [`math`](math.md)`.MAX_INT` | `int` | The largest int, 9223372036854775807; an option's "none". |
+| [`math`](math.md)`.MIN_INT` | `int` | The smallest int, -9223372036854775808. |
 | [`math`](math.md)`.PI`                     | `float`        | π, 3.141592653589793.                                                                            |
 | [`math`](math.md)`.TAU`                    | `float`        | τ = 2π, the full-turn constant, 6.283185307179586. |
 | [`meta`](meta.md)`.BUILD`                  | `string`       | Which Go toolchain compiled the interpreter: `"go"` / `"tinygo"`.                                |
 | [`meta`](meta.md)`.VERSION`                | `string`       | The interpreter's build version (e.g. `"0.27.0"`).                                               |
-| [`meta`](meta.md)`.SYSMODDIR`              | `string`       | Resolved system module directory (`--sysmoddir` > `JENNIFER_SYSMODDIR` > compile default).       |
+| [`meta`](meta.md)`.SYSMODDIR`              | `string`       | Resolved system module directory (`--sysmoddir` > `JENNIFER_SYSMODDIR` > build default).         |
 | [`meta`](meta.md)`.CAPABILITIES`           | `list of string` | Host capabilities this build has, sorted: `["exec", "net", "sql"]` (standard) / `[]` (tiny).            |
 | [`os`](os.md)`.ARCH`                       | `string`       | CPU architecture: `"amd64"`, `"arm64"`, `"wasm"`, ...                                            |
-| [`os`](os.md)`.ARGS`                       | list of string | Argv. Index 0 is the script path, the rest are user args.                                        |
+| [`os`](os.md)`.ARGS`                       | list of string | Argv. Index 0 is the script path, the rest are user args. Reading it throws `"os"` if an argument is not UTF-8 (`os.argsBytes()` for raw). |
 | [`os`](os.md)`.DIRSEP`                     | `string`       | Path-component separator: `"/"` Unix, `"\\"` Windows.                                            |
 | [`os`](os.md)`.EOL`                        | `string`       | Platform line ending. `"\n"` Unix-likes, `"\r\n"` Windows.                                       |
 | [`os`](os.md)`.NCPU`                       | `int`          | Logical CPUs usable by the process (`runtime.NumCPU`). `1` on `jennifer-tiny` (single-thread scheduler). |

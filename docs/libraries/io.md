@@ -354,9 +354,9 @@ terminator), so LF and CRLF input read the same on any platform, while a bare
 stdin yields an empty list; a blank line is preserved as `""`; a final line with
 no trailing newline is included.
 
-It reads the **whole input into memory**, at roughly **1 KB of heap per line**
-(one value per line), so a few hundred thousand lines is already hundreds of MB.
-More than 256 MiB of input or 1048576 lines (32 MiB / 262144 on
+It reads the **whole input into memory**, one value per line, so a few million
+short lines is already hundreds of MB.
+More than 256 MiB of input or 4194304 lines (32 MiB / 1048576 on
 `jennifer-tiny`) is a catchable error of kind `"limit"` naming the limit.
 Budget `readLines()` for small inputs (low single-digit MB); for large or
 untrusted streams keep the streaming `readLine()` loop, which stays flat in

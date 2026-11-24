@@ -7,8 +7,8 @@ invisible:
 
 - **Read-only parameters are borrowed, not copied.** A parameter a function never
   writes is bound by alias, so passing a large `list` or `map` into a helper that
-  only reads it does not deep-copy it. No annotation is needed. Three cases
-  still copy (or rebuild) on every call - see
+  only reads it does not deep-copy it. No annotation is needed. Two cases
+  still copy on every call - see
   [When a read-only argument is still copied](#when-a-read-only-argument-is-still-copied).
 - **A mutate-and-return helper updates in place.** Inside a function,
   `$grid = put($grid, x, y, v);` hands `$grid` to `put` without a copy (the old
@@ -227,7 +227,7 @@ invisible outside the hottest loops.
 
 ## When a read-only argument is still copied
 
-The borrow has three gaps. In each, a call costs time proportional to the size of
+The borrow has two gaps. In each, a call costs time proportional to the size of
 its argument, so a helper called in a loop over a large value goes quadratic:
 
 - **Nested collections.** A parameter of type `list of list`, `list of map`,
@@ -254,18 +254,10 @@ its argument, so a helper called in a loop over a large value goes quadratic:
   Separately, one `spawn` anywhere in the run that can do any of this turns the
   proof off for the whole run. In a hot path, sort with `lists.sort` on computed
   keys instead of `lists.sortBy`, or make the top-level state `def const`.
-- **Module calls.** A call into an imported module rebuilds every argument and
-  result that holds a struct declared in that module, whatever the callee does
-  with it, so the call costs time proportional to the value's size. A module
-  function taking the module's own "handle" struct (a parsed tree, an index) pays
-  this on every call. Values holding no struct of that module (a
-  `map of string to string`, a `list of int`) cross free. Keep per-element loops
-  inside the module: one call over the whole collection, not one per element.
 
-`jennifer profile --allocs` shows the first two as eager copies at the call site
-and the third in its own section, *module-boundary rebuilds*, at the call site
-with the direction (`in` for an argument, `out` for a result or constant). The
-roadmap plans to close all three (M30.3, M30.8 and M29.14).
+`jennifer profile --allocs` shows both as eager copies at the call site. The
+roadmap plans to close them (M30.3 and M30.8). A call into a module passes its
+arguments and result as a local call does.
 
 ## See also
 

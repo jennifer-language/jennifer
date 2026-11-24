@@ -91,7 +91,7 @@ which supports the full surface.
 | `i2c`   | Every entry point (`open`, `read`, `write`, `readReg`, ...) | Runtime error pointing at the default `jennifer` binary on Linux. `I2C_SLAVE` ioctl; same build-tag split as `serial`. |
 | `gpio`  | Every entry point (`setup`, `read`, `write`, `release`, `chip`) | Runtime error pointing at the default `jennifer` binary on Linux. The `/dev/gpiochipN` GPIO v2 line ioctls; same build-tag split as `serial`. (The sysfs-backed `gpio` **module** is the portable default and runs on both binaries.) |
 | `sql`   | Every entry point (`open`, `query`, `exec`, ...) | Runtime error pointing at the default `jennifer` binary. The MySQL / Postgres drivers are heavyweight dependency trees that TinyGo does not compile, so `sqllib_tiny.go` stubs the whole surface (they are unreachable on stock `jennifer-tiny` anyway - no network stack). Build-tag split like `net`: `sqllib_std.go` (`!tinygo`) imports the drivers, `sqllib_tiny.go` (`tinygo`) returns friendly errors. |
-| `crypto` | **Only** the RSA / ECDSA / ML-KEM algorithm names (`"rsa-sha*"`, `"ecdsa-sha*"`, `"rsa2048"`.. / `"p256"`.. in `keypair` / `publicKey`, `"rsa-oaep-*"` in `wrap` / `unwrap`, `"mlkem768"`), plus `jwkPublic` / `jwkToPem` / `csr` | Runtime error naming the algorithm and pointing at the default `jennifer` binary. These pull in `crypto/rsa`, `crypto/ecdsa`, `crypto/x509` (PEM parsing / CSR), and `crypto/mlkem`, which are off the TinyGo build; `cryptolib_asym_tiny.go` / `cryptolib_acme_tiny.go` / `cryptolib_pqc_tiny.go` stub them. The rest of `crypto` - random, `deriveKey`, `hashPassword` / `verifyPassword`, AES-GCM, ChaCha20-Poly1305 and the AES block modes, Ed25519, X25519 (`crypto/ecdh` builds under TinyGo), and the `mtwei*` EC-SRP functions - runs on **both** binaries. (So JWT's HS\* / EdDSA work on `jennifer-tiny` but RS\* / ES\* do not, and `acme` needs the default binary.) |
+| `crypto` | **Only** the RSA / ECDSA / ML-KEM algorithm names (`"rsa-pkcs1-*"`, `"rsa-pss-*"`, `"ecdsa-sha*"`, `"rsa2048"`.. / `"p256"`.. in `keypair` / `publicKey`, `"rsa-oaep-*"` in `wrap` / `unwrap`, `"mlkem768"`), plus `jwkPublic` / `jwkToPem` / `csr` | Runtime error naming the algorithm and pointing at the default `jennifer` binary. These pull in `crypto/rsa`, `crypto/ecdsa`, `crypto/x509` (PEM parsing / CSR), and `crypto/mlkem`, which are off the TinyGo build; `cryptolib_asym_tiny.go` / `cryptolib_acme_tiny.go` / `cryptolib_pqc_tiny.go` stub them. The rest of `crypto` - random, `deriveKey`, `hashPassword` / `verifyPassword`, AES-GCM, ChaCha20-Poly1305 and the AES block modes, Ed25519, X25519 (`crypto/ecdh` builds under TinyGo), and the `mtwei*` EC-SRP functions - runs on **both** binaries. (So JWT's HS\* / EdDSA work on `jennifer-tiny` but RS\* / PS\* / ES\* do not, and `acme` needs the default binary.) |
 
 ### `net` on TinyGo is a build choice, not a hard limit
 
@@ -142,9 +142,9 @@ This fits the deployment target: minimal containers and embedded scripting
 hosts generally should *not* shell out to external processes (no shell, no
 other executables).
 
-The constants and the env / argv / flag helpers in `os`
+The constants and the env / argv helpers in `os`
 (`os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`,
-`os.ARGS`, `os.getEnv`, `os.hasFlag`, `os.flag`) work on both binaries.
+`os.ARGS`, `os.argsBytes`, `os.getEnv`, `os.getEnvBytes`) work on both binaries.
 `os.isTerminal` works on both too, but `jennifer-tiny` has no
 `golang.org/x/term`, so it falls back to the character-device mode bit
 (`isterminal_tinygo.go`): right for a pty, a pipe, and a file redirect, wrong
@@ -223,8 +223,8 @@ error on both binaries. `yaml` keeps its own pre-parse guard (it is
 backed by a Go dependency, not a hand-rolled descent). The same cap
 bounds **values** where they are built: a literal or an index,
 field or append write that would nest past it throws a catchable
-`"limit"`, so every walk over a value (copy, `==`, retag at a module
-boundary, display, the encoders) stays bounded on both binaries.
+`"limit"`, so every walk over a value (copy, `==`, display, the
+encoders) stays bounded on both binaries.
 
 The same 4 MB ceiling limits how deep the tree-walker can recurse at runtime.
 Function calls are not the only thing that stacks Go frames - nested blocks and

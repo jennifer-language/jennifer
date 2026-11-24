@@ -55,9 +55,9 @@ after the file is the program's own `os.ARGS`.
 
 - `--sysmoddir DIR` (or `--sysmoddir=DIR`) - the system module directory
   for bare `import "name.j";`. Overrides `JENNIFER_SYSMODDIR`, which
-  overrides the compile-time default. A named (CLI or env) dir that is
-  missing or not a directory refuses to start; the compile-time default is
-  best-effort. The resolved value is `meta.SYSMODDIR`.
+  overrides the build default (`<PREFIX>/share/jennifer/modules`, see
+  `make PREFIX=`). A named (CLI or env) dir that is missing or not a
+  directory refuses to start; the build default is best-effort. The resolved value is `meta.SYSMODDIR`.
 - `-I DIR` (or `-I=DIR`, repeatable) - add a directory to the module
   search path after the system dir. A `-I` dir *adds* names; a module name
   appearing in two search dirs is a hard error at load. (Resolution lives
@@ -82,10 +82,38 @@ after the file is the program's own `os.ARGS`.
   any inherited `JENNIFER_ENV`. Parsed in `main.go`'s `parseRunArgs` /
   `validRunProfile`.
 
-`jennifer version -v` (also `-vv`..., `--verbose`) reports every system
-directory the resolver uses - the system module dir and the vendor root - each
-with the layers (compile default / `JENNIFER_SYSMODDIR`, and env /
-`vendor/`-walk) behind it.
+`jennifer version -v` (also `-vv`..., `--verbose`) reports the install
+prefix the binary was built for (`make PREFIX=`, M29.4) and every path the
+interpreter uses, each with where it came from (a flag, the environment, the
+build, or the system):
+
+| Line | Layers |
+| --- | --- |
+| `prefix` | the build |
+| `system module dir` | `--sysmoddir`, `JENNIFER_SYSMODDIR`, the build (`<PREFIX>/share/jennifer/modules`) |
+| `docs dir` | the build (`<PREFIX>/share/doc/jennifer`) |
+| `resolv.conf`, `hosts` | `JENNIFER_RESOLV_CONF` / `JENNIFER_HOSTS`, `<PREFIX>/etc`, `/etc` (M29.5; the candidates looked for are listed) |
+| `temp dir` | `TMPDIR`, the system default |
+| `vendor root` | `JENNIFER_VENDOR`, the nearest `vendor/` above the current directory |
+
+```text
+jennifer 0.27.0
+prefix: /usr (build)
+system module dir: /usr/share/jennifer/modules (build)
+  build default: /usr/share/jennifer/modules
+docs dir: /usr/share/doc/jennifer (build)
+resolv.conf: /etc/resolv.conf (system)
+  looked for: JENNIFER_RESOLV_CONF (unset), /etc/resolv.conf
+hosts: /etc/hosts (system)
+  looked for: JENNIFER_HOSTS (unset), /etc/hosts
+temp dir: /tmp (system default)
+vendor root: (none; no JENNIFER_VENDOR and no vendor/ above cwd)
+```
+
+The prefix is written into `internal/version/version_gen.go` by
+`scripts/gen-version.sh` (an `init()`, since TinyGo ignores `-ldflags -X`);
+`internal/version/paths.go` derives every built-in path from it, so no other
+Go code names `/usr` or `/etc`.
 
 `jennifer run`:
 
