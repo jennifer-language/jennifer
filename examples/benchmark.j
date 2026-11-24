@@ -51,19 +51,24 @@ import "../modules/args.j" as args;
 
 # Command line: --format text (default) / json, --suite v1 (default) / v2 /
 # v3 / v4 / all.
-def cli as args.Result init args.parse(
+def cliParser as args.Parser init args.flag(
     args.flag(
-        args.flag(
-            args.parser("benchmark", "Jennifer benchmark suite"),
-            "format",
-            "",
-            "text",
-            "text or json"),
-        "suite",
+        args.parser("benchmark", "Jennifer benchmark suite"),
+        "format",
         "",
-        "v1",
-        "v1, v2, v3, v4 or all"),
-    os.ARGS);
+        "text",
+        "text or json"),
+    "suite",
+    "",
+    "v1",
+    "v1, v2, v3, v4 or all");
+def cli as args.Result;
+try {
+    $cli = args.parse($cliParser, os.ARGS);
+} catch (e) {
+    io.eprintf("%s\n\n%s\n", $e.message, args.usage($cliParser));
+    exit 2;
+}
 if ($cli.done) {
     io.printf("%s\n", $cli.helpText);
     exit 0;
