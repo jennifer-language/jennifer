@@ -7,6 +7,7 @@ func init() {
 	addDataKind("xml", "xml")
 	add("xml", `
 decode(string, map of string to string?) xml.Value
+decodeWith(string, xml.DecodeOptions) xml.Value
 encode(xml.Value) string
 encodePretty(xml.Value) string
 typeOf(xml.Value) string

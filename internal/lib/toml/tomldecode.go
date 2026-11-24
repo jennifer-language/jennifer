@@ -49,14 +49,29 @@ func formName(form uint8) string {
 // node is a toml.Value tree node.
 type node = doctree.Node
 
-// decodeToml parses a full TOML document into the root table (a map).
+// defaultCaps are toml.decode's caps (read at call time: tests lower
+// maxDecodedNodes).
+func defaultCaps() doctree.DecodeCaps {
+	return doctree.DecodeCaps{Depth: maxNestingDepth, Nodes: maxDecodedNodes}
+}
+
+// decodeToml is toml.decode: the document under the default caps.
 func decodeToml(src string) (node, error) {
+	return decodeTomlCaps("toml.decode", src, defaultCaps())
+}
+
+// decodeTomlCaps parses a full TOML document into the root table (a map), under
+// the given caps; verb (toml.decode / toml.decodeWith) opens every message.
+func decodeTomlCaps(verb, src string, caps doctree.DecodeCaps) (node, error) {
 	// TOML text is UTF-8; a string read as bytes or built by conversion may
 	// not be.
 	if off := limits.InvalidUTF8At(src); off >= 0 {
-		return node{}, dataerr.New("toml", "toml: invalid UTF-8 at byte %d", off)
+		return node{}, dataerr.New("toml", "%s: invalid UTF-8 at byte %d", verb, off)
 	}
 	d := &decoder{
+		verb:     verb,
+		maxDepth: caps.Depth,
+		maxNodes: caps.Nodes,
 		src:      src,
 		defined:  map[string]bool{},
 		arrays:   map[string]bool{},
@@ -83,6 +98,10 @@ const maxNestingDepth = limits.MaxNestingDepth
 var maxDecodedNodes = limits.MaxDecodedNodes
 
 type decoder struct {
+	verb     string // toml.decode / toml.decodeWith, the messages' prefix
+	maxDepth int    // nesting cap: maxNestingDepth or lower (decodeWith)
+	maxNodes int    // node cap: maxDecodedNodes or lower (decodeWith)
+
 	src   string
 	pos   int
 	line  int // 0-based; +1 for messages
@@ -147,12 +166,31 @@ func (d *decoder) stateKeys(segs []string) []string {
 }
 
 func (d *decoder) errf(format string, a ...interface{}) error {
-	return dataerr.New("toml", "toml: line %d: %s", d.line+1, fmt.Sprintf(format, a...))
+	return dataerr.New("toml", "%s", d.posf(format, a...))
 }
 
 // capf is errf for a reached cap, kind "limit" (limits.CapError).
 func (d *decoder) capf(format string, a ...interface{}) error {
-	return limits.Capf("toml: line %d: %s", d.line+1, fmt.Sprintf(format, a...))
+	return limits.Capf("%s", d.posf(format, a...))
+}
+
+// expectf is errf for a token that is missing: at the end of the text it says
+// "unexpected end of input" instead.
+func (d *decoder) expectf(format string, a ...interface{}) error {
+	if d.pos >= len(d.src) {
+		return d.errf("unexpected end of input")
+	}
+	return d.errf(format, a...)
+}
+
+// posf renders a message the way json.decode does: the verb, the text, then
+// the line and column (1-based, the column in bytes) of the current position.
+// It scans from the start: an error ends the decode, so it runs once.
+func (d *decoder) posf(format string, a ...interface{}) string {
+	pos := min(d.pos, len(d.src))
+	line := 1 + strings.Count(d.src[:pos], "\n")
+	col := pos - strings.LastIndexByte(d.src[:pos], '\n')
+	return fmt.Sprintf("%s: %s at line %d, column %d", d.verb, fmt.Sprintf(format, a...), line, col)
 }
 
 func (d *decoder) peek() byte {
@@ -295,8 +333,8 @@ func (d *decoder) run() (node, error) {
 	// Headers, dotted keys and inline values each cap their own nesting, but
 	// together they can stack deeper; bound the whole document like the other
 	// decoders do. The root table is implicit, so it does not count as a level.
-	if root.ExceedsDepth(maxNestingDepth + 1) {
-		return node{}, limits.Capf("toml: document nests deeper than %d levels", maxNestingDepth)
+	if root.ExceedsDepth(d.maxDepth + 1) {
+		return node{}, limits.Capf("%s: document nests deeper than %d levels", d.verb, d.maxDepth)
 	}
 	return root, nil
 }
@@ -312,7 +350,7 @@ func (d *decoder) parseTableHeader(root node) (node, error) {
 	}
 	d.skipInlineWS()
 	if d.peek() != ']' {
-		return node{}, d.errf("expected ']' to close table header")
+		return node{}, d.expectf("expected ']' to close table header")
 	}
 	d.advance()
 	keys := d.stateKeys(segs)
@@ -358,7 +396,7 @@ func (d *decoder) parseArrayTableHeader(root node) (node, error) {
 	}
 	d.skipInlineWS()
 	if d.peek() != ']' || d.at(1) != ']' {
-		return node{}, d.errf("expected ']]' to close array-of-tables header")
+		return node{}, d.expectf("expected ']]' to close array-of-tables header")
 	}
 	d.advance()
 	d.advance()
@@ -444,7 +482,7 @@ func (d *decoder) parseKeyValue(current node) error {
 	}
 	d.skipInlineWS()
 	if d.peek() != '=' {
-		return d.errf("expected '=' after key")
+		return d.expectf("expected '=' after key")
 	}
 	d.advance()
 	d.skipInlineWS()
@@ -498,8 +536,8 @@ func (d *decoder) parseKey() ([]string, error) {
 			return nil, err
 		}
 		segs = append(segs, seg)
-		if len(segs) > maxNestingDepth {
-			return nil, d.capf("key nesting exceeds %d segments", maxNestingDepth)
+		if len(segs) > d.maxDepth {
+			return nil, d.capf("key nesting exceeds %d segments", d.maxDepth)
 		}
 		d.skipInlineWS()
 		if d.peek() == '.' {
@@ -523,7 +561,7 @@ func (d *decoder) parseKeySegment() (string, error) {
 		}
 		return d.src[start:d.pos], nil
 	default:
-		return "", d.errf("expected a key")
+		return "", d.expectf("expected a key")
 	}
 }
 
@@ -535,8 +573,8 @@ func isBareKeyChar(c byte) bool {
 
 func (d *decoder) parseValue() (node, error) {
 	d.nodes++
-	if d.nodes > maxDecodedNodes {
-		return node{}, d.capf("document expands to more than %d nodes (input rejected as a decode bomb)", maxDecodedNodes)
+	if d.nodes > d.maxNodes {
+		return node{}, d.capf("document expands to more than %d nodes (input rejected as a decode bomb)", d.maxNodes)
 	}
 	switch c := d.peek(); {
 	case c == '"':
@@ -554,16 +592,16 @@ func (d *decoder) parseValue() (node, error) {
 		s, err := d.parseLiteralString()
 		return doctree.String(s), err
 	case c == '[':
-		if d.depth >= maxNestingDepth {
-			return node{}, d.capf("nesting exceeds %d levels", maxNestingDepth)
+		if d.depth >= d.maxDepth {
+			return node{}, d.capf("nesting exceeds %d levels", d.maxDepth)
 		}
 		d.depth++
 		v, err := d.parseArray()
 		d.depth--
 		return v, err
 	case c == '{':
-		if d.depth >= maxNestingDepth {
-			return node{}, d.capf("nesting exceeds %d levels", maxNestingDepth)
+		if d.depth >= d.maxDepth {
+			return node{}, d.capf("nesting exceeds %d levels", d.maxDepth)
 		}
 		d.depth++
 		v, err := d.parseInlineTable()
@@ -574,7 +612,7 @@ func (d *decoder) parseValue() (node, error) {
 	case c == '+' || c == '-' || c >= '0' && c <= '9' || c == 'i' || c == 'n':
 		return d.parseNumberOrDate()
 	default:
-		return node{}, d.errf("unexpected value starting with %q", string(c))
+		return node{}, d.expectf("unexpected value starting with %q", string(c))
 	}
 }
 
@@ -587,7 +625,7 @@ func (d *decoder) parseBool() (node, error) {
 		d.pos += 5
 		return doctree.Bool(false), nil
 	}
-	return node{}, d.errf("invalid boolean")
+	return node{}, d.expectf("invalid boolean")
 }
 
 // ----- strings -------------------------------------------------------------
@@ -842,7 +880,7 @@ func (d *decoder) parseArray() (node, error) {
 			d.advance()
 			return doctree.List(elems), nil
 		}
-		return node{}, d.errf("expected ',' or ']' in array")
+		return node{}, d.expectf("expected ',' or ']' in array")
 	}
 }
 
@@ -884,7 +922,7 @@ func (d *decoder) parseInlineTable() (node, error) {
 		}
 		d.skipInlineWS()
 		if d.peek() != '=' {
-			return node{}, d.errf("expected '=' in inline table")
+			return node{}, d.expectf("expected '=' in inline table")
 		}
 		d.advance()
 		d.skipInlineWS()
@@ -906,7 +944,7 @@ func (d *decoder) parseInlineTable() (node, error) {
 			d.advance()
 			return tbl, nil
 		default:
-			return node{}, d.errf("expected ',' or '}' in inline table")
+			return node{}, d.expectf("expected ',' or '}' in inline table")
 		}
 	}
 }
@@ -1062,7 +1100,7 @@ func (d *decoder) validateDatetime(text string, form uint8) error {
 // byte into the token) if the next character isn't 0-9.
 func (d *decoder) consumeDigit(ctx string) error {
 	if d.pos >= len(d.src) || !isDigit(d.src[d.pos]) {
-		return d.errf("invalid %s: expected a digit", ctx)
+		return d.expectf("invalid %s: expected a digit", ctx)
 	}
 	d.pos++
 	return nil
@@ -1072,7 +1110,7 @@ func (d *decoder) consumeDigit(ctx string) error {
 // consumes a newline into a date-time token, so d.line stays accurate.
 func (d *decoder) consumeExact(want byte, ctx string) error {
 	if d.pos >= len(d.src) || d.src[d.pos] != want {
-		return d.errf("invalid %s: expected %q", ctx, string(want))
+		return d.expectf("invalid %s: expected %q", ctx, string(want))
 	}
 	d.pos++
 	return nil
@@ -1125,7 +1163,7 @@ func (d *decoder) parseNumber() (node, error) {
 	}
 	tok := d.src[start:d.pos]
 	if tok == "" {
-		return node{}, d.errf("expected a number")
+		return node{}, d.expectf("expected a number")
 	}
 	return classifyNumber(tok, d)
 }

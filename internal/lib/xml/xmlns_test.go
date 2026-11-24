@@ -287,7 +287,7 @@ func TestDecodeFragmentWithPrefixMap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := decodeXMLIn(frag, seed)
+	root, err := decodeXMLIn(frag, seed, defaultCaps())
 	if err != nil {
 		t.Fatalf("decode with seed: %v", err)
 	}

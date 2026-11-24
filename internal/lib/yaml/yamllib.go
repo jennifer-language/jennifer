@@ -96,6 +96,15 @@ func Install(in *interpreter.Interpreter) {
 		return lib.Wrap(tree), nil
 	})
 
+	// Caps for decodeWith, each at most yaml.decode's and 0 for that default.
+	in.RegisterNamespacedStruct(LibraryName, "DecodeOptions", doctree.DecodeOptionFields())
+	in.RegisterNamespaced(LibraryName, "decodeWith", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+		return decodeWithFn(args)
+	})
+	in.RegisterNamespaced(LibraryName, "asBytes", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+		return asBytesFn(args)
+	})
+
 	in.RegisterNamespaced(LibraryName, "decodeAll", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		if len(args) != 1 {
 			return interpreter.Null(), fmt.Errorf("yaml.decodeAll expects 1 argument (text), got %d", len(args))
@@ -136,4 +145,39 @@ func encodeFn(args []interpreter.Value, flow bool) (interpreter.Value, error) {
 		return interpreter.Null(), fmt.Errorf("%s: %w", verb, err)
 	}
 	return interpreter.StringVal(s), nil
+}
+
+// asBytesFn implements `yaml.asBytes(v[, ptr]) -> bytes`: the payload of a
+// `!!binary` node (a bytes node; yaml.encode writes one for a `bytes` value).
+func asBytesFn(args []interpreter.Value) (interpreter.Value, error) {
+	const fn = "yaml.asBytes"
+	n, err := lib.NodeAt(fn, args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if n.Kind() != doctree.KindBytes {
+		return interpreter.Null(), fmt.Errorf("%s: node is a %s, not bytes (a !!binary node)", fn, lib.NodeType(n))
+	}
+	return interpreter.BytesVal([]byte(n.Str())), nil
+}
+
+// decodeWithFn implements `yaml.decodeWith(text, yaml.DecodeOptions)`: decode
+// one document under lower caps than yaml.decode's.
+func decodeWithFn(args []interpreter.Value) (interpreter.Value, error) {
+	const fn = "yaml.decodeWith"
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("%s expects 2 arguments (string, yaml.DecodeOptions), got %d", fn, len(args))
+	}
+	if args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("%s: argument 1 must be string, got %s", fn, args[0].Kind)
+	}
+	caps, err := doctree.ReadDecodeOptions(fn, LibraryName, args[1], defaultCaps())
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	tree, err := decodeYamlCaps(args[0].Str, caps)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return lib.Wrap(tree), nil
 }

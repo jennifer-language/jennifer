@@ -15,11 +15,12 @@ information); this is entropy-based *size reduction*. Backed by Go's
 | Call                              | Returns           | Notes                                                          |
 | --------------------------------- | ----------------- | -------------------------------------------------------------- |
 | `compress.pack(algo, b[, level])`| `bytes`           | Compress; `algo` is `"gzip"` / `"zlib"` / `"deflate"`.         |
-| `compress.unpack(algo, b[, maxBytes])` | `bytes`     | Decompress; same `algo`. Output is capped at `maxBytes` (default 256 MiB, 32 MiB on `jennifer-tiny`). |
+| `compress.unpack(algo, b)`        | `bytes`           | Decompress; same `algo`. Output is capped at 256 MiB (32 MiB on `jennifer-tiny`). |
+| `compress.unpackWith(algo, b, o)` | `bytes`           | Same, with the cap of a `compress.UnpackOptions{maxBytes}` (see below). |
 | `compress.stream(algo [, level])` | `compress.Stream` | Start a streaming compressor.                                  |
 | `compress.update(stream, b)`      | `null`            | Feed one chunk of input.                                       |
 | `compress.finalize(stream)`       | `bytes`           | Close and return the full compressed output.                   |
-| `compress.discard(stream)`        | `null`            | Drop a stream without flushing/returning output, releasing its state. Subsequent calls error. |
+| `compress.discard(stream)`        | `null`            | Drop a stream without flushing/returning output, releasing its state. On a finalized or discarded stream it does nothing, so `defer compress.discard($s);` is safe. |
 
 `level` is optional: `"fast"`, `"default"` (when omitted), or `"best"`.
 
@@ -29,20 +30,32 @@ catchable `Error{kind: "limit"}` naming it (the same kind
 [`archive`](archive.md) uses). The default cap is 256 MiB (268435456 bytes;
 32 MiB on `jennifer-tiny`). Reaching it can cost two to three times that in peak
 memory: `gzip` sizes its output from the stream's size trailer, `zlib` and
-`deflate` grow the buffer as data arrives, and binding the result copies it. Pass `maxBytes` (an `int`, at least `1`;
-`9223372036854775807` reads everything) to set your own: the size the data
-declares, or a sane maximum, when the input is untrusted (a compressed frame
-from a file, an HTTP body with `Content-Encoding: gzip`):
+`deflate` grow the buffer as data arrives, and binding the result copies it.
+`compress.unpackWith` sets the cap per call: the size the data declares, or a
+sane maximum, when the input is untrusted (a compressed frame from a file, an
+HTTP body with `Content-Encoding: gzip`):
+
+| `UnpackOptions.maxBytes` | Cap |
+|---|---|
+| `0` | the default (256 MiB; 32 MiB on `jennifer-tiny`) |
+| `1` and up | that many bytes, also above the default for trusted input |
+| `math.MAX_INT` | none: reads the whole stream |
+| negative | a `"runtime"` error |
 
 ```jennifer
 try {
-    def body as bytes init compress.unpack("gzip", $raw, 16777216);   # 16 MiB
+    def body as bytes init compress.unpackWith("gzip", $raw, compress.UnpackOptions{maxBytes: 16777216});   # 16 MiB
 } catch (e) {
     # e.kind == "limit": the body expands past 16 MiB
 }
 ```
 
-`maxBytes` may also raise the cap above the default for trusted input.
+**After the stream.** `"zlib"` and `"deflate"` data is one stream: any byte
+after its end (junk, padding, a second stream) is kind `"compress"`.
+`"gzip"` data may hold several members (RFC 1952; `gzip -d` reads them, and
+`cat a.gz b.gz` makes one): `unpack` returns the members' output joined, and
+bytes after the last member that are not another member (zero padding
+included) are kind `"compress"`.
 
 | `algo` | Format | Use |
 | ------ | ------ | --- |
@@ -54,9 +67,19 @@ try {
 
 | Kind | Raised for |
 |---|---|
-| `"compress"` | input `unpack` cannot decompress: a bad header, corrupt data, a CRC-32 / Adler-32 mismatch, a stream that ends early or is followed by bytes that are not another stream |
-| `"limit"` | `unpack` output past `maxBytes`, more than the open-stream cap |
-| `"runtime"` | misuse: a wrong argument, an unknown `algo` or `level`, `maxBytes` below 1, a finalized or discarded stream |
+| `"compress"` | input `unpack` / `unpackWith` cannot decompress: a bad header, corrupt data, a CRC-32 / Adler-32 mismatch, a stream that ends early, any byte after a zlib or deflate stream, bytes after a gzip member that are not another member |
+| `"limit"` | output past the cap, more than the open-stream cap |
+| `"closed"` | `update` / `finalize` on a finalized or discarded stream (`compress.update: stream 3 has already been finalized or discarded, or never existed`) |
+| `"runtime"` | misuse: a wrong argument, an unknown `algo` or `level`, a negative `maxBytes` |
+
+### Deprecated
+
+| Call | Instead | Removed |
+|---|---|---|
+| `compress.unpack(algo, b, maxBytes)` | `compress.unpackWith(algo, b, compress.UnpackOptions{maxBytes: ...})` | 0.29.0 |
+
+The positional `maxBytes` still works and still refuses a value below 1.
+Lint reports it as L301.
 
 ## One-shot
 
@@ -85,7 +108,7 @@ def packed as bytes init compress.finalize($s);   # equals compress.pack of the 
 
 `compress.Stream` is a handle (like `hash.Stream`): copies share the
 underlying state, and `finalize` consumes it: a second `finalize` or
-`update` on the same handle errors. Each open stream holds a compressor of up to
+`update` on the same handle throws kind `"closed"`, a `discard` does nothing. Each open stream holds a compressor of up to
 about 1 MiB, so at most 256 streams (32 on `jennifer-tiny`) are open at once;
 `compress.stream` past that raises a catchable `Error{kind: "limit"}`.
 

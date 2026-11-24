@@ -23,6 +23,7 @@ asDecimal(yaml.Value, string?) decimal.Decimal
 isNull(yaml.Value, string?) bool
 isDatetime(yaml.Value, string?) bool
 asDatetime(yaml.Value, string?) time.Time
+asBytes(yaml.Value, string?) bytes
 list(list of any?) yaml.Value
 map(map of string to any?) yaml.Value
 set(yaml.Value, string, any) yaml.Value
@@ -31,6 +32,7 @@ append(yaml.Value, string, any) yaml.Value
 remove(yaml.Value, string) yaml.Value
 move(yaml.Value, string, string) yaml.Value
 decode(string) yaml.Value
+decodeWith(string, yaml.DecodeOptions) yaml.Value
 decodeAll(string) list of yaml.Value
 encode(any) string
 encodePretty(any) string

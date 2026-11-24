@@ -71,10 +71,7 @@ func Install(in *interpreter.Interpreter) {
 	// Caps for decodeWith, each at most json.decode's and 0 for that default:
 	// a service decoding untrusted input lowers them to bound what a document
 	// may build (2M nodes can take some 300 MB from 6 MB of text).
-	in.RegisterNamespacedStruct(LibraryName, "DecodeOptions", []parser.StructField{
-		{Name: "maxDepth", Type: parser.PrimitiveType(parser.TypeInt)},
-		{Name: "maxNodes", Type: parser.PrimitiveType(parser.TypeInt)},
-	})
+	in.RegisterNamespacedStruct(LibraryName, "DecodeOptions", doctree.DecodeOptionFields())
 	in.RegisterNamespaced(LibraryName, "decodeWith", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		tree, err := decodeWithFn(args)
 		if err != nil {

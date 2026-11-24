@@ -24,6 +24,7 @@ import (
 
 	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/lib/doctree"
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
@@ -139,26 +140,44 @@ func (e *elem) DisplayNative() string {
 // rejected (an ASN.1 value is a single element). Every error but a reached cap
 // ("limit") is malformed input, kind "asn1".
 func decodeTree(data []byte) (*elem, error) {
-	nodes := 0
-	elem, rest, err := decodeOne(data, 0, &nodes)
+	return decodeTreeCaps("asn1.decode", data, defaultCaps())
+}
+
+// defaultCaps are asn1.decode's caps (read at call time: tests lower maxNodes).
+func defaultCaps() doctree.DecodeCaps {
+	return doctree.DecodeCaps{Depth: limits.MaxNestingDepth, Nodes: maxNodes}
+}
+
+// decodeState is one decode's element count and caps.
+type decodeState struct {
+	nodes    int
+	maxDepth int
+	maxNodes int
+}
+
+// decodeTreeCaps is decodeTree under the given caps (asn1.decodeWith); fn
+// names the call in the trailing-bytes message.
+func decodeTreeCaps(fn string, data []byte, caps doctree.DecodeCaps) (*elem, error) {
+	st := &decodeState{maxDepth: caps.Depth, maxNodes: caps.Nodes}
+	elem, rest, err := decodeOne(data, 0, st)
 	if err != nil {
 		return nil, dataerr.Wrap("asn1", err)
 	}
 	if len(rest) != 0 {
-		return nil, dataerr.New("asn1", "asn1.decode: %d trailing byte(s) after the top-level element", len(rest))
+		return nil, dataerr.New("asn1", "%s: %d trailing byte(s) after the top-level element", fn, len(rest))
 	}
 	return elem, nil
 }
 
 // decodeOne parses one BER element from data, returning it and the unconsumed
-// remainder. depth guards recursion; nodes counts materialised elements.
-func decodeOne(data []byte, depth int, nodes *int) (*elem, []byte, error) {
-	if depth > limits.MaxNestingDepth {
-		return nil, nil, limits.Capf("asn1.decode: nesting deeper than the %d-level limit", limits.MaxNestingDepth)
+// remainder. depth guards recursion; st counts materialised elements.
+func decodeOne(data []byte, depth int, st *decodeState) (*elem, []byte, error) {
+	if depth > st.maxDepth {
+		return nil, nil, limits.Capf("asn1.decode: nesting deeper than the %d-level limit", st.maxDepth)
 	}
-	*nodes++
-	if *nodes > maxNodes {
-		return nil, nil, limits.Capf("asn1.decode: more than %d elements (input rejected as a decode bomb)", maxNodes)
+	st.nodes++
+	if st.nodes > st.maxNodes {
+		return nil, nil, limits.Capf("asn1.decode: more than %d elements (input rejected as a decode bomb)", st.maxNodes)
 	}
 	if len(data) < 2 {
 		return nil, nil, fmt.Errorf("asn1.decode: truncated element (need at least an identifier and a length octet)")
@@ -243,7 +262,7 @@ func decodeOne(data []byte, depth int, nodes *int) (*elem, []byte, error) {
 			if len(rest) == 0 {
 				return nil, nil, fmt.Errorf("asn1.decode: unterminated indefinite-length element")
 			}
-			child, r, err := decodeOne(rest, depth+1, nodes)
+			child, r, err := decodeOne(rest, depth+1, st)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -264,7 +283,7 @@ func decodeOne(data []byte, depth int, nodes *int) (*elem, []byte, error) {
 		var children []*elem
 		cdata := content
 		for len(cdata) > 0 {
-			child, r, err := decodeOne(cdata, depth+1, nodes)
+			child, r, err := decodeOne(cdata, depth+1, st)
 			if err != nil {
 				return nil, nil, err
 			}

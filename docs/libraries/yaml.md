@@ -24,6 +24,7 @@ binaries**.
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `yaml.decode(text)` | `yaml.Value` | Parse a single-document YAML string into an opaque handle. A multi-document stream errors (use `decodeAll`); an empty string decodes to `null`. |
+| `yaml.decodeWith(text, o)` | `yaml.Value` | `decode` under the lower caps of a `yaml.DecodeOptions{maxDepth, maxNodes}` (see [Decode caps](#decode-caps)). |
 | `yaml.decodeAll(text)` | `list of yaml.Value` | Parse every document of a `---`-separated stream. |
 | `yaml.encode(v)` | `string` | Render to **compact flow style** (`{a: 1, b: [x, y]}`). |
 | `yaml.encodePretty(v)` | `string` | Render to **readable block style** (indented, one entry per line). |
@@ -39,6 +40,7 @@ binaries**.
 | `yaml.asFloats(v[, ptr])` / `asInts` / `asStrings` | `list of float` / `int` / `string` | A whole list in one call, each element read as `asFloat` / `asInt` / `asString` reads it ([json](json.md) has the details). |
 | `yaml.asBool(v[, ptr])` | `bool` | |
 | `yaml.isNull(v[, ptr])` | `bool` | Whether the addressed node is `null`. |
+| `yaml.asBytes(v[, ptr])` | `bytes` | A `!!binary` node (`typeOf` reports `bytes`) as its decoded bytes. |
 | `yaml.asDatetime(v[, ptr])` | `time.Time` | A YAML timestamp scalar as a `time.Time` (needs `use time;`). |
 | `yaml.isDatetime(v[, ptr])` | `bool` | Whether the addressed node is a timestamp. |
 | `yaml.map()` | `yaml.Value` | A fresh empty mapping, to build a document from scratch. |
@@ -80,7 +82,7 @@ type (`"42"` stays a string), and `yaml.encode` re-quotes a string that reads
 like another type. An integer too large for a 64-bit `int` keeps every digit
 (an `int` node that `asDecimal` reads and `encode` writes back), not a lossy
 `float`. Mappings become maps in document
-order; sequences become lists; a `!!binary` scalar decodes to `bytes`. A non-scalar mapping key (a `? [a, b]`
+order; sequences become lists; a `!!binary` scalar decodes to a `bytes` node, which `yaml.asBytes` reads. A non-scalar mapping key (a `? [a, b]`
 complex key) and a **duplicate mapping key** are both rejected.
 
 Numbers follow YAML 1.2. The spellings YAML 1.1 parsers still read
@@ -100,6 +102,23 @@ its scalar decodes as the plain string, its collection as the map or list.
 An alias shares the converted value of its anchor rather than copying it, so a
 block of defaults merged into many places is held once in memory.
 
+### Decode caps
+
+| Cap | Default (`jennifer` / `jennifer-tiny`) | `DecodeOptions` field |
+|---|---|---|
+| Nesting depth of the tree (aliases included) | 1000 / 64 | `maxDepth` |
+| Tree nodes (an alias counted at every place it appears) | 2,097,152 / 262,144 | `maxNodes` |
+| Nesting depth of the text, before the parse | 128 | - |
+| Input size | 4 MiB / 512 KiB | - |
+
+A reached cap is kind `"limit"`. `yaml.decodeWith` lowers the first two per
+call, as `json.decodeWith` does: 0 keeps the default; a value above it, or a
+negative one, is a `"runtime"` error naming the allowed range.
+
+```jennifer
+def doc as yaml.Value init yaml.decodeWith($text, yaml.DecodeOptions{maxDepth: 16, maxNodes: 10000});
+```
+
 `yaml.decode` guards against resource-exhaustion input with normal (catchable)
 decode errors: a raw-text pre-scan rejects structural nesting deeper than 128
 levels **before** the parse runs (the underlying parser is recursive, so a
@@ -118,9 +137,9 @@ one twice) from exhausting memory. Each of these caps is kind `"limit"`.
 
 | Kind | Raised for |
 |---|---|
-| `"yaml"` | malformed text in `decode` / `decodeAll`: a syntax error, a duplicate key, an undefined alias, a scalar that does not fit its tag, a YAML 1.1-only number, a bad merge source, invalid UTF-8; more than one document in `decode`; a number an accessor cannot return exactly (`asInt` past int64, `asFloat` past what a float holds) |
+| `"yaml"` | malformed text in `decode` / `decodeWith` / `decodeAll`: a syntax error, a duplicate key, an undefined alias, a scalar that does not fit its tag, a YAML 1.1-only number, a bad merge source, invalid UTF-8; more than one document in `decode`; a number an accessor cannot return exactly (`asInt` past int64, `asFloat` past what a float holds) |
 | `"limit"` | a reached cap (above) |
-| `"runtime"` | misuse: a wrong argument, an unencodable value, an accessor on a node of another type, a malformed pointer |
+| `"runtime"` | misuse: a wrong argument, `DecodeOptions` out of range, an unencodable value, an accessor on a node of another type (`asBytes` on a string), a malformed pointer |
 
 The decoded tree is the same compact, immutable one `json` and `toml` use, so
 binding, passing or `yaml.get`-ing a `yaml.Value` shares the tree instead of

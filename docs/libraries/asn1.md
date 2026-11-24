@@ -51,6 +51,7 @@ JSON Pointer the `json` family uses over map keys.)
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `asn1.decode(bytes)`         | `asn1.Value` | Parse one BER element; trailing bytes are an error. |
+| `asn1.decodeWith(bytes, o)`  | `asn1.Value` | Same, under the lower caps of an `asn1.DecodeOptions{maxDepth, maxNodes}` (see [Strictness and limits](#strictness-and-limits)). |
 | `asn1.typeOf(v[, ptr])`      | `string`     | A friendly type: the universal type name (`integer`, `octetString`, `sequence`, ...) or the class (`context` / `application` / `private`) for a non-universal tag. |
 | `asn1.tagClass(v[, ptr])`    | `string`     | `universal` / `application` / `context` / `private`. |
 | `asn1.tagNumber(v[, ptr])`   | `int`        | The numeric tag. |
@@ -94,17 +95,26 @@ the top-level value, and a leaf extractor called on the wrong element type.
 
 | Limit | Default binary | `jennifer-tiny` | Error kind |
 | ----- | -------------- | --------------- | ---------- |
-| Nesting depth (`decode` and `encode`) | 1000 levels | 64 levels | `"limit"` |
-| Elements one `decode` materialises (about 100 bytes each) | 2,097,152 | 262,144 | `"limit"` |
+| Nesting depth (`decode` and `encode`; `DecodeOptions.maxDepth`) | 1000 levels | 64 levels | `"limit"` |
+| Elements one `decode` materialises, about 100 bytes each (`DecodeOptions.maxNodes`) | 2,097,152 | 262,144 | `"limit"` |
 | Size of one `encode` result (e.g. a value reusing one sub-value many times) | 256 MiB | 32 MiB | `"limit"` |
+
+`asn1.decodeWith` lowers the two decode caps per call, as `json.decodeWith`
+does: 0 keeps the default; a value above it, or a negative one, is a
+`"runtime"` error naming the allowed range. `maxDepth` counts the levels below
+the top-level element (`maxDepth: 1` reads `SEQUENCE { INTEGER }`).
+
+```jennifer
+def msg as asn1.Value init asn1.decodeWith($wire, asn1.DecodeOptions{maxDepth: 16, maxNodes: 4096});
+```
 
 ### Errors
 
 | Kind | Raised for |
 |---|---|
-| `"asn1"` | malformed input in `decode`: a truncated element, a length past the data, an indefinite length on a primitive, an unterminated indefinite element, trailing bytes. Malformed content a leaf extractor reads: an empty `INTEGER` (`asInt`), a `BOOLEAN` not one octet (`asBool`), a text type that is not UTF-8 (`asString`), an empty or truncated `OID` (`asOid`) |
+| `"asn1"` | malformed input in `decode` / `decodeWith`: a truncated element, a length past the data, an indefinite length on a primitive, an unterminated indefinite element, trailing bytes. Malformed content a leaf extractor reads: an empty `INTEGER` (`asInt`), a `BOOLEAN` not one octet (`asBool`), a text type that is not UTF-8 (`asString`), an empty or truncated `OID` (`asOid`) |
 | `"limit"` | a reached cap (above) |
-| `"runtime"` | misuse: a wrong argument, a builder value out of range, a leaf extractor on an element of another type, a pointer past the tree; content well-formed but past what the extractor returns (an `INTEGER` wider than 64 bits, an `OID` arc too large, an `OCTET STRING` that is not UTF-8 read with `asString`) |
+| `"runtime"` | misuse: a wrong argument, `DecodeOptions` out of range, a builder value out of range, a leaf extractor on an element of another type, a pointer past the tree; content well-formed but past what the extractor returns (an `INTEGER` wider than 64 bits, an `OID` arc too large, an `OCTET STRING` that is not UTF-8 read with `asString`) |
 
 ## Scope
 

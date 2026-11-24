@@ -8,6 +8,7 @@ func init() {
 	add("compress", `
 pack(string, bytes, string?) bytes
 unpack(string, bytes, int?) bytes
+unpackWith(string, bytes, compress.UnpackOptions) bytes
 stream(string, string?) compress.Stream
 update(compress.Stream, bytes) null
 finalize(compress.Stream) bytes

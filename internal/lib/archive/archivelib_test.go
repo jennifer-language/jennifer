@@ -8,6 +8,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"io/fs"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -204,7 +205,8 @@ func TestUnpackAggregateCaps(t *testing.T) {
 
 // TestUnpackWithCaps covers caller-set caps and the kind:"limit" contract: each
 // dimension trips its own cap, a breach classifies as kind "limit", a 0 field
-// takes the default, and a negative field disables the cap.
+// takes the default, math.MAX_INT disables the cap, a negative field throws
+// "runtime".
 func TestUnpackWithCaps(t *testing.T) {
 	opts := func(total, entryBytes, entries int64) interpreter.Value {
 		return interpreter.NamespacedStructVal("archive", "UnpackOptions", []interpreter.StructField{
@@ -240,9 +242,44 @@ func TestUnpackWithCaps(t *testing.T) {
 	if _, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("tar"), packed, opts(0, 0, 0)}); err != nil {
 		t.Errorf("default (all-zero) options should unpack: %v", err)
 	}
-	// A negative field disables that cap (unlimited): a tiny entry cap of -1 passes.
-	if _, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("tar"), packed, opts(-1, -1, -1)}); err != nil {
-		t.Errorf("unlimited (negative) options should unpack: %v", err)
+	// math.MAX_INT disables every cap, with the defaults lowered so they
+	// would trip.
+	savedTotal, savedEntries := maxDecompressed, maxEntries
+	maxDecompressed, maxEntries = 100, 1
+	defer func() { maxDecompressed, maxEntries = savedTotal, savedEntries }()
+	check("lowered defaults", opts(0, 0, 0))
+	if _, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("tar"), packed, opts(math.MaxInt64, math.MaxInt64, math.MaxInt64)}); err != nil {
+		t.Errorf("math.MAX_INT options should unpack: %v", err)
+	}
+	// A negative field is misuse ("runtime"), in every dimension.
+	for i, o := range []interpreter.Value{opts(-1, 0, 0), opts(0, -1, 0), opts(0, 0, -1)} {
+		_, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("tar"), packed, o})
+		if err == nil {
+			t.Errorf("negative field %d: expected an error", i)
+			continue
+		}
+		if kind := kindOf(err); kind != "" {
+			t.Errorf("negative field %d: kind = %q, want runtime (\"\")", i, kind)
+		}
+	}
+}
+
+// TestTgzAlias: the deprecated "tgz" format still packs and unpacks, and is
+// "tar.gz" exactly.
+func TestTgzAlias(t *testing.T) {
+	es := []entry{{name: "a.txt", data: []byte("hi"), mtime: 1700000000}}
+	packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("tgz"), entriesVal(es)})
+	if err != nil {
+		t.Fatalf("pack tgz: %v", err)
+	}
+	for _, format := range []string{"tgz", "tar.gz"} {
+		out, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{str(format), packed})
+		if err != nil {
+			t.Fatalf("unpack %s: %v", format, err)
+		}
+		if len(out.List) != 1 {
+			t.Fatalf("unpack %s: %d entries, want 1", format, len(out.List))
+		}
 	}
 }
 

@@ -7,6 +7,7 @@ func init() {
 	addDataKind("images", "images")
 	add("images", `
 decode(bytes, int?) images.Image
+decodeWith(bytes, images.DecodeOptions) images.Image
 info(bytes) images.Info
 encode(string, images.Image, int?) bytes
 create(int, int, images.Color?) images.Image
@@ -31,4 +32,5 @@ dither(images.Image) images.Image
 fill(images.Image, int, int, int, int, images.Color) images.Image
 draw(images.Image, images.Image, int, int) images.Image
 `)
+	deprecate("images", "rgba", "`images.Color{r: ..., g: ..., b: ..., a: ...}`", "0.29.0")
 }

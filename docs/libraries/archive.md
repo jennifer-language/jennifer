@@ -26,8 +26,8 @@ def files as list of archive.Entry init archive.unpackWith("tar.gz", $tgz,
 | `archive.unpack(format, b)`     | `list of archive.Entry` | Read a bundle back (default caps).             |
 | `archive.unpackWith(format, b, opts)` | `list of archive.Entry` | Read a bundle with caller-set caps (`archive.UnpackOptions`). |
 
-`format` is `"tar"`, `"zip"`, or the gzip combo `"tar.gz"` (alias
-`"tgz"`). Errors are listed [below](#errors).
+`format` is `"tar"`, `"zip"`, or the gzip combo `"tar.gz"`. Errors are
+listed [below](#errors).
 
 `unpack` bounds untrusted input: the total decompressed payload of one
 call (summed across every entry) is capped at 256 MiB (32 MiB on
@@ -74,10 +74,14 @@ def opts as archive.UnpackOptions init archive.UnpackOptions{
 def entries as list of archive.Entry init archive.unpackWith("zip", $kmz, $opts);
 ```
 
-Each cap field: **`0` takes the default** (so all three at `0`, with
-`skipSpecial: false`, behaves exactly like `unpack`), **a positive value** sets
-that cap (up to `9223372036854775807`, which reads everything), and **a
-negative value disables it** (unlimited - for a fully trusted archive). Exceeding any cap raises `Error{kind: "limit"}`, the same as `unpack`.
+| Cap field value | Cap |
+|---|---|
+| `0` | the default (so all three at `0`, with `skipSpecial: false`, is `unpack`) |
+| `1` and up | that value |
+| `math.MAX_INT` | none (for a fully trusted archive) |
+| negative | a `"runtime"` error |
+
+Exceeding any cap raises `Error{kind: "limit"}`, the same as `unpack`.
 Like any library struct literal, `UnpackOptions{...}` may leave fields out; a
 left-out field takes its zero value (so `0`, the default cap).
 
@@ -87,7 +91,16 @@ left-out field takes its zero value (so `0`, the default cap).
 |---|---|
 | `"archive"` | a bundle `unpack` / `unpackWith` cannot read: not the format, truncated, corrupt compressed data or a checksum mismatch, an absolute or `..` member name, a symbolic link / device / FIFO / socket member (without `skipSpecial`), a hard link to no earlier regular file |
 | `"limit"` | a reached cap: the total size, an entry's size, the member count |
-| `"runtime"` | misuse: a wrong argument, an unknown format, an entry `pack` refuses (an unsafe name, a `mode` outside `0` to `0o7777`) |
+| `"runtime"` | misuse: a wrong argument, an unknown format, a negative `UnpackOptions` cap, an entry `pack` refuses (an unsafe name, a `mode` outside `0` to `0o7777`) |
+
+### Deprecated
+
+| Use | Instead | Removed |
+|---|---|---|
+| the format `"tgz"` (`pack`, `unpack`, `unpackWith`) | `"tar.gz"` | 0.29.0 |
+
+`"tgz"` still works. Lint reports it as L301 where the format is a string
+literal.
 
 ## `archive.Entry`
 

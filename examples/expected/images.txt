@@ -6,4 +6,4 @@ PNG round-trips exactly: true
 thumbnail 100x63
 stamped corner images.Color{r: 135, g: 206, b: 235, a: 255}
 dithered: 18673 of 64000 pixels black
-limit: images.decode: a 320x200 image exceeds the 1000-pixel limit
+limit: images.decodeWith: a 320x200 image exceeds the 1000-pixel limit

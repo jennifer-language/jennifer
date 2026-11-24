@@ -52,9 +52,11 @@ var maxNodes = limits.MaxDecodedNodes
 // rejects a real one.
 var maxDecodeBytes = 2 * limits.MaxDecodedNodes
 
-// converter carries the per-decode budget counters.
+// converter carries the per-decode budget counters and caps.
 type converter struct {
-	nodes int
+	nodes    int
+	maxDepth int // maxNestingDepth or lower (decodeWith)
+	maxNodes int // maxNodes or lower (decodeWith)
 	// anchored holds each anchored node's conversion, so an alias shares it
 	// instead of converting the subtree again: the tree is immutable, and a
 	// document that reuses a block of defaults stays one copy in memory.
@@ -65,7 +67,17 @@ type converter struct {
 // with more than one document is an error pointing at decodeAll; an empty stream
 // yields a null value.
 func decodeYaml(src string) (node, error) {
-	docs, err := decodeStream(src)
+	return decodeYamlCaps(src, defaultCaps())
+}
+
+// defaultCaps are yaml.decode's caps (read at call time: tests lower maxNodes).
+func defaultCaps() doctree.DecodeCaps {
+	return doctree.DecodeCaps{Depth: maxNestingDepth, Nodes: maxNodes}
+}
+
+// decodeYamlCaps is decodeYaml under the given caps (yaml.decodeWith).
+func decodeYamlCaps(src string, caps doctree.DecodeCaps) (node, error) {
+	docs, err := decodeStream(src, caps)
 	if err != nil {
 		return node{}, err
 	}
@@ -81,17 +93,17 @@ func decodeYaml(src string) (node, error) {
 // decodeAllYaml parses every document of a YAML stream into a slice of root
 // values (each later wrapped as a yaml.Value).
 func decodeAllYaml(src string) ([]node, error) {
-	return decodeStream(src)
+	return decodeStream(src, defaultCaps())
 }
 
 // decodeStream runs the yaml.v3 streaming decoder and converts each document.
 // Every error but a reached cap ("limit") is malformed input, kind "yaml".
-func decodeStream(src string) ([]node, error) {
-	docs, err := decodeStreamRaw(src)
+func decodeStream(src string, caps doctree.DecodeCaps) ([]node, error) {
+	docs, err := decodeStreamRaw(src, caps)
 	return docs, dataerr.Wrap("yaml", err)
 }
 
-func decodeStreamRaw(src string) ([]node, error) {
+func decodeStreamRaw(src string, caps doctree.DecodeCaps) ([]node, error) {
 	if len(src) > maxDecodeBytes {
 		return nil, limits.Capf("yaml.decode: input is %d bytes, over the %d-byte limit (input rejected as a decode bomb)", len(src), maxDecodeBytes)
 	}
@@ -103,7 +115,7 @@ func decodeStreamRaw(src string) ([]node, error) {
 	// One converter for the whole stream: its node budget bounds the decode,
 	// not each document (a many-document file of alias bombs would otherwise
 	// multiply the cap).
-	c := &converter{}
+	c := &converter{maxDepth: caps.Depth, maxNodes: caps.Nodes}
 	for {
 		var doc yaml.Node
 		err := dec.Decode(&doc)
@@ -146,12 +158,12 @@ func isIntegerText(s string) bool {
 
 // node converts one yaml.Node into a tree node.
 func (c *converter) node(n *yaml.Node, depth int) (node, error) {
-	if depth > maxNestingDepth {
-		return node{}, limits.Capf("yaml.decode: nesting too deep (limit %d)", maxNestingDepth)
+	if depth > c.maxDepth {
+		return node{}, limits.Capf("yaml.decode: nesting too deep (limit %d)", c.maxDepth)
 	}
 	c.nodes++
-	if c.nodes > maxNodes {
-		return node{}, limits.Capf("yaml.decode: document expands to too many nodes (limit %d); possible alias bomb", maxNodes)
+	if c.nodes > c.maxNodes {
+		return node{}, limits.Capf("yaml.decode: document expands to too many nodes (limit %d); possible alias bomb", c.maxNodes)
 	}
 	switch n.Kind {
 	case yaml.DocumentNode:
@@ -166,13 +178,13 @@ func (c *converter) node(n *yaml.Node, depth int) (node, error) {
 		if v, ok := c.anchored[n.Alias]; ok {
 			// The node budget counts the expansion, as though it were
 			// converted again (one node is already counted above).
-			if size := v.ExpandedSize(); size > uint64(maxNodes) || c.nodes+int(size)-1 > maxNodes {
-				return node{}, limits.Capf("yaml.decode: document expands to too many nodes (limit %d); possible alias bomb", maxNodes)
+			if size := v.ExpandedSize(); size > uint64(c.maxNodes) || c.nodes+int(size)-1 > c.maxNodes {
+				return node{}, limits.Capf("yaml.decode: document expands to too many nodes (limit %d); possible alias bomb", c.maxNodes)
 			} else {
 				c.nodes += int(size) - 1
 			}
-			if depth+v.Height() > maxNestingDepth {
-				return node{}, limits.Capf("yaml.decode: nesting too deep (limit %d)", maxNestingDepth)
+			if depth+v.Height() > c.maxDepth {
+				return node{}, limits.Capf("yaml.decode: nesting too deep (limit %d)", c.maxDepth)
 			}
 			return v, nil
 		}

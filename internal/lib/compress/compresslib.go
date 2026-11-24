@@ -36,8 +36,8 @@ const dataKind = "compress"
 
 // maxDecompressed is unpack's default output cap, so a small "zip bomb" input
 // cannot expand to gigabytes in memory: limits.MaxAllocBytes (256 MiB, 32 MiB
-// on jennifer-tiny). A caller lowers (or raises) it with unpack's optional
-// maxBytes argument.
+// on jennifer-tiny). A caller lowers (or raises) it with unpackWith's
+// UnpackOptions.maxBytes.
 const maxDecompressed = limits.MaxAllocBytes
 
 // maxDeflateRatio bounds how far DEFLATE can expand its input (about 1032:1), so
@@ -144,6 +144,11 @@ func Install(in *interpreter.Interpreter) {
 	})
 	in.RegisterNamespaced(LibraryName, "pack", packFn)
 	in.RegisterNamespaced(LibraryName, "unpack", unpackFn)
+	// The output cap of unpackWith: 0 is the default, math.MAX_INT none.
+	in.RegisterNamespacedStruct(LibraryName, "UnpackOptions", []parser.StructField{
+		{Name: "maxBytes", Type: parser.PrimitiveType(parser.TypeInt)},
+	})
+	in.RegisterNamespaced(LibraryName, "unpackWith", unpackWithFn)
 	in.RegisterNamespaced(LibraryName, "stream", streamFn)
 	in.RegisterNamespaced(LibraryName, "update", updateFn)
 	in.RegisterNamespaced(LibraryName, "finalize", finalizeFn)
@@ -325,47 +330,104 @@ func releaseWriter(algo string, level int, rw resetWriter) {
 	}
 }
 
-// unpackFn implements `compress.unpack(algo, bytes[, maxBytes]) -> bytes`.
+// unpackFn implements `compress.unpack(algo, bytes[, maxBytes]) -> bytes`. The
+// positional maxBytes is deprecated (compress.unpackWith); it keeps refusing a
+// value below 1.
 func unpackFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	const fn = "compress.unpack"
 	if len(args) != 2 && len(args) != 3 {
-		return interpreter.Null(), fmt.Errorf("compress.unpack expects 2 or 3 arguments (algo, bytes[, maxBytes]), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("%s expects 2 or 3 arguments (algo, bytes[, maxBytes]), got %d", fn, len(args))
 	}
-	if args[0].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("compress.unpack: algo must be string, got %s", args[0].Kind)
-	}
-	if args[1].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("compress.unpack: second argument must be bytes, got %s", args[1].Kind)
+	if err := unpackArgs(fn, args); err != nil {
+		return interpreter.Null(), err
 	}
 	limit := int64(maxDecompressed)
 	if len(args) == 3 {
 		if args[2].Kind != interpreter.KindInt {
-			return interpreter.Null(), fmt.Errorf("compress.unpack: maxBytes must be int, got %s", args[2].Kind)
+			return interpreter.Null(), fmt.Errorf("%s: maxBytes must be int, got %s", fn, args[2].Kind)
 		}
 		if args[2].Int < 1 {
-			return interpreter.Null(), fmt.Errorf("compress.unpack: maxBytes must be at least 1, got %d", args[2].Int)
+			return interpreter.Null(), fmt.Errorf("%s: maxBytes must be at least 1, got %d", fn, args[2].Int)
 		}
 		limit = args[2].Int
 	}
-	algo := args[0].Str
-	r, err := acquireReader(algo, bytes.NewReader(args[1].Bytes))
+	return unpackBytes(ctx, fn, args[0].Str, args[1].Bytes, limit)
+}
+
+// unpackWithFn implements `compress.unpackWith(algo, bytes,
+// compress.UnpackOptions) -> bytes`: maxBytes 0 is the default cap, a negative
+// value throws, math.MAX_INT reads without a cap.
+func unpackWithFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	const fn = "compress.unpackWith"
+	if len(args) != 3 {
+		return interpreter.Null(), fmt.Errorf("%s expects 3 arguments (algo, bytes, compress.UnpackOptions), got %d", fn, len(args))
+	}
+	if err := unpackArgs(fn, args); err != nil {
+		return interpreter.Null(), err
+	}
+	o := args[2]
+	if o.Kind != interpreter.KindStruct || o.StructNS != LibraryName || o.StructName != "UnpackOptions" {
+		return interpreter.Null(), fmt.Errorf("%s: argument 3 must be a compress.UnpackOptions, got %s", fn, o.Kind)
+	}
+	limit := int64(maxDecompressed)
+	for _, f := range o.Fields {
+		if f.Name != "maxBytes" {
+			continue
+		}
+		if f.Value.Kind != interpreter.KindInt {
+			return interpreter.Null(), fmt.Errorf("%s: maxBytes must be int, got %s", fn, f.Value.Kind)
+		}
+		if f.Value.Int < 0 {
+			return interpreter.Null(), fmt.Errorf("%s: maxBytes must be 0 (the default), positive, or math.MAX_INT (no cap), got %d", fn, f.Value.Int)
+		}
+		if f.Value.Int > 0 {
+			limit = f.Value.Int
+		}
+	}
+	return unpackBytes(ctx, fn, args[0].Str, args[1].Bytes, limit)
+}
+
+// unpackArgs checks the (algo, bytes, ...) arguments unpack and unpackWith share.
+func unpackArgs(fn string, args []interpreter.Value) error {
+	if args[0].Kind != interpreter.KindString {
+		return fmt.Errorf("%s: algo must be string, got %s", fn, args[0].Kind)
+	}
+	if args[1].Kind != interpreter.KindBytes {
+		return fmt.Errorf("%s: second argument must be bytes, got %s", fn, args[1].Kind)
+	}
+	return nil
+}
+
+// unpackBytes decompresses data under the output cap limit (math.MaxInt64 reads
+// to the end). zlib and deflate data is one stream, so any byte after it is a
+// data error; gzip reads every member (RFC 1952 allows concatenated members)
+// and refuses trailing bytes that are not one.
+func unpackBytes(ctx interpreter.BuiltinCtx, fn, algo string, data []byte, limit int64) (interpreter.Value, error) {
+	src := bytes.NewReader(data)
+	r, err := acquireReader(algo, src)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("compress.unpack: %w", err)
+		return interpreter.Null(), fmt.Errorf("%s: %w", fn, err)
 	}
 	var hint int64
 	if algo == "gzip" {
-		hint = gzipSizeHint(args[1].Bytes)
+		hint = gzipSizeHint(data)
 	}
 	out, err := readCapped(r, limit, hint)
 	releaseReader(algo, r)
 	if err != nil {
 		var ce *capError
 		if errors.As(err, &ce) {
-			return interpreter.Null(), interpreter.RaiseError("limit", "compress.unpack: "+ce.Error(), ctx.File, ctx.Line, ctx.Col)
+			return interpreter.Null(), interpreter.RaiseError("limit", fn+": "+ce.Error(), ctx.File, ctx.Line, ctx.Col)
 		}
 		if errors.Is(err, io.ErrUnexpectedEOF) {
-			return interpreter.Null(), dataerr.New(dataKind, "compress.unpack: the %s data ends inside a stream: truncated, or followed by bytes that are not another stream", algo)
+			return interpreter.Null(), dataerr.New(dataKind, "%s: the %s data ends inside a stream: truncated, or followed by bytes that are not another stream", fn, algo)
 		}
-		return interpreter.Null(), fmt.Errorf("compress.unpack: %w", dataerr.Wrap(dataKind, err))
+		return interpreter.Null(), fmt.Errorf("%s: %w", fn, dataerr.Wrap(dataKind, err))
+	}
+	// The decompressors read a bytes.Reader byte by byte (it is an
+	// io.ByteReader), so what is left is exactly what follows the stream.
+	if algo != "gzip" && src.Len() > 0 {
+		return interpreter.Null(), dataerr.New(dataKind, "%s: %d byte(s) after the end of the %s stream", fn, src.Len(), algo)
 	}
 	return interpreter.BytesVal(out), nil
 }
@@ -437,7 +499,7 @@ func updateFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	st, ok := streams[id]
 	streamsMu.Unlock()
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("compress.update: stream %d has already been finalized or never existed", id)
+		return interpreter.Null(), interpreter.KindedError("closed", fmt.Sprintf("compress.update: stream %d has already been finalized or discarded, or never existed", id))
 	}
 	st.mu.Lock()
 	_, werr := st.w.Write(args[1].Bytes)
@@ -465,7 +527,7 @@ func finalizeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	}
 	streamsMu.Unlock()
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("compress.finalize: stream %d has already been finalized or never existed", id)
+		return interpreter.Null(), interpreter.KindedError("closed", fmt.Sprintf("compress.finalize: stream %d has already been finalized or discarded, or never existed", id))
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
@@ -478,7 +540,8 @@ func finalizeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 
 // discardFn drops a live stream without flushing/returning its output, closing
 // the underlying writer to release its state. The abort path for a stream
-// opened but abandoned before finalize.
+// opened but abandoned before finalize, and safe in a `defer`: on a finalized
+// or discarded stream it does nothing.
 func discardFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("compress.discard expects 1 argument (stream), got %d", len(args))
@@ -494,7 +557,8 @@ func discardFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	}
 	streamsMu.Unlock()
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("compress.discard: stream %d has already been finalized or never existed", id)
+		// Discarding a finalized or discarded stream does nothing (M29.46).
+		return interpreter.Null(), nil
 	}
 	st.mu.Lock()
 	st.w.Close() // release the writer's buffers; the output is intentionally dropped

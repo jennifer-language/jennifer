@@ -26,8 +26,9 @@ Runnable: [`examples/images.j`](https://github.com/jennifer-language/jennifer/bl
 | Type | Meaning |
 | ---- | ------- |
 | `images.Image` | The opaque image. `%v` shows `<images.Image 640x480>`; `==` compares size and pixels. An uninitialised `def m as images.Image;` is a 1x1 transparent image. |
-| `images.Color { r as int, g as int, b as int, a as int }` | One pixel, non-premultiplied, each channel `0`..`255`. `a` is opacity: `255` opaque, `0` transparent. Build one with `rgb` / `rgba` / `hex`, or as a literal; a field left out of a literal is `0`, so `images.Color{r: 255}` is **transparent** red (use `images.rgb(255, 0, 0)` for opaque). |
+| `images.Color { r as int, g as int, b as int, a as int }` | One pixel, non-premultiplied, each channel `0`..`255`. `a` is opacity: `255` opaque, `0` transparent. Build one with `rgb` / `hex`, or as a literal (`images.Color{r: 255, g: 0, b: 0, a: 128}`); a field left out of a literal is `0`, so `images.Color{r: 255}` is **transparent** red (use `images.rgb(255, 0, 0)` for opaque). |
 | `images.Info { format as string, width as int, height as int }` | What `info` reads from a header. |
+| `images.DecodeOptions { maxPixels as int }` | The pixel cap of `decodeWith` (see [Untrusted images](#untrusted-images)). |
 
 Coordinates are pixels from the top-left corner, `x` to the right and `y`
 down.
@@ -36,7 +37,8 @@ down.
 
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
-| `images.decode(data[, maxPixels])` | `images.Image` | Decode PNG, JPEG or GIF `bytes`; the format is detected. A GIF yields its first frame, placed on a transparent canvas of the logical screen size (what `info` reports). Images over `maxPixels` (default 64 Mpx, 8 Mpx on `jennifer-tiny`) are refused, see below. |
+| `images.decode(data)` | `images.Image` | Decode PNG, JPEG or GIF `bytes`; the format is detected. A GIF yields its first frame, placed on a transparent canvas of the logical screen size (what `info` reports). Images over 64 Mpx (8 Mpx on `jennifer-tiny`) are refused, see below. |
+| `images.decodeWith(data, o)` | `images.Image` | Same, with the pixel cap of an `images.DecodeOptions{maxPixels}`. |
 | `images.info(data)` | `images.Info` | Format (`"png"`, `"jpeg"`, `"gif"`) and size from the header alone, without decoding the pixels. |
 | `images.encode(format, img[, quality])` | `bytes` | `format` is `"png"`, `"jpeg"` or `"gif"`; `quality` (`1`..`100`, default `90`) is for `"jpeg"` only. |
 | `images.create(width, height[, color])` | `images.Image` | A new image filled with `color` (default transparent). |
@@ -47,7 +49,6 @@ down.
 | `images.width(img)` / `images.height(img)` | `int` | The size. |
 | `images.pixel(img, x, y)` | `images.Color` | One pixel; outside the image is an error. |
 | `images.rgb(r, g, b)` | `images.Color` | An opaque color. |
-| `images.rgba(r, g, b, a)` | `images.Color` | A color with opacity `a`. |
 | `images.hex(s)` | `images.Color` | Parse `"#rgb"`, `"#rrggbb"` or `"#rrggbbaa"` (no alpha = opaque). |
 | `images.crop(img, x, y, width, height)` | `images.Image` | A rectangle, which must lie inside the image. |
 | `images.resize(img, width, height[, filter])` | `images.Image` | Scale to exactly `width` x `height`. Pass `0` for one of them to keep the aspect ratio. |
@@ -64,9 +65,9 @@ down.
 
 | Kind | Raised for |
 |---|---|
-| `"images"` | bytes `decode` / `info` cannot read: not PNG, JPEG or GIF, a corrupt or truncated file, an unsupported variant |
+| `"images"` | bytes `decode` / `decodeWith` / `info` cannot read: not PNG, JPEG or GIF, a corrupt or truncated file, an unsupported variant |
 | `"limit"` | a reached cap (see [Untrusted images](#untrusted-images)) |
-| `"runtime"` | misuse: a wrong argument, an unknown format, filter or direction, a malformed `hex` color, coordinates or sizes out of range, `fromPixels` bytes of the wrong length |
+| `"runtime"` | misuse: a wrong argument, a negative `maxPixels`, an unknown format, filter or direction, a malformed `hex` color, coordinates or sizes out of range, `fromPixels` bytes of the wrong length |
 
 ## Resizing
 
@@ -114,19 +115,27 @@ The same layout feeds other code a raster: rows top to bottom, 4 bytes (`r`,
 
 A few hundred bytes of PNG can declare a 100000 x 100000 canvas, tens of
 gigabytes once decoded. `decode` therefore reads the header first and refuses
-an image with more than `maxPixels` pixels with a catchable `Error{kind: "limit"}`
+an image over the pixel cap with a catchable `Error{kind: "limit"}`
 before allocating anything. The default is what one 256 MiB buffer holds at 4
 bytes a pixel: 67108864 = 64 Mpx (on `jennifer-tiny`, 32 MiB and 8388608 =
 8 Mpx). Decoding peaks above the pixel memory, since the decoder's own image
 and the RGBA copy exist together: about 3x for a 16-bit PNG (8 bytes a pixel
 decoded, 768 MiB at 64 Mpx), 2x for an 8-bit color PNG (512 MiB), up to 1.75x for a
 color JPEG and 1.25x for a grayscale image. [`compress`](compress.md)`.unpack`
-and [`archive`](archive.md) use the same `limit` kind for their caps. Pass a
-lower `maxPixels` for uploads, or check `info` first:
+and [`archive`](archive.md) use the same `limit` kind for their caps.
+`images.decodeWith` sets the cap per call; lower it for uploads, or check
+`info` first:
+
+| `DecodeOptions.maxPixels` | Cap |
+|---|---|
+| `0` | the default (64 Mpx; 8 Mpx on `jennifer-tiny`) |
+| `1` and up | that many pixels, also above the default for trusted input |
+| `math.MAX_INT` | none |
+| negative | a `"runtime"` error |
 
 ```jennifer
 try {
-    def avatar as images.Image init images.decode($upload, 4000000);   # 4 Mpx
+    def avatar as images.Image init images.decodeWith($upload, images.DecodeOptions{maxPixels: 4000000});   # 4 Mpx
 } catch (e) {
     if ($e.kind == "limit") {
         # too large: reject the upload
@@ -144,6 +153,16 @@ the source, the result and at most that buffer. They raise
 source decoded with a raised `maxPixels` can reach, or when the filter weights
 exceed 256 MiB (32 MiB on `jennifer-tiny`), which takes a source or result side
 of several million pixels. A rectangle argument whose `x + width` or `y + height` overflows is an error.
+
+### Deprecated
+
+| Call | Instead | Removed |
+|---|---|---|
+| `images.decode(data, maxPixels)` | `images.decodeWith(data, images.DecodeOptions{maxPixels: ...})` | 0.29.0 |
+| `images.rgba(r, g, b, a)` | `images.Color{r: ..., g: ..., b: ..., a: ...}` | 0.29.0 |
+
+The positional `maxPixels` still works and still refuses a value below 1.
+Lint reports both as L301.
 
 ## Not supported
 

@@ -141,7 +141,8 @@ const LibraryName = "archive"
 const dataKind = "archive"
 
 // formatList is the rendered known-format string for error messages.
-const formatList = `"tar", "zip", "tar.gz" (alias "tgz")`
+// "tgz" is a deprecated alias of "tar.gz" (lint L301), still read and written.
+const formatList = `"tar", "zip", "tar.gz"`
 
 // defaultMode is applied to an entry whose mode field is 0.
 const defaultMode = 0o644
@@ -162,9 +163,10 @@ func Install(in *interpreter.Interpreter) {
 		{Name: "mode", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "mtime", Type: parser.PrimitiveType(parser.TypeInt)},
 	})
-	// Caps for unpackWith: a 0 field takes the default, a negative field disables
-	// that cap (unlimited), a positive field sets it. The zero value is all
-	// defaults, so a bare `archive.UnpackOptions{}` behaves like archive.unpack.
+	// Caps for unpackWith: a 0 field takes the default, a positive field sets
+	// it, math.MAX_INT disables it, a negative field throws. The zero value is
+	// all defaults, so a bare `archive.UnpackOptions{}` behaves like
+	// archive.unpack.
 	in.RegisterNamespacedStruct(LibraryName, "UnpackOptions", []parser.StructField{
 		{Name: "maxTotalBytes", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "maxEntryBytes", Type: parser.PrimitiveType(parser.TypeInt)},
@@ -285,9 +287,9 @@ func unpackFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 }
 
 // unpackWithFn is archive.unpack with caller-set caps: archive.unpackWith(format,
-// bytes, archive.UnpackOptions). A 0 option field takes the default cap; a
-// negative field disables that cap (unlimited - for a trusted archive). Exceeding
-// a cap raises Error{kind: "limit"}.
+// bytes, archive.UnpackOptions). A 0 option field takes the default cap;
+// math.MAX_INT disables that cap (for a trusted archive); a negative field
+// throws. Exceeding a cap raises Error{kind: "limit"}.
 func unpackWithFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 3 {
 		return interpreter.Null(), fmt.Errorf("archive.unpackWith expects 3 arguments (format, bytes, archive.UnpackOptions), got %d", len(args))
@@ -362,7 +364,8 @@ func finishUnpack(ctx interpreter.BuiltinCtx, fnName string, entries []entry, er
 }
 
 // capsFromOptions reads an archive.UnpackOptions into unpackCaps: a 0 field takes
-// the default, a negative field is unlimited, a positive field is that cap.
+// the default, math.MAX_INT is unlimited, another positive field is that cap, a
+// negative field is an error.
 func capsFromOptions(v interpreter.Value) (unpackCaps, error) {
 	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "UnpackOptions" {
 		return unpackCaps{}, fmt.Errorf("archive.unpackWith: options must be an archive.UnpackOptions, got %s", v.Kind)
@@ -370,30 +373,39 @@ func capsFromOptions(v interpreter.Value) (unpackCaps, error) {
 	def := defaultUnpackCaps()
 	caps := def
 	for _, f := range v.Fields {
+		var err error
 		switch f.Name {
 		case "maxTotalBytes":
-			caps.total = capFromOpt(f.Value.Int, def.total)
+			caps.total, err = capFromOpt(f.Name, f.Value.Int, def.total)
 		case "maxEntryBytes":
-			caps.entryBytes = capFromOpt(f.Value.Int, def.entryBytes)
+			caps.entryBytes, err = capFromOpt(f.Name, f.Value.Int, def.entryBytes)
 		case "maxEntries":
-			caps.entries = int(capFromOpt(f.Value.Int, int64(def.entries)))
+			var n int64
+			n, err = capFromOpt(f.Name, f.Value.Int, int64(def.entries))
+			caps.entries = int(min(n, math.MaxInt))
 		case "skipSpecial":
 			caps.skipSpecial = f.Value.Bool
+		}
+		if err != nil {
+			return unpackCaps{}, err
 		}
 	}
 	return caps, nil
 }
 
-// capFromOpt maps a UnpackOptions field: 0 -> the default, a negative -> unlimited
-// (internal 0), a positive -> that value.
-func capFromOpt(v, def int64) int64 {
+// capFromOpt maps a UnpackOptions field: 0 -> the default, math.MAX_INT ->
+// unlimited (internal 0), another positive value -> that value, a negative
+// value -> an error.
+func capFromOpt(name string, v, def int64) (int64, error) {
 	switch {
 	case v == 0:
-		return def
+		return def, nil
+	case v == math.MaxInt64:
+		return 0, nil
 	case v < 0:
-		return 0
+		return 0, fmt.Errorf("archive.unpackWith: %s must be 0 (the default), positive, or math.MAX_INT (no cap), got %d", name, v)
 	default:
-		return v
+		return v, nil
 	}
 }
 

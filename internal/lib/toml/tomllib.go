@@ -10,7 +10,8 @@
 // `insert` / `append` / `remove` / `move`) are doctree's, the same as `json`'s
 // and `yaml`'s, so the libraries read the same. The one thing TOML has that
 // JSON does not - the four date-time forms - is a datetime node, surfaced
-// through `toml.asDatetime`, which returns a `time.Time`.
+// through `toml.asDatetime` (the offset form, as a `time.Time`) and
+// `toml.asLocal` (the three local forms, as a `toml.Local`).
 package tomllib
 
 import (
@@ -23,14 +24,26 @@ import (
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/lib/doctree"
+	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
 // LibraryName is the namespace prefix (`toml.decode`, `toml.get`, ...).
 const LibraryName = "toml"
 
 // lib is the toml library's handle on the shared surface: TOML has no null,
-// and a stored time.Time becomes an offset date-time.
-var lib = &doctree.Lib{Name: LibraryName, Display: display, TimeNode: timeNode, AsTime: asTime}
+// a stored time.Time becomes an offset date-time, and typeOf names the local
+// forms.
+var lib = &doctree.Lib{Name: LibraryName, Display: display, TimeNode: timeNode, AsTime: asTime, DatetimeType: datetimeType}
+
+// datetimeType names a datetime node's form for typeOf: "datetime" for an
+// offset date-time (what asDatetime reads), else TOML 1.0's name of the local
+// form.
+func datetimeType(n node) string {
+	if n.Form() == formOffsetDatetime {
+		return "datetime"
+	}
+	return formName(n.Form())
+}
 
 // display renders a toml.Value inline (`{ a = 1 }`), for `%v` and the REPL.
 func display(n node) (string, error) {
@@ -50,9 +63,47 @@ func timeNode(v interpreter.Value) (node, bool) {
 	return doctree.Datetime(text, formOffsetDatetime), true
 }
 
-// asTime reads any of the four date-time forms as a Go time.
+// asTime reads an offset date-time as a Go time. A local form names no
+// instant (it has no offset), so it is refused rather than read as UTC.
 func asTime(n node) (stdtime.Time, error) {
+	if n.Form() != formOffsetDatetime {
+		return stdtime.Time{}, fmt.Errorf("node is a %s, which has no UTC offset; read it with toml.asLocal", formName(n.Form()))
+	}
 	return parseDatetimeText(n.Str(), n.Form())
+}
+
+// asLocalFn implements `toml.asLocal(v[, ptr]) -> toml.Local`: the fields of a
+// local date-time, date or time; the parts the form lacks are 0.
+func asLocalFn(args []interpreter.Value) (interpreter.Value, error) {
+	const fn = "toml.asLocal"
+	n, err := lib.NodeAt(fn, args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if n.Kind() != doctree.KindDatetime || n.Form() == formOffsetDatetime {
+		hint := ""
+		if n.Kind() == doctree.KindDatetime {
+			hint = "; read it with toml.asDatetime"
+		}
+		return interpreter.Null(), fmt.Errorf("%s: node is a %s, not a local-datetime, local-date or local-time%s", fn, lib.NodeType(n), hint)
+	}
+	t, err := parseDatetimeText(n.Str(), n.Form())
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("%s: %w", fn, err)
+	}
+	var y, mo, d, h, mi, sec, ns int
+	if n.Form() != formLocalTime {
+		y, mo, d = t.Year(), int(t.Month()), t.Day()
+	}
+	if n.Form() != formLocalDate {
+		h, mi, sec, ns = t.Hour(), t.Minute(), t.Second(), t.Nanosecond()
+	}
+	iv := func(v int) interpreter.Value { return interpreter.IntVal(int64(v)) }
+	return interpreter.NamespacedStructVal(LibraryName, "Local", []interpreter.StructField{
+		{Name: "year", Value: iv(y)}, {Name: "month", Value: iv(mo)}, {Name: "day", Value: iv(d)},
+		{Name: "hour", Value: iv(h)}, {Name: "minute", Value: iv(mi)}, {Name: "second", Value: iv(sec)},
+		{Name: "nanosecond", Value: iv(ns)},
+	}), nil
 }
 
 func inf(neg bool) float64 {
@@ -70,6 +121,18 @@ func Install(in *interpreter.Interpreter) {
 	// its write surface (internal/lib/doctree).
 	lib.Install(in)
 
+	intField := func(name string) parser.StructField {
+		return parser.StructField{Name: name, Type: parser.PrimitiveType(parser.TypeInt)}
+	}
+	// A local date-time, date or time (no offset), as toml.asLocal reads it.
+	in.RegisterNamespacedStruct(LibraryName, "Local", []parser.StructField{
+		intField("year"), intField("month"), intField("day"),
+		intField("hour"), intField("minute"), intField("second"), intField("nanosecond"),
+	})
+	in.RegisterNamespaced(LibraryName, "asLocal", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+		return asLocalFn(args)
+	})
+
 	in.RegisterNamespaced(LibraryName, "decode", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		if len(args) != 1 {
 			return interpreter.Null(), fmt.Errorf("toml.decode expects 1 argument (text), got %d", len(args))
@@ -83,6 +146,15 @@ func Install(in *interpreter.Interpreter) {
 		}
 		return lib.Wrap(tree), nil
 	})
+	// Caps for decodeWith, each at most toml.decode's and 0 for that default.
+	in.RegisterNamespacedStruct(LibraryName, "DecodeOptions", doctree.DecodeOptionFields())
+	in.RegisterNamespaced(LibraryName, "decodeWith", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+		tree, err := decodeWithFn(args)
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		return lib.Wrap(tree), nil
+	})
 
 	in.RegisterNamespaced(LibraryName, "encode", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		return encodeFn(args, false)
@@ -90,6 +162,23 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "encodePretty", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		return encodeFn(args, true)
 	})
+}
+
+// decodeWithFn implements `toml.decodeWith(text, toml.DecodeOptions)`: decode
+// under lower caps than toml.decode's.
+func decodeWithFn(args []interpreter.Value) (node, error) {
+	const fn = "toml.decodeWith"
+	if len(args) != 2 {
+		return node{}, fmt.Errorf("%s expects 2 arguments (string, toml.DecodeOptions), got %d", fn, len(args))
+	}
+	if args[0].Kind != interpreter.KindString {
+		return node{}, fmt.Errorf("%s: argument 1 must be string, got %s", fn, args[0].Kind)
+	}
+	caps, err := doctree.ReadDecodeOptions(fn, LibraryName, args[1], defaultCaps())
+	if err != nil {
+		return node{}, err
+	}
+	return decodeTomlCaps(fn, args[0].Str, caps)
 }
 
 // parseDatetimeText parses stored RFC 3339 text into a Go time.Time, choosing

@@ -45,7 +45,7 @@ const dataKind = "images"
 // (256 MiB) on the default binary and 8 Mpx (32 MiB) on jennifer-tiny. decode
 // checks the header against it before allocating, so a small file declaring a
 // gigapixel canvas fails with Error{kind: "limit"} instead of exhausting
-// memory; decode's optional argument moves it. Every operation that allocates
+// memory; decodeWith's DecodeOptions.maxPixels moves it. Every operation that allocates
 // a new canvas (create, fromPixels, resize, fit) enforces it too.
 const maxPixels = limits.MaxAllocBytes / 4
 
@@ -93,6 +93,9 @@ func Install(in *interpreter.Interpreter) {
 
 	reg := func(name string, fn interpreter.Builtin) { in.RegisterNamespaced(LibraryName, name, fn) }
 	reg("decode", decodeFn)
+	// The pixel cap of decodeWith: 0 is the default, math.MAX_INT none.
+	in.RegisterNamespacedStruct(LibraryName, "DecodeOptions", []parser.StructField{intField("maxPixels")})
+	reg("decodeWith", decodeWithFn)
 	reg("info", infoFn)
 	reg("encode", encodeFn)
 	reg("create", createFn)
@@ -226,7 +229,9 @@ func newCanvas(ctx interpreter.BuiltinCtx, fn string, w, h int) (*image.NRGBA, e
 
 // --- codecs -----------------------------------------------------------------
 
-// decodeFn implements `images.decode(data[, maxPixels]) -> images.Image`.
+// decodeFn implements `images.decode(data[, maxPixels]) -> images.Image`. The
+// positional maxPixels is deprecated (images.decodeWith); it keeps refusing a
+// value below 1.
 func decodeFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	const fn = "images.decode"
 	if len(args) != 1 && len(args) != 2 {
@@ -246,7 +251,45 @@ func decodeFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		}
 		limit = int64(n)
 	}
-	data := args[0].Bytes
+	return decodeImage(ctx, fn, args[0].Bytes, limit)
+}
+
+// decodeWithFn implements `images.decodeWith(data, images.DecodeOptions) ->
+// images.Image`: maxPixels 0 is the default cap, a negative value throws,
+// math.MAX_INT decodes without a cap.
+func decodeWithFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
+	const fn = "images.decodeWith"
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("%s expects 2 arguments (data, images.DecodeOptions), got %d", fn, len(args))
+	}
+	if args[0].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("%s: data must be bytes, got %s", fn, describe(args[0]))
+	}
+	o := args[1]
+	if o.Kind != interpreter.KindStruct || o.StructNS != LibraryName || o.StructName != "DecodeOptions" {
+		return interpreter.Null(), fmt.Errorf("%s: options must be an images.DecodeOptions, got %s", fn, describe(o))
+	}
+	limit := int64(maxPixels)
+	for _, f := range o.Fields {
+		if f.Name != "maxPixels" {
+			continue
+		}
+		if f.Value.Kind != interpreter.KindInt {
+			return interpreter.Null(), fmt.Errorf("%s: maxPixels must be int, got %s", fn, describe(f.Value))
+		}
+		if f.Value.Int < 0 {
+			return interpreter.Null(), fmt.Errorf("%s: maxPixels must be 0 (the default), positive, or math.MAX_INT (no cap), got %d", fn, f.Value.Int)
+		}
+		if f.Value.Int > 0 {
+			limit = f.Value.Int
+		}
+	}
+	return decodeImage(ctx, fn, args[0].Bytes, limit)
+}
+
+// decodeImage decodes data under the pixel cap limit, checked against the
+// header before the pixels are allocated.
+func decodeImage(ctx interpreter.BuiltinCtx, fn string, data []byte, limit int64) (Value, error) {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if errors.Is(err, image.ErrFormat) {
 		return interpreter.Null(), dataerr.New(dataKind, "%s: not a PNG, JPEG or GIF image", fn)

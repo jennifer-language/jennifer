@@ -140,12 +140,40 @@ func TestStreamingMatchesOneShot(t *testing.T) {
 	if string(dec.Bytes) != "hello world" {
 		t.Errorf("streamed content = %q, want %q", dec.Bytes, "hello world")
 	}
-	// finalize consumes the handle: a second finalize / update errors.
-	if _, err := finalizeFn(interpreter.BuiltinCtx{}, []interpreter.Value{s}); err == nil {
-		t.Error("expected an error finalizing an already-finalized stream")
+	// finalize consumes the handle: a second finalize / update is kind
+	// "closed", a discard does nothing (M29.46).
+	_, err = finalizeFn(interpreter.BuiltinCtx{}, []interpreter.Value{s})
+	if kind, _, _, _, _ := interpreter.ClassifyError(err); kind != "closed" {
+		t.Errorf("second finalize: kind %q (%v), want closed", kind, err)
 	}
-	if _, err := updateFn(interpreter.BuiltinCtx{}, []interpreter.Value{s, b("x")}); err == nil {
-		t.Error("expected an error updating a finalized stream")
+	_, err = updateFn(interpreter.BuiltinCtx{}, []interpreter.Value{s, b("x")})
+	if kind, _, _, _, _ := interpreter.ClassifyError(err); kind != "closed" {
+		t.Errorf("update after finalize: kind %q (%v), want closed", kind, err)
+	}
+	if _, err := discardFn(interpreter.BuiltinCtx{}, []interpreter.Value{s}); err != nil {
+		t.Errorf("discard after finalize: %v", err)
+	}
+}
+
+// TestDiscardTwice: a second discard does nothing, any other use of a
+// discarded stream is kind "closed" (M29.46).
+func TestDiscardTwice(t *testing.T) {
+	s, err := streamFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("zlib")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := discardFn(interpreter.BuiltinCtx{}, []interpreter.Value{s}); err != nil {
+			t.Fatalf("discard %d: %v", i+1, err)
+		}
+	}
+	_, err = updateFn(interpreter.BuiltinCtx{}, []interpreter.Value{s, b("x")})
+	if kind, _, _, _, _ := interpreter.ClassifyError(err); kind != "closed" {
+		t.Errorf("update after discard: kind %q (%v), want closed", kind, err)
+	}
+	_, err = finalizeFn(interpreter.BuiltinCtx{}, []interpreter.Value{s})
+	if kind, _, _, _, _ := interpreter.ClassifyError(err); kind != "closed" {
+		t.Errorf("finalize after discard: kind %q (%v), want closed", kind, err)
 	}
 }
 

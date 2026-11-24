@@ -39,9 +39,32 @@ type Lib struct {
 	// (toml, yaml); without it a time.Time is an ordinary struct, stored as a
 	// map of its fields (json). It also enables `isDatetime` / `asDatetime`.
 	TimeNode func(v interpreter.Value) (Node, bool)
-	// AsTime converts a datetime node to a Go time for `asDatetime`.
+	// AsTime converts a datetime node to a Go time for `asDatetime`; an error
+	// refuses the node (toml's local forms, which have no offset).
 	AsTime func(n Node) (stdtime.Time, error)
+	// DatetimeType, when set, names a datetime node's type for `typeOf` and
+	// the accessors' messages (toml's "local-date", ...). The name
+	// "datetime" is the form `asDatetime` reads; nil names every datetime node
+	// "datetime".
+	DatetimeType func(n Node) string
 }
+
+// nodeType is n's type name as `typeOf` reports it.
+func (l *Lib) nodeType(n Node) string {
+	if n.k == KindDatetime && l.DatetimeType != nil {
+		return l.DatetimeType(n)
+	}
+	return n.TypeName()
+}
+
+// NodeAt unpacks a (NAME.Value[, pointer]) argument list and resolves the
+// pointer, for a library's own accessor (toml.asLocal).
+func (l *Lib) NodeAt(fnName string, args []interpreter.Value) (Node, error) {
+	return l.nodeAt(fnName, args)
+}
+
+// NodeType is n's type name as `typeOf` reports it.
+func (l *Lib) NodeType(n Node) string { return l.nodeType(n) }
 
 // payload is the native payload of a `NAME.Value` handle: one node, the root
 // of a document or any sub-tree of one.
@@ -355,7 +378,7 @@ func (l *Lib) typeOf(fnName string, args []interpreter.Value) (interpreter.Value
 		if err != nil {
 			return interpreter.Null(), err
 		}
-		return interpreter.StringVal(n.TypeName()), nil
+		return interpreter.StringVal(l.nodeType(n)), nil
 	}
 	n, err := l.Take(fnName, args[0])
 	if err != nil {
@@ -372,7 +395,7 @@ func (l *Lib) typeOf(fnName string, args []interpreter.Value) (interpreter.Value
 	if werr != nil {
 		return interpreter.StringVal("missing"), nil
 	}
-	return interpreter.StringVal(at.TypeName()), nil
+	return interpreter.StringVal(l.nodeType(at)), nil
 }
 
 // get returns the addressed sub-node as a handle sharing the sub-tree.
@@ -412,7 +435,7 @@ func (l *Lib) keys(fnName string, args []interpreter.Value) (interpreter.Value, 
 		return interpreter.Null(), err
 	}
 	if n.k != KindMap {
-		return interpreter.Null(), fmt.Errorf("%s: expected a map, got a %s", fnName, n.TypeName())
+		return interpreter.Null(), fmt.Errorf("%s: expected a map, got a %s", fnName, l.nodeType(n))
 	}
 	out := make([]interpreter.Value, n.Len())
 	for i, k := range n.c.keys {
@@ -428,7 +451,7 @@ func (l *Lib) length(fnName string, args []interpreter.Value) (interpreter.Value
 		return interpreter.Null(), err
 	}
 	if !n.IsContainer() {
-		return interpreter.Null(), fmt.Errorf("%s: expected a list or map, got a %s", fnName, n.TypeName())
+		return interpreter.Null(), fmt.Errorf("%s: expected a list or map, got a %s", fnName, l.nodeType(n))
 	}
 	return interpreter.IntVal(int64(n.Len())), nil
 }
@@ -444,7 +467,7 @@ func (l *Lib) asInt(fnName string, args []interpreter.Value) (interpreter.Value,
 		return interpreter.Null(), l.bigIntErr(fnName, "", n)
 	}
 	if n.k != KindInt {
-		return interpreter.Null(), fmt.Errorf("%s: node is a %s, not an int", fnName, n.TypeName())
+		return interpreter.Null(), fmt.Errorf("%s: node is a %s, not an int", fnName, l.nodeType(n))
 	}
 	return n.ScalarValue(), nil
 }
@@ -504,7 +527,7 @@ func (l *Lib) asDecimal(fnName string, args []interpreter.Value) (interpreter.Va
 		}
 		text = strconv.FormatFloat(f, 'g', -1, 64)
 	default:
-		return interpreter.Null(), fmt.Errorf("%s: node is a %s, not a number", fnName, n.TypeName())
+		return interpreter.Null(), fmt.Errorf("%s: node is a %s, not a number", fnName, l.nodeType(n))
 	}
 	v, err := decimallib.FromText(text)
 	if err != nil {
@@ -527,7 +550,7 @@ func (l *Lib) asFloat(fnName string, args []interpreter.Value) (interpreter.Valu
 		return interpreter.Null(), err
 	}
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("%s: node is a %s, not a number", fnName, n.TypeName())
+		return interpreter.Null(), fmt.Errorf("%s: node is a %s, not a number", fnName, l.nodeType(n))
 	}
 	return interpreter.FloatVal(f), nil
 }
@@ -541,7 +564,7 @@ func (l *Lib) listAt(fnName string, args []interpreter.Value) ([]Node, error) {
 		return nil, err
 	}
 	if n.k != KindList {
-		return nil, fmt.Errorf("%s: expected a list, got a %s", fnName, n.TypeName())
+		return nil, fmt.Errorf("%s: expected a list, got a %s", fnName, l.nodeType(n))
 	}
 	return n.Elems(), nil
 }
@@ -560,7 +583,7 @@ func (l *Lib) asFloats(fnName string, args []interpreter.Value) (interpreter.Val
 			return interpreter.Null(), err
 		}
 		if !ok {
-			return interpreter.Null(), fmt.Errorf("%s: element %d is a %s, not a number", fnName, i, e.TypeName())
+			return interpreter.Null(), fmt.Errorf("%s: element %d is a %s, not a number", fnName, i, l.nodeType(e))
 		}
 		out[i] = interpreter.FloatVal(f)
 	}
@@ -589,7 +612,7 @@ func (l *Lib) scalarList(fnName string, args []interpreter.Value, k Kind, what s
 			return interpreter.Null(), l.bigIntErr(fnName, fmt.Sprintf("element %d ", i), e)
 		}
 		if e.k != k {
-			return interpreter.Null(), fmt.Errorf("%s: element %d is a %s, not %s", fnName, i, e.TypeName(), what)
+			return interpreter.Null(), fmt.Errorf("%s: element %d is a %s, not %s", fnName, i, l.nodeType(e), what)
 		}
 		out[i] = e.ScalarValue()
 	}
@@ -612,7 +635,7 @@ func (l *Lib) asKind(fnName string, args []interpreter.Value, k Kind, what strin
 		return interpreter.Null(), err
 	}
 	if n.k != k {
-		return interpreter.Null(), fmt.Errorf("%s: node is a %s, not %s", fnName, n.TypeName(), what)
+		return interpreter.Null(), fmt.Errorf("%s: node is a %s, not %s", fnName, l.nodeType(n), what)
 	}
 	return n.ScalarValue(), nil
 }
@@ -625,12 +648,14 @@ func (l *Lib) isNull(fnName string, args []interpreter.Value) (interpreter.Value
 	return interpreter.BoolVal(n.k == KindNull), nil
 }
 
+// isDatetime reports whether asDatetime reads the node: a datetime whose type
+// is "datetime" (not one of toml's local forms).
 func (l *Lib) isDatetime(fnName string, args []interpreter.Value) (interpreter.Value, error) {
 	n, err := l.nodeAt(fnName, args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return interpreter.BoolVal(n.k == KindDatetime), nil
+	return interpreter.BoolVal(n.k == KindDatetime && l.nodeType(n) == "datetime"), nil
 }
 
 // minNanoTime and maxNanoTime bound the instants whose UnixNano fits int64
@@ -649,7 +674,7 @@ func (l *Lib) asDatetime(fnName string, args []interpreter.Value) (interpreter.V
 		return interpreter.Null(), err
 	}
 	if n.k != KindDatetime {
-		return interpreter.Null(), fmt.Errorf("%s: node is a %s, not a datetime", fnName, n.TypeName())
+		return interpreter.Null(), fmt.Errorf("%s: node is a %s, not a datetime", fnName, l.nodeType(n))
 	}
 	t, err := l.AsTime(n)
 	if err != nil {

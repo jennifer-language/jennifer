@@ -1173,7 +1173,8 @@ func testImageFrom() {
     def rgb as bytes init compress.unpack("zlib", $solid.data);
     testing.assertEqual([$rgb[3], $rgb[4], $rgb[5]], [10, 20, 30]);
 
-    def faded as Image init imageFrom("Faded", images.create(2, 2, images.rgba(0, 0, 0, 64)));
+    def shade as images.Color init images.Color{r: 0, g: 0, b: 0, a: 64};
+    def faded as Image init imageFrom("Faded", images.create(2, 2, $shade));
     testing.assertTrue($faded.hasSmask);
     testing.assertEqual(compress.unpack("zlib", $faded.smask)[3], 64);
 

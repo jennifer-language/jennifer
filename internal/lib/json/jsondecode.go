@@ -37,33 +37,11 @@ func decodeWithFn(args []interpreter.Value) (node, error) {
 	if args[0].Kind != interpreter.KindString {
 		return node{}, fmt.Errorf("json.decodeWith: argument 1 must be string, got %s", args[0].Kind)
 	}
-	o := args[1]
-	if o.Kind != interpreter.KindStruct || o.StructNS != LibraryName || o.StructName != "DecodeOptions" {
-		return node{}, fmt.Errorf("json.decodeWith: argument 2 must be a json.DecodeOptions, got %s", o.Kind)
+	caps, err := doctree.ReadDecodeOptions("json.decodeWith", LibraryName, args[1], doctree.DecodeCaps{Depth: maxNestingDepth, Nodes: maxDecodedNodes})
+	if err != nil {
+		return node{}, err
 	}
-	depth, nodes := maxNestingDepth, maxDecodedNodes
-	for _, f := range o.Fields {
-		var limit *int
-		switch f.Name {
-		case "maxDepth":
-			limit = &depth
-		case "maxNodes":
-			limit = &nodes
-		default:
-			continue
-		}
-		if f.Value.Kind != interpreter.KindInt {
-			return node{}, fmt.Errorf("json.decodeWith: %s must be int, got %s", f.Name, f.Value.Kind)
-		}
-		v := f.Value.Int
-		if v < 0 || v > int64(*limit) {
-			return node{}, fmt.Errorf("json.decodeWith: %s must be 0 (the default) to %d, got %d", f.Name, *limit, v)
-		}
-		if v > 0 {
-			*limit = int(v)
-		}
-	}
-	return decodeText("json.decodeWith", args[0].Str, depth, nodes)
+	return decodeText("json.decodeWith", args[0].Str, caps.Depth, caps.Nodes)
 }
 
 // decodeText decodes one JSON document under the given caps.

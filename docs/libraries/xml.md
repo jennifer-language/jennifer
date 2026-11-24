@@ -26,7 +26,8 @@ io.printf("%s\n", xml.text(xml.get($root, "book/title"))); # Go
 
 | Call                    | Returns     | Notes                                          |
 | ----------------------- | ----------- | ---------------------------------------------- |
-| `xml.decode(s [, ns])`  | `xml.Value` | Parse a document into the root element. Errors (with line / column) on malformed XML, including a raw character XML 1.0 does not allow (see [Building](#building)), anywhere in the document. `ns` (a `map of string to string`, prefix to namespace URI) puts bindings in scope at the root, for a fragment cut out of a larger document (see [Namespaces](#namespaces)). |
+| `xml.decode(s)`         | `xml.Value` | Parse a document into the root element. Errors (with line / column) on malformed XML, including a raw character XML 1.0 does not allow (see [Building](#building)), anywhere in the document. |
+| `xml.decodeWith(s, o)`  | `xml.Value` | Same, with an `xml.DecodeOptions{maxDepth, maxNodes, namespaces}`: lower caps (see [Notes and limits](#notes-and-limits)), and `namespaces` (a `map of string to string`, prefix to namespace URI) puts bindings in scope at the root, for a fragment cut out of a larger document (see [Namespaces](#namespaces)). |
 | `xml.encode(v)`         | `string`    | Serialize compactly.                           |
 | `xml.encodePretty(v)`   | `string`    | Serialize with 2-space indentation.            |
 
@@ -164,8 +165,8 @@ def docs as list of xml.Value init xml.findAll($root, "g:Document/g:Placemark", 
   `""` key, or no namespace when `""` is absent. Without a map, paths match the
   written names. `*:name` matches a local name in any namespace either way.
 - **Fragments.** A piece cut out of a larger document (`<gpx:trkpt>...` without
-  the root's `xmlns:gpx`) has an undeclared prefix. Pass the root's bindings to
-  `decode` as a prefix map: `xml.decode($frag, {"gpx": GPX})`.
+  the root's `xmlns:gpx`) has an undeclared prefix. Pass the root's bindings
+  as `namespaces`: `xml.decodeWith($frag, xml.DecodeOptions{namespaces: {"gpx": GPX}})`.
 - **Encoding.** A decoded document keeps its own `xmlns` attributes, so it
   re-encodes with the same declarations. A sub-tree encoded on its own, and a
   tree built with `elementNS` / `setAttrNS`, gets an `xmlns` declaration exactly where an
@@ -198,6 +199,10 @@ def docs as list of xml.Value init xml.findAll($root, "g:Document/g:Placemark", 
   `jennifer-tiny`) raises a catchable error. `xml.append` applies the same cap
   to the expanded tree, a sub-tree appended several times counted at each
   place.
+- **Lower caps per call.** `xml.decodeWith`'s `maxDepth` (element nesting)
+  and `maxNodes` lower the two decode caps, as `json.decodeWith` does: 0
+  keeps the default; a value above it, or a negative one, is a `"runtime"`
+  error naming the allowed range.
 - **Memory**: a decoded `xml.Value` is a compact element tree (name, ordered
   attributes, ordered children); names, and text and attribute values with no
   entity to decode, share the input string. A document takes from about its
@@ -212,9 +217,17 @@ def docs as list of xml.Value init xml.findAll($root, "g:Document/g:Placemark", 
 
 | Kind | Raised for |
 |---|---|
-| `"xml"` | malformed text in `decode`, with line and column: a syntax error, a mismatched or unclosed tag, a duplicate attribute, an unknown entity, an undeclared prefix, a character XML 1.0 does not allow, invalid UTF-8 |
+| `"xml"` | malformed text in `decode` / `decodeWith`, with line and column: a syntax error, a mismatched or unclosed tag, a duplicate attribute, an unknown entity, an undeclared prefix, a character XML 1.0 does not allow, invalid UTF-8 |
 | `"limit"` | a reached cap (above) |
-| `"runtime"` | misuse: a wrong argument, a bad `ns` map, a name or text the program builds that XML does not allow, a malformed path, `attr` / `get` / `lookupPrefix` finding nothing |
+| `"runtime"` | misuse: a wrong argument, `DecodeOptions` out of range, a bad `namespaces` map, a name or text the program builds that XML does not allow, a malformed path, `attr` / `get` / `lookupPrefix` finding nothing |
+
+### Deprecated
+
+| Call | Instead | Removed |
+|---|---|---|
+| `xml.decode(s, ns)` | `xml.decodeWith(s, xml.DecodeOptions{namespaces: ns})` | 0.29.0 |
+
+Lint reports the deprecated form as L301.
 
 ## See also
 

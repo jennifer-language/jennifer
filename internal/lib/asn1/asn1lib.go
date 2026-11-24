@@ -24,6 +24,7 @@ import (
 
 	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/lib/doctree"
 )
 
 // LibraryName is the namespace prefix (`asn1.`) and the `use` name.
@@ -35,6 +36,9 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespacedObject(LibraryName, "Value", nil)
 
 	in.RegisterNamespaced(LibraryName, "decode", decodeFn)
+	// Caps for decodeWith, each at most asn1.decode's and 0 for that default.
+	in.RegisterNamespacedStruct(LibraryName, "DecodeOptions", doctree.DecodeOptionFields())
+	in.RegisterNamespaced(LibraryName, "decodeWith", decodeWithFn)
 	in.RegisterNamespaced(LibraryName, "encode", encodeFn)
 
 	// Read accessors (node[, pointer]).
@@ -151,6 +155,27 @@ func decodeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		return interpreter.Null(), fmt.Errorf("asn1.decode: argument must be bytes, got %s", args[0].Kind)
 	}
 	elem, err := decodeTree(args[0].Bytes)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return wrap(elem), nil
+}
+
+// decodeWithFn implements `asn1.decodeWith(data, asn1.DecodeOptions)`: decode
+// under lower caps than asn1.decode's.
+func decodeWithFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	const fn = "asn1.decodeWith"
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("%s expects 2 arguments (bytes, asn1.DecodeOptions), got %d", fn, len(args))
+	}
+	if args[0].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("%s: argument 1 must be bytes, got %s", fn, args[0].Kind)
+	}
+	caps, err := doctree.ReadDecodeOptions(fn, LibraryName, args[1], defaultCaps())
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	elem, err := decodeTreeCaps(fn, args[0].Bytes, caps)
 	if err != nil {
 		return interpreter.Null(), err
 	}

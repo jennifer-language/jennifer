@@ -12,7 +12,8 @@ use io;
 
 # A 320x200 sky-blue canvas with a half-transparent red box on it.
 def sky as images.Image init images.create(320, 200, images.hex("#87ceeb"));
-def boxed as images.Image init images.fill($sky, 40, 30, 120, 80, images.rgba(255, 0, 0, 128));
+def halfRed as images.Color init images.Color{r: 255, g: 0, b: 0, a: 128};
+def boxed as images.Image init images.fill($sky, 40, 30, 120, 80, $halfRed);
 io.printf("canvas %v\n", $boxed);
 io.printf("inside the box %v\n", images.pixel($boxed, 50, 40));
 io.printf("outside it     %v\n", images.pixel($boxed, 300, 190));
@@ -44,7 +45,7 @@ io.printf("dithered: %d of %d pixels black\n", $black, len($raw) // 4);
 
 # A decode bomb is refused from the header alone.
 try {
-    images.decode($png, 1000);
+    images.decodeWith($png, images.DecodeOptions{maxPixels: 1000});
 } catch (e) {
     io.printf("%s: %s\n", $e.kind, $e.message);
 }

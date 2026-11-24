@@ -57,7 +57,9 @@ for (def src in [$plainKml, $prefixedKml]) {
 
 # A fragment cut out of a larger document decodes against its root's bindings,
 # and encode declares what it needs.
-def frag as xml.Value init xml.decode("<k:Placemark><k:name>C</k:name></k:Placemark>", {"k": KML});
+def frag as xml.Value init xml.decodeWith(
+    "<k:Placemark><k:name>C</k:name></k:Placemark>",
+    xml.DecodeOptions{namespaces: {"k": KML}});
 io.printf("fragment ns: %s\n", xml.namespace($frag));
 io.printf("fragment: %s\n", xml.encode($frag));
 

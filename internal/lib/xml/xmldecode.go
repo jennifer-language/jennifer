@@ -22,6 +22,7 @@ import (
 	"unicode/utf8"
 
 	"jennifer-lang.dev/jennifer/internal/dataerr"
+	"jennifer-lang.dev/jennifer/internal/lib/doctree"
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
@@ -35,6 +36,9 @@ type decoder struct {
 	line    int
 	col     int
 	nodes   int // elements / attributes / text nodes built so far, gated by addNodes
+	// The caps: maxDepth / maxDecodedNodes, or lower (xml.decodeWith).
+	capDepth int
+	capNodes int
 	// Shared scratch stacks: an element's children and attributes are pushed
 	// here while it is open and copied out at exactly their final size when it
 	// closes, so no per-element slice is left with append's spare capacity.
@@ -51,8 +55,8 @@ var maxDecodedNodes = limits.MaxDecodedNodes
 // the cap.
 func (d *decoder) addNodes(n int) error {
 	d.nodes += n
-	if d.nodes > maxDecodedNodes {
-		return d.capf("document expands to more than %d nodes (input rejected as a decode bomb)", maxDecodedNodes)
+	if d.nodes > d.capNodes {
+		return d.capf("document expands to more than %d nodes (input rejected as a decode bomb)", d.capNodes)
 	}
 	return nil
 }
@@ -158,14 +162,20 @@ func (d *decoder) skipSpace() {
 // decodeXML parses a full document: an optional prolog, exactly one root
 // element, and optional trailing misc.
 func decodeXML(src string) (node, error) {
-	return decodeXMLIn(src, nil)
+	return decodeXMLIn(src, nil, defaultCaps())
 }
 
-// decodeXMLIn parses src with the namespace bindings in seed already in scope
-// at the root - how a fragment cut out of a larger document decodes against
-// its root's declarations.
-func decodeXMLIn(src string, seed *nsScope) (node, error) {
-	d := &decoder{s: src}
+// defaultCaps are xml.decode's caps (read at call time: tests lower
+// maxDecodedNodes).
+func defaultCaps() doctree.DecodeCaps {
+	return doctree.DecodeCaps{Depth: maxDepth, Nodes: maxDecodedNodes}
+}
+
+// decodeXMLIn parses src under caps with the namespace bindings in seed
+// already in scope at the root - how a fragment cut out of a larger document
+// decodes against its root's declarations.
+func decodeXMLIn(src string, seed *nsScope, caps doctree.DecodeCaps) (node, error) {
+	d := &decoder{s: src, capDepth: caps.Depth, capNodes: caps.Nodes}
 	if err := d.checkRawChars(); err != nil {
 		return node{}, err
 	}
@@ -316,8 +326,8 @@ func (d *decoder) skipDoctype() error {
 // level, capped to keep the recursion from overflowing the Go stack; scope is
 // the namespace bindings in scope at the parent.
 func (d *decoder) parseElement(depth int, scope *nsScope) (node, error) {
-	if depth >= maxDepth {
-		return node{}, d.capf("element nesting exceeds %d levels", maxDepth)
+	if depth >= d.capDepth {
+		return node{}, d.capf("element nesting exceeds %d levels", d.capDepth)
 	}
 	if err := d.addNodes(1); err != nil {
 		return node{}, err

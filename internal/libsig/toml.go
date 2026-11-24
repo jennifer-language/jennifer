@@ -22,6 +22,7 @@ asBool(toml.Value, string?) bool
 asDecimal(toml.Value, string?) decimal.Decimal
 isDatetime(toml.Value, string?) bool
 asDatetime(toml.Value, string?) time.Time
+asLocal(toml.Value, string?) toml.Local
 list(list of any?) toml.Value
 map(map of string to any?) toml.Value
 set(toml.Value, string, any) toml.Value
@@ -30,6 +31,7 @@ append(toml.Value, string, any) toml.Value
 remove(toml.Value, string) toml.Value
 move(toml.Value, string, string) toml.Value
 decode(string) toml.Value
+decodeWith(string, toml.DecodeOptions) toml.Value
 encode(any) string
 encodePretty(any) string
 `)

@@ -15,7 +15,9 @@ import (
 	"sync/atomic"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/lib/doctree"
 	"jennifer-lang.dev/jennifer/internal/limits"
+	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
 // Install registers the xml surface.
@@ -28,29 +30,16 @@ func Install(in *interpreter.Interpreter) {
 	in.SetNativeObjectZero(LibraryName, "Value", &xmlValue{root: textNode("")})
 
 	in.RegisterNamespaced(LibraryName, "decode", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-		if len(args) != 1 && len(args) != 2 {
-			return interpreter.Null(), fmt.Errorf("xml.decode expects 1 or 2 arguments (string[, ns]), got %d", len(args))
-		}
-		if args[0].Kind != interpreter.KindString {
-			return interpreter.Null(), fmt.Errorf("xml.decode: argument must be string, got %s", args[0].Kind)
-		}
-		// An optional prefix map puts bindings in scope at the root: a fragment
-		// cut out of a larger document decodes against its root's declarations.
-		var seed *nsScope
-		if len(args) == 2 {
-			ns, err := prefixMap("xml.decode", args[1])
-			if err != nil {
-				return interpreter.Null(), err
-			}
-			if seed, err = seedScope(ns); err != nil {
-				return interpreter.Null(), fmt.Errorf("xml.decode: %w", err)
-			}
-		}
-		tree, err := decodeXMLIn(args[0].Str, seed)
-		if err != nil {
-			return interpreter.Null(), fmt.Errorf("xml.decode: %w", err)
-		}
-		return wrap(tree), nil
+		return decodeFn(args)
+	})
+	// Caps for decodeWith, each at most xml.decode's and 0 for that default,
+	// and the namespace bindings in scope at the root.
+	in.RegisterNamespacedStruct(LibraryName, "DecodeOptions", doctree.DecodeOptionFields(parser.StructField{
+		Name: "namespaces",
+		Type: parser.MapType(parser.PrimitiveType(parser.TypeString), parser.PrimitiveType(parser.TypeString)),
+	}))
+	in.RegisterNamespaced(LibraryName, "decodeWith", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+		return decodeWithFn(args)
 	})
 	in.RegisterNamespaced(LibraryName, "encode", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		return encodeFn(args, false)
@@ -83,6 +72,68 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "setAttrNS", setAttrNSFn)
 	in.RegisterNamespaced(LibraryName, "setText", setTextFn)
 	in.RegisterNamespaced(LibraryName, "append", appendFn)
+}
+
+// decodeFn implements `xml.decode(text[, ns])`. The second argument is
+// deprecated (xml.DecodeOptions.namespaces).
+func decodeFn(args []interpreter.Value) (interpreter.Value, error) {
+	const fn = "xml.decode"
+	if len(args) != 1 && len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("%s expects 1 or 2 arguments (string[, ns]), got %d", fn, len(args))
+	}
+	if args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("%s: argument must be string, got %s", fn, args[0].Kind)
+	}
+	ns := interpreter.Null()
+	if len(args) == 2 {
+		ns = args[1]
+	}
+	return decodeWithNS(fn, args[0].Str, ns, defaultCaps())
+}
+
+// decodeWithFn implements `xml.decodeWith(text, xml.DecodeOptions)`: decode
+// under lower caps than xml.decode's, with the options' namespaces in scope at
+// the root.
+func decodeWithFn(args []interpreter.Value) (interpreter.Value, error) {
+	const fn = "xml.decodeWith"
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("%s expects 2 arguments (string, xml.DecodeOptions), got %d", fn, len(args))
+	}
+	if args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("%s: argument 1 must be string, got %s", fn, args[0].Kind)
+	}
+	caps, err := doctree.ReadDecodeOptions(fn, LibraryName, args[1], defaultCaps())
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	ns := interpreter.Null()
+	for _, f := range args[1].Fields {
+		if f.Name == "namespaces" {
+			ns = f.Value
+		}
+	}
+	return decodeWithNS(fn, args[0].Str, ns, caps)
+}
+
+// decodeWithNS decodes text under caps with the prefix map ns (a map of
+// string to string; null or empty for none) in scope at the root: a fragment
+// cut out of a larger document decodes against its root's declarations.
+func decodeWithNS(fn, text string, ns interpreter.Value, caps doctree.DecodeCaps) (interpreter.Value, error) {
+	var seed *nsScope
+	if ns.Kind != interpreter.KindNull && !(ns.Kind == interpreter.KindMap && len(ns.Map) == 0) {
+		m, err := prefixMap(fn, ns)
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		if seed, err = seedScope(m); err != nil {
+			return interpreter.Null(), fmt.Errorf("%s: %w", fn, err)
+		}
+	}
+	tree, err := decodeXMLIn(text, seed, caps)
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("%s: %w", fn, err)
+	}
+	return wrap(tree), nil
 }
 
 // ---- encode ----
