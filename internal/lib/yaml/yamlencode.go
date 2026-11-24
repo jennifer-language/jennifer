@@ -63,10 +63,11 @@ func toYaml(n node, flow bool) *yaml.Node {
 	case doctree.KindInt:
 		return scalarNode("!!int", strconv.FormatInt(n.IntVal(), 10))
 	case doctree.KindBigInt:
-		// Plain digits, an integer in YAML 1.2. yaml.v3 resolves digits past
-		// int64 to !!float, so that tag keeps the scalar plain (an !!int tag
-		// would be written out); decode reads such digits back exactly.
-		return scalarNode("!!float", n.Str())
+		// Plain untagged digits: a YAML 1.2 core-schema integer of any size,
+		// as other parsers read it. yaml.v3 itself resolves such digits to
+		// !!float or !!str, so neither a tag nor its resolution may be used
+		// (an !!int tag would be written out); decode reads them back exactly.
+		return scalarNode("", n.Str())
 	case doctree.KindFloat:
 		return scalarNode("!!float", formatYamlFloat(n.FloatVal()))
 	case doctree.KindString:
@@ -83,7 +84,14 @@ func toYaml(n node, flow bool) *yaml.Node {
 	case doctree.KindBytes:
 		return scalarNode("!!binary", base64.StdEncoding.EncodeToString([]byte(n.Str())))
 	case doctree.KindDatetime:
-		return scalarNode("!!timestamp", n.Str())
+		y := scalarNode("!!timestamp", n.Str())
+		if flow && strings.IndexByte(y.Value, ':') >= 0 {
+			// A ':' keeps yaml.v3 from writing a plain scalar in flow
+			// context, and a quoted one untagged reads back as a string:
+			// write the tag (`!!timestamp '2001-12-14T21:59:43Z'`).
+			y.Style = yaml.TaggedStyle
+		}
+		return y
 	case doctree.KindList:
 		y := &yaml.Node{Kind: yaml.SequenceNode, Style: style, Content: make([]*yaml.Node, n.Len())}
 		for i, e := range n.Elems() {

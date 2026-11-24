@@ -21,3 +21,12 @@ func TestBigIntegerRefused(t *testing.T) {
 		t.Errorf("int64 max: %v", err)
 	}
 }
+
+// A huge integer's error message shows a bounded prefix and the digit count,
+// not every digit.
+func TestBigIntegerMessageBounded(t *testing.T) {
+	_, err := decodeToml("id = " + strings.Repeat("9", 100_000) + "\n")
+	if dataerr.KindOf(err) != "toml" || len(err.Error()) > 300 || !strings.Contains(err.Error(), "(100000 digits)") {
+		t.Errorf("%.400v", err)
+	}
+}

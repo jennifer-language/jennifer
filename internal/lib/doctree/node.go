@@ -23,6 +23,7 @@ import (
 	"math"
 	"math/big"
 	"sort"
+	"strconv"
 	"strings"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
@@ -194,9 +195,43 @@ func Int(n int64) Node { return Node{k: KindInt, num: uint64(n)} }
 // Float returns a float node.
 func Float(f float64) Node { return Node{k: KindFloat, num: math.Float64bits(f)} }
 
-// BigInt returns an integer node outside int64, from its decimal digits (an
-// optional '-', no '+', no leading zero).
-func BigInt(digits string) Node { return Node{k: KindBigInt, str: digits} }
+// BigInt returns an integer node from its decimal digits (an optional sign,
+// then ASCII digits; the caller has checked the grammar). The digits are kept
+// normalised (no '+', no leading zero), so two big ints compare by string; a
+// value that fits int64 becomes an Int node.
+func BigInt(digits string) Node {
+	neg := strings.HasPrefix(digits, "-")
+	body := strings.TrimLeft(strings.TrimLeft(digits, "+-"), "0")
+	if len(body) <= 19 {
+		if i, err := strconv.ParseInt(digits, 10, 64); err == nil {
+			return Int(i)
+		}
+	}
+	if neg {
+		body = "-" + body
+	}
+	return Node{k: KindBigInt, str: body}
+}
+
+// maxFloatDigits is the digit count of the largest finite float64
+// (1.8e308): an integer with more digits has no float value.
+const maxFloatDigits = 309
+
+// ShortNumber is a number's text as an error message shows it: whole up to
+// 40 characters, else its first 40 and the digit count, so a hostile
+// million-digit number does not become a megabyte message.
+func ShortNumber(s string) string {
+	if len(s) <= 40 {
+		return s
+	}
+	digits := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] >= '0' && s[i] <= '9' {
+			digits++
+		}
+	}
+	return s[:40] + "... (" + strconv.Itoa(digits) + " digits)"
+}
 
 // String returns a string node.
 func String(s string) Node { return Node{k: KindString, str: s} }
@@ -344,8 +379,7 @@ func (n Node) Equal(o Node) bool {
 		return n.ScalarValue().Equal(o.ScalarValue())
 	}
 	if n.k == KindBigInt || o.k == KindBigInt {
-		a, b := n.Rat(), o.Rat()
-		return a != nil && b != nil && a.Cmp(b) == 0
+		return bigIntEqual(n, o)
 	}
 	if n.k != o.k {
 		return false
@@ -390,22 +424,44 @@ func (n Node) Equal(o Node) bool {
 	return false
 }
 
-// Rat is a number node's exact value (an int, a big int or a finite float),
-// or nil for any other node.
-func (n Node) Rat() *big.Rat {
-	switch n.k {
-	case KindInt:
-		return new(big.Rat).SetInt64(n.IntVal())
-	case KindBigInt:
-		r, ok := new(big.Rat).SetString(n.str)
-		if !ok {
-			return nil
-		}
-		return r
-	case KindFloat:
-		return new(big.Rat).SetFloat64(n.FloatVal()) // nil for NaN / Inf
+// bigIntEqual is Equal where at least one side is a big int. Its digits are
+// never parsed past maxFloatDigits (big.Int.SetString is quadratic): two big
+// ints compare their normalised strings, a big int never equals an int (it
+// lies outside int64), and against a float it is parsed only when a float
+// can hold its magnitude.
+func bigIntEqual(n, o Node) bool {
+	if n.k != KindBigInt {
+		n, o = o, n
 	}
-	return nil
+	switch o.k {
+	case KindBigInt:
+		return n.str == o.str
+	case KindFloat:
+		f := o.FloatVal()
+		if math.IsNaN(f) || math.IsInf(f, 0) || f != math.Trunc(f) {
+			return false
+		}
+		b := n.bigIntSmall()
+		if b == nil {
+			return false
+		}
+		fi, _ := new(big.Float).SetFloat64(f).Int(nil)
+		return fi.Cmp(b) == 0
+	}
+	return false
+}
+
+// bigIntSmall is a big int node's value when it has at most maxFloatDigits
+// digits (cheap to parse), else nil.
+func (n Node) bigIntSmall() *big.Int {
+	if len(strings.TrimPrefix(n.str, "-")) > maxFloatDigits {
+		return nil
+	}
+	b, ok := new(big.Int).SetString(n.str, 10)
+	if !ok {
+		return nil
+	}
+	return b
 }
 
 // ScalarValue renders a scalar node as the interpreter Value an `as*`

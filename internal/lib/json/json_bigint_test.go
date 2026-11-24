@@ -92,3 +92,15 @@ func TestBigIntegers(t *testing.T) {
 		t.Errorf("canonical big int: %v", err)
 	}
 }
+
+// A huge integer's error message shows a bounded prefix and the digit count.
+func TestBigIntegerMessageBounded(t *testing.T) {
+	n, err := decodeFn([]interpreter.Value{interpreter.StringVal("[" + strings.Repeat("7", 100_000) + "]")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = lib.Builtin("asInt")(interpreter.BuiltinCtx{}, []interpreter.Value{lib.Wrap(n), interpreter.StringVal("/0")})
+	if dataerr.KindOf(err) != "json" || len(err.Error()) > 300 || !strings.Contains(err.Error(), "7777... (100000 digits)") {
+		t.Errorf("%.400v", err)
+	}
+}

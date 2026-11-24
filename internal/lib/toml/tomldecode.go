@@ -106,7 +106,7 @@ type decoder struct {
 	pos   int
 	line  int // 0-based; +1 for messages
 	depth int // current container nesting, gated in parseValue
-	nodes int // value nodes materialised so far, gated in parseValue
+	nodes int // nodes materialised so far, gated by countNode
 
 	// Table-definition state (keyed by encoded dotted path) enforces TOML 1.0's
 	// MUST-error redefinition rules that a plain tree build would silently merge:
@@ -422,6 +422,9 @@ func (d *decoder) parseArrayTableHeader(root node) (node, error) {
 	}
 	last := segs[len(segs)-1]
 	// Find or create the array under `last`, then append a fresh table element.
+	if err := d.countNode(); err != nil {
+		return node{}, err
+	}
 	elem := d.b.NewMap()
 	if pos := d.b.Lookup(cur, last); pos >= 0 {
 		v := cur.Elem(pos)
@@ -434,6 +437,9 @@ func (d *decoder) parseArrayTableHeader(root node) (node, error) {
 		d.arrayIdx[key]++
 		d.curPath = segs
 		return elem, nil
+	}
+	if err := d.countNode(); err != nil {
+		return node{}, err
 	}
 	arr := d.b.NewList()
 	d.b.Push(arr, elem)
@@ -455,6 +461,9 @@ func (d *decoder) parseArrayTableHeader(root node) (node, error) {
 func (d *decoder) descendTable(cur node, key, stateKey string) (node, error) {
 	pos := d.b.Lookup(cur, key)
 	if pos < 0 {
+		if err := d.countNode(); err != nil {
+			return node{}, err
+		}
 		t := d.b.NewMap()
 		d.b.Add(cur, key, t)
 		return t, nil
@@ -571,10 +580,19 @@ func isBareKeyChar(c byte) bool {
 
 // ----- values --------------------------------------------------------------
 
-func (d *decoder) parseValue() (node, error) {
+// countNode charges one materialised node (a value, or a table or array a
+// header or dotted key creates) against the node cap.
+func (d *decoder) countNode() error {
 	d.nodes++
 	if d.nodes > d.maxNodes {
-		return node{}, d.capf("document expands to more than %d nodes (input rejected as a decode bomb)", d.maxNodes)
+		return d.capf("document expands to more than %d nodes (input rejected as a decode bomb)", d.maxNodes)
+	}
+	return nil
+}
+
+func (d *decoder) parseValue() (node, error) {
+	if err := d.countNode(); err != nil {
+		return node{}, err
 	}
 	switch c := d.peek(); {
 	case c == '"':
@@ -966,6 +984,9 @@ func inlineAssign(tbl node, segs []string, val node, d *decoder, prefix string, 
 	path := prefix + "\x00" + segs[0]
 	pos := d.b.Lookup(tbl, segs[0])
 	if pos < 0 {
+		if err := d.countNode(); err != nil {
+			return err
+		}
 		pos = d.b.Add(tbl, segs[0], d.b.NewMap())
 		implicit[path] = true
 	}
@@ -1185,7 +1206,7 @@ func classifyNumber(tok string, d *decoder) (node, error) {
 	// Underscores must sit between digits (strconv silently strips them, so
 	// without this `1__0`, `_1`, `1_` would slip through).
 	if !validateUnderscores(tok) {
-		return node{}, d.errf("invalid number %q: misplaced underscore", tok)
+		return node{}, d.errf("invalid number %q: misplaced underscore", doctree.ShortNumber(tok))
 	}
 	// Prefixed integers: hex / octal / binary. No sign, no underscores adjacent
 	// to the prefix (we strip all underscores after the check above).
@@ -1204,7 +1225,7 @@ func classifyNumber(tok string, d *decoder) (node, error) {
 		}
 		if base != 0 {
 			if body[2] == '+' || body[2] == '-' {
-				return node{}, d.errf("invalid integer %q", tok)
+				return node{}, d.errf("invalid integer %q", doctree.ShortNumber(tok))
 			}
 			n, err := strconv.ParseInt(body[2:], base, 64)
 			return intOrErr(n, err, tok, d)
@@ -1214,13 +1235,13 @@ func classifyNumber(tok string, d *decoder) (node, error) {
 	// bare-dot floats (`.5`, `5.`, `3.e2`), and empty exponents, all of which
 	// TOML rejects - validate the grammar explicitly first.
 	if !validateDecimalGrammar(body) {
-		return node{}, d.errf("invalid number %q", tok)
+		return node{}, d.errf("invalid number %q", doctree.ShortNumber(tok))
 	}
 	// Float if it carries a '.', or an exponent, or is inf/nan (handled above).
 	if strings.ContainsAny(body, ".eE") && !isDecimalInteger(body) {
 		f, err := strconv.ParseFloat(body, 64)
 		if err != nil {
-			return node{}, d.errf("invalid float %q", tok)
+			return node{}, d.errf("invalid float %q", doctree.ShortNumber(tok))
 		}
 		return doctree.Float(f), nil
 	}
@@ -1230,9 +1251,9 @@ func classifyNumber(tok string, d *decoder) (node, error) {
 		// decode error, not a silent lossy-float downgrade. (`json` keeps its
 		// deliberate integral-past-int64 -> float fallback; TOML does not.)
 		if ne, ok := err.(*strconv.NumError); ok && ne.Err == strconv.ErrRange {
-			return node{}, d.errf("integer %q is out of range for a 64-bit signed TOML integer; quote it as a string", tok)
+			return node{}, d.errf("integer %q is out of range for a 64-bit signed TOML integer; quote it as a string", doctree.ShortNumber(tok))
 		}
-		return node{}, d.errf("invalid integer %q", tok)
+		return node{}, d.errf("invalid integer %q", doctree.ShortNumber(tok))
 	}
 	return doctree.Int(n), nil
 }
@@ -1336,7 +1357,7 @@ func isDecimalInteger(body string) bool {
 
 func intOrErr(n int64, err error, tok string, d *decoder) (node, error) {
 	if err != nil {
-		return node{}, d.errf("invalid integer %q", tok)
+		return node{}, d.errf("invalid integer %q", doctree.ShortNumber(tok))
 	}
 	return doctree.Int(n), nil
 }

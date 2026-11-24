@@ -283,17 +283,17 @@ func TestTgzAlias(t *testing.T) {
 	}
 }
 
-// TestCheckEntryNameDriveLetter pins the Windows drive-letter guard must
-// reject only a real drive reference (letter + ':' + separator/end), not any
-// Unix name whose second character is ':'.
+// TestCheckEntryNameDriveLetter pins the Windows drive-letter guard: a letter
+// and ':' opening the name is refused on every platform, a drive-relative
+// `C:foo` included; a ':' elsewhere is an ordinary character.
 func TestCheckEntryNameDriveLetter(t *testing.T) {
-	ok := []string{"a:b.txt", "1:1.log", "dir/a:b", "a.txt", "sub/x"}
+	ok := []string{"1:1.log", "dir/a:b", "ab:c", "a.txt", "sub/x"}
 	for _, n := range ok {
 		if err := checkEntryName(n); err != nil {
 			t.Errorf("checkEntryName(%q) = %v, want nil (legal Unix name)", n, err)
 		}
 	}
-	bad := []string{"C:/x.txt", "c:\\x", "D:", "/abs/path", "../up", "x/../../y",
+	bad := []string{"C:/x.txt", "c:\\x", "D:", "C:foo", "a:b.txt", "z:..", "/abs/path", "../up", "x/../../y",
 		"a/b/c/d/src/../../../../PWNED.txt", "a/../b", "a\\..\\b", "x/.."}
 	for _, n := range bad {
 		if err := checkEntryName(n); err == nil {

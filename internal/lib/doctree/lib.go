@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 	stdtime "time"
@@ -475,7 +476,7 @@ func (l *Lib) asInt(fnName string, args []interpreter.Value) (interpreter.Value,
 // bigIntErr is asInt's error for an integer outside int64; at is "" or
 // "element N ".
 func (l *Lib) bigIntErr(fnName, at string, n Node) error {
-	return dataerr.New(l.Name, "%s: %sinteger %s does not fit int64; read it with %s.asDecimal", fnName, at, n.str, l.Name)
+	return dataerr.New(l.Name, "%s: %sinteger %s does not fit int64; read it with %s.asDecimal", fnName, at, ShortNumber(n.str), l.Name)
 }
 
 // numberFloat is asFloat's reading of a number node: a float as it is (a
@@ -498,10 +499,14 @@ func (l *Lib) numberFloat(fnName, at string, n Node) (float64, bool, error) {
 		}
 		return 0, true, dataerr.New(l.Name, "%s: %sinteger %d has no exact float value; read it with %s.asDecimal", fnName, at, i, l.Name)
 	case KindBigInt:
-		if f, exact := n.Rat().Float64(); exact {
-			return f, true, nil
+		// Past maxFloatDigits digits the magnitude is beyond float64, so the
+		// digits are not parsed (big.Int.SetString is quadratic).
+		if b := n.bigIntSmall(); b != nil {
+			if f, acc := new(big.Float).SetInt(b).Float64(); acc == big.Exact && !math.IsInf(f, 0) {
+				return f, true, nil
+			}
 		}
-		return 0, true, dataerr.New(l.Name, "%s: %sinteger %s has no exact float value; read it with %s.asDecimal", fnName, at, n.str, l.Name)
+		return 0, true, dataerr.New(l.Name, "%s: %sinteger %s has no exact float value; read it with %s.asDecimal", fnName, at, ShortNumber(n.str), l.Name)
 	}
 	return 0, false, nil
 }

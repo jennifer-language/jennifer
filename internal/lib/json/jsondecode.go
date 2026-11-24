@@ -531,7 +531,7 @@ func (d *decoder) parseNumber() (node, error) {
 	}
 	f, err := strconv.ParseFloat(tok, 64)
 	if err != nil {
-		return node{}, d.errf("invalid number %q", tok)
+		return node{}, d.errf("invalid number %q", doctree.ShortNumber(tok))
 	}
 	return doctree.Float(f), nil
 }

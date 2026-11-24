@@ -53,7 +53,7 @@ returns a fresh handle: `$v = toml.set($v, ...)`, as with lists and maps.
 | Cap | Default (`jennifer` / `jennifer-tiny`) | `DecodeOptions` field |
 |---|---|---|
 | Nesting depth (containers, header and dotted-key segments) | 1000 / 64 | `maxDepth` |
-| Value nodes | 2,097,152 / 262,144 | `maxNodes` |
+| Nodes: values, and the tables and arrays of tables that headers and dotted keys create | 2,097,152 / 262,144 | `maxNodes` |
 
 A reached cap is kind `"limit"`. `toml.decodeWith` lowers the caps per call,
 as `json.decodeWith` does: 0 keeps the default; a value above it, or a

@@ -321,7 +321,7 @@ func encodeInline(sb *strings.Builder, n node) error {
 	case doctree.KindInt:
 		sb.WriteString(strconv.FormatInt(n.IntVal(), 10))
 	case doctree.KindBigInt:
-		return fmt.Errorf("TOML integers are 64-bit; %s does not fit (encode it as a string)", n.Str())
+		return fmt.Errorf("TOML integers are 64-bit; %s does not fit (encode it as a string)", doctree.ShortNumber(n.Str()))
 	case doctree.KindFloat:
 		sb.WriteString(formatTomlFloat(n.FloatVal()))
 	case doctree.KindString:

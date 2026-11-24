@@ -446,19 +446,17 @@ func packTar(entries []entry) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// hasDriveLetter reports whether s (already slash-normalized) begins with a
-// Windows drive reference - an ASCII letter, a `:`, then a separator or the end
-// of the string (`C:`, `C:/foo`). A bare `:` at index 1 is not enough: ordinary
-// Unix names like `a:b.txt` or `1:1.log` are legal and must unpack.
+// hasDriveLetter reports whether s begins with a Windows drive reference: an
+// ASCII letter and a `:`. That includes a drive-relative name (`C:foo`, which
+// Windows resolves against drive C's current directory, outside any
+// extraction root), so a Unix name like `a:b.txt` is refused too, on every
+// platform: the same archive must unpack the same everywhere.
 func hasDriveLetter(s string) bool {
 	if len(s) < 2 || s[1] != ':' {
 		return false
 	}
 	c := s[0]
-	if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
-		return false
-	}
-	return len(s) == 2 || s[2] == '/'
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
 }
 
 // checkEntryName rejects a member whose name could escape an extraction
@@ -476,8 +474,11 @@ func checkEntryName(name string) error {
 		return fmt.Errorf("archive entry has an empty name")
 	}
 	norm := strings.ReplaceAll(name, "\\", "/")
-	if strings.HasPrefix(norm, "/") || hasDriveLetter(norm) {
+	if strings.HasPrefix(norm, "/") {
 		return fmt.Errorf("archive entry %q has an absolute path", name)
+	}
+	if hasDriveLetter(norm) {
+		return fmt.Errorf("archive entry %q starts with a drive letter", name)
 	}
 	for _, seg := range strings.Split(norm, "/") {
 		if seg == ".." {
@@ -542,7 +543,67 @@ func unpackTar(b []byte, caps unpackCaps) ([]entry, error) {
 // unpackTarStream decodes a tar stream under caps. ceiling bounds the bytes
 // the stream can hold at all, so a member's declared size sizes its buffer
 // only up to what the input could really carry.
+//
+// The stream must end with the end-of-archive marker (two zero blocks),
+// followed by nothing but NUL record padding; it is read to its end, so a
+// tar.gz's gzip trailer (CRC-32 and size) is verified and bytes after the
+// gzip member are refused.
 func unpackTarStream(src io.Reader, caps unpackCaps, ceiling int64) ([]entry, error) {
+	er := &eofReader{r: src}
+	entries, err := unpackTarMembers(er, caps, ceiling)
+	if err != nil {
+		return nil, err
+	}
+	if er.atEOF {
+		return nil, errors.New("tar stream is truncated: it ends without the end-of-archive marker")
+	}
+	if err := checkTarTail(er); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+// eofReader records whether a read hit the end of the stream with no data:
+// the tar reader ends a stream that stops at a member boundary as cleanly as
+// one that carries the end-of-archive marker.
+type eofReader struct {
+	r     io.Reader
+	atEOF bool
+}
+
+func (e *eofReader) Read(p []byte) (int, error) {
+	n, err := e.r.Read(p)
+	if n == 0 && err == io.EOF {
+		e.atEOF = true
+	}
+	return n, err
+}
+
+// checkTarTail reads what follows the end-of-archive marker to the end:
+// only NUL padding (tar pads to its record size) may follow. A gzip error
+// here is a bad trailer or bytes after the gzip member.
+func checkTarTail(r io.Reader) error {
+	var buf [32 * 1024]byte
+	for {
+		n, err := r.Read(buf[:])
+		for _, b := range buf[:n] {
+			if b != 0 {
+				return errors.New("tar stream has data after the end-of-archive marker")
+			}
+		}
+		switch {
+		case err == io.EOF:
+			return nil
+		case errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, gzip.ErrHeader):
+			return errors.New("the gzip data ends inside a stream: truncated, or followed by bytes that are not another gzip stream")
+		case err != nil:
+			return err
+		}
+	}
+}
+
+// unpackTarMembers reads the members up to the end-of-archive marker.
+func unpackTarMembers(src io.Reader, caps unpackCaps, ceiling int64) ([]entry, error) {
 	tr := tar.NewReader(src)
 	var entries []entry
 	// byName maps a regular member's name to its index in entries, so a hardlink

@@ -79,9 +79,12 @@ included, though `yaml.asFloat` refuses those: Jennifer has no non-finite
 float), `true` / `false` a `bool`, `~` / `null` a `null`, a timestamp a
 `datetime`, and everything else a `string`. A quoted scalar keeps its string
 type (`"42"` stays a string), and `yaml.encode` re-quotes a string that reads
-like another type. An integer too large for a 64-bit `int` keeps every digit
-(an `int` node that `asDecimal` reads and `encode` writes back), not a lossy
-`float`. Mappings become maps in document
+like another type. A plain integer too large for a 64-bit `int`, of any
+length (a `0x` / `0o` one up to 4096 digits; longer is kind `"limit"`), keeps
+every digit: an `int` node that `asDecimal` reads and `encode` writes back as
+plain digits (a YAML 1.2 integer to any parser), not a lossy `float` or a
+`string`. An explicit `!!float` tag is a `float` whatever its text, and a float
+past float64's range (`1e400`, plain or tagged) is a decode error. Mappings become maps in document
 order; sequences become lists; a `!!binary` scalar decodes to a `bytes` node, which `yaml.asBytes` reads. A non-scalar mapping key (a `? [a, b]`
 complex key) and a **duplicate mapping key** are both rejected.
 
@@ -137,7 +140,7 @@ one twice) from exhausting memory. Each of these caps is kind `"limit"`.
 
 | Kind | Raised for |
 |---|---|
-| `"yaml"` | malformed text in `decode` / `decodeWith` / `decodeAll`: a syntax error, a duplicate key, an undefined alias, a scalar that does not fit its tag, a YAML 1.1-only number, a bad merge source, invalid UTF-8; more than one document in `decode`; a number an accessor cannot return exactly (`asInt` past int64, `asFloat` past what a float holds) |
+| `"yaml"` | malformed text in `decode` / `decodeWith` / `decodeAll`: a syntax error, a duplicate key, an undefined alias, a scalar that does not fit its tag, a float past float64's range, a YAML 1.1-only number, a bad merge source, invalid UTF-8; more than one document in `decode`; a number an accessor cannot return exactly (`asInt` past int64, `asFloat` past what a float holds) |
 | `"limit"` | a reached cap (above) |
 | `"runtime"` | misuse: a wrong argument, `DecodeOptions` out of range, an unencodable value, an accessor on a node of another type (`asBytes` on a string), a malformed pointer |
 
@@ -220,9 +223,9 @@ def doc as yaml.Value init yaml.decode($src);
 io.printf("%s", yaml.encodePretty($doc));
 ```
 
-Block style preserves a timestamp's implicit type on round-trip; flow style
-quotes a timestamp (so it round-trips as a string) - prefer `encodePretty` when
-a document carries timestamps.
+A timestamp round-trips as a `datetime` in both styles. Flow style cannot
+write one with a time part (its `:`) as a plain scalar, so it writes it quoted
+with its tag: `{created: !!timestamp '2001-12-15T02:59:43Z'}`.
 
 ## Building and editing
 

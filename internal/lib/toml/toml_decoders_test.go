@@ -184,3 +184,28 @@ func TestDecodeMessageShape(t *testing.T) {
 		t.Errorf("decodeWith message: %v", err)
 	}
 }
+
+// The tables that headers, array-of-tables headers and dotted keys create count
+// against maxNodes (and the default cap) like values do.
+func TestDecodeWithNodesCountTables(t *testing.T) {
+	s := interpreter.StringVal
+	for _, doc := range []string{
+		"[a]\n[b]\n[c]\n[d]\n[e]\n[f]\n",
+		strings.Repeat("[[a]]\n", 5),
+		"a.b.c.d.e.f = 1\n",
+		"x = {a.b.c.d.e = 1}\n",
+		"[a.b.c.d.e]\n",
+	} {
+		_, err := tomlCall(t, "decodeWith", s(doc), decodeOpts(0, 3))
+		if k := dataerr.KindOf(err); k != "limit" {
+			t.Errorf("%q: kind %q, want limit (%v)", doc, k, err)
+		}
+	}
+	mustToml(t, "decodeWith", s("[a]\n[b]\nx = 1\n"), decodeOpts(0, 3))
+	saved := maxDecodedNodes
+	maxDecodedNodes = 100
+	defer func() { maxDecodedNodes = saved }()
+	if _, err := tomlCall(t, "decode", s(strings.Repeat("[[a]]\n", 120))); dataerr.KindOf(err) != "limit" {
+		t.Errorf("default cap on [[a]] headers: %v, want limit", err)
+	}
+}

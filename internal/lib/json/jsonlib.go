@@ -272,7 +272,7 @@ func (e *encoder) node(n node, depth int) error {
 		return e.int(n.IntVal())
 	case doctree.KindBigInt:
 		if e.canonical {
-			return fmt.Errorf("canonical form cannot hold the integer %s exactly (beyond +/-2^53); encode it as a string", n.Str())
+			return fmt.Errorf("canonical form cannot hold the integer %s exactly (beyond +/-2^53); encode it as a string", doctree.ShortNumber(n.Str()))
 		}
 		e.sb.WriteString(n.Str())
 	case doctree.KindFloat:

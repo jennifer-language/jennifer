@@ -16,6 +16,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"math/big"
 	"strconv"
 	"strings"
 	stdtime "time"
@@ -54,6 +55,7 @@ var maxDecodeBytes = 2 * limits.MaxDecodedNodes
 
 // converter carries the per-decode budget counters and caps.
 type converter struct {
+	verb     string // yaml.decode / yaml.decodeAll / yaml.decodeWith, the messages' prefix
 	nodes    int
 	maxDepth int // maxNestingDepth or lower (decodeWith)
 	maxNodes int // maxNodes or lower (decodeWith)
@@ -67,7 +69,7 @@ type converter struct {
 // with more than one document is an error pointing at decodeAll; an empty stream
 // yields a null value.
 func decodeYaml(src string) (node, error) {
-	return decodeYamlCaps(src, defaultCaps())
+	return decodeYamlCaps("yaml.decode", src, defaultCaps())
 }
 
 // defaultCaps are yaml.decode's caps (read at call time: tests lower maxNodes).
@@ -75,9 +77,10 @@ func defaultCaps() doctree.DecodeCaps {
 	return doctree.DecodeCaps{Depth: maxNestingDepth, Nodes: maxNodes}
 }
 
-// decodeYamlCaps is decodeYaml under the given caps (yaml.decodeWith).
-func decodeYamlCaps(src string, caps doctree.DecodeCaps) (node, error) {
-	docs, err := decodeStream(src, caps)
+// decodeYamlCaps is decodeYaml under the given caps (yaml.decodeWith); verb
+// opens every message.
+func decodeYamlCaps(verb, src string, caps doctree.DecodeCaps) (node, error) {
+	docs, err := decodeStream(verb, src, caps)
 	if err != nil {
 		return node{}, err
 	}
@@ -85,7 +88,7 @@ func decodeYamlCaps(src string, caps doctree.DecodeCaps) (node, error) {
 		return doctree.Null(), nil
 	}
 	if len(docs) > 1 {
-		return node{}, dataerr.New("yaml", "yaml.decode: input has %d documents; use yaml.decodeAll for a multi-document stream", len(docs))
+		return node{}, dataerr.New("yaml", "%s: input has %d documents; use yaml.decodeAll for a multi-document stream", verb, len(docs))
 	}
 	return docs[0], nil
 }
@@ -93,21 +96,21 @@ func decodeYamlCaps(src string, caps doctree.DecodeCaps) (node, error) {
 // decodeAllYaml parses every document of a YAML stream into a slice of root
 // values (each later wrapped as a yaml.Value).
 func decodeAllYaml(src string) ([]node, error) {
-	return decodeStream(src, defaultCaps())
+	return decodeStream("yaml.decodeAll", src, defaultCaps())
 }
 
 // decodeStream runs the yaml.v3 streaming decoder and converts each document.
 // Every error but a reached cap ("limit") is malformed input, kind "yaml".
-func decodeStream(src string, caps doctree.DecodeCaps) ([]node, error) {
-	docs, err := decodeStreamRaw(src, caps)
+func decodeStream(verb, src string, caps doctree.DecodeCaps) ([]node, error) {
+	docs, err := decodeStreamRaw(verb, src, caps)
 	return docs, dataerr.Wrap("yaml", err)
 }
 
-func decodeStreamRaw(src string, caps doctree.DecodeCaps) ([]node, error) {
+func decodeStreamRaw(verb, src string, caps doctree.DecodeCaps) ([]node, error) {
 	if len(src) > maxDecodeBytes {
-		return nil, limits.Capf("yaml.decode: input is %d bytes, over the %d-byte limit (input rejected as a decode bomb)", len(src), maxDecodeBytes)
+		return nil, limits.Capf("%s: input is %d bytes, over the %d-byte limit (input rejected as a decode bomb)", verb, len(src), maxDecodeBytes)
 	}
-	if err := guardDepth(src); err != nil {
+	if err := guardDepthAs(verb, src); err != nil {
 		return nil, err
 	}
 	dec := yaml.NewDecoder(bytes.NewReader([]byte(src)))
@@ -115,7 +118,7 @@ func decodeStreamRaw(src string, caps doctree.DecodeCaps) ([]node, error) {
 	// One converter for the whole stream: its node budget bounds the decode,
 	// not each document (a many-document file of alias bombs would otherwise
 	// multiply the cap).
-	c := &converter{maxDepth: caps.Depth, maxNodes: caps.Nodes}
+	c := &converter{verb: verb, maxDepth: caps.Depth, maxNodes: caps.Nodes}
 	for {
 		var doc yaml.Node
 		err := dec.Decode(&doc)
@@ -123,7 +126,7 @@ func decodeStreamRaw(src string, caps doctree.DecodeCaps) ([]node, error) {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("yaml.decode: %w", err)
+			return nil, fmt.Errorf("%s: %w", verb, err)
 		}
 		v, cerr := c.node(&doc, 0)
 		if cerr != nil {
@@ -159,11 +162,11 @@ func isIntegerText(s string) bool {
 // node converts one yaml.Node into a tree node.
 func (c *converter) node(n *yaml.Node, depth int) (node, error) {
 	if depth > c.maxDepth {
-		return node{}, limits.Capf("yaml.decode: nesting too deep (limit %d)", c.maxDepth)
+		return node{}, limits.Capf("%s: nesting too deep (limit %d)", c.verb, c.maxDepth)
 	}
 	c.nodes++
 	if c.nodes > c.maxNodes {
-		return node{}, limits.Capf("yaml.decode: document expands to too many nodes (limit %d); possible alias bomb", c.maxNodes)
+		return node{}, limits.Capf("%s: document expands to too many nodes (limit %d); possible alias bomb", c.verb, c.maxNodes)
 	}
 	switch n.Kind {
 	case yaml.DocumentNode:
@@ -173,18 +176,18 @@ func (c *converter) node(n *yaml.Node, depth int) (node, error) {
 		return c.node(n.Content[0], depth+1)
 	case yaml.AliasNode:
 		if n.Alias == nil {
-			return node{}, fmt.Errorf("yaml.decode: alias %q has no anchor", n.Value)
+			return node{}, fmt.Errorf("%s: alias %q has no anchor", c.verb, n.Value)
 		}
 		if v, ok := c.anchored[n.Alias]; ok {
 			// The node budget counts the expansion, as though it were
 			// converted again (one node is already counted above).
 			if size := v.ExpandedSize(); size > uint64(c.maxNodes) || c.nodes+int(size)-1 > c.maxNodes {
-				return node{}, limits.Capf("yaml.decode: document expands to too many nodes (limit %d); possible alias bomb", c.maxNodes)
+				return node{}, limits.Capf("%s: document expands to too many nodes (limit %d); possible alias bomb", c.verb, c.maxNodes)
 			} else {
 				c.nodes += int(size) - 1
 			}
 			if depth+v.Height() > c.maxDepth {
-				return node{}, limits.Capf("yaml.decode: nesting too deep (limit %d)", c.maxDepth)
+				return node{}, limits.Capf("%s: nesting too deep (limit %d)", c.verb, c.maxDepth)
 			}
 			return v, nil
 		}
@@ -202,7 +205,7 @@ func (c *converter) node(n *yaml.Node, depth int) (node, error) {
 		// A zero Node comes from an empty document.
 		return doctree.Null(), nil
 	default:
-		return node{}, fmt.Errorf("yaml.decode: unsupported node kind %d", n.Kind)
+		return node{}, fmt.Errorf("%s: unsupported node kind %d", c.verb, n.Kind)
 	}
 }
 
@@ -214,17 +217,17 @@ func (c *converter) value(n *yaml.Node, depth int) (node, error) {
 	switch n.Kind {
 	case yaml.MappingNode:
 		if strings.HasPrefix(tag, "!!") && tag != "!!map" && tag != "!!set" {
-			return node{}, fmt.Errorf("yaml.decode: line %d: a mapping tagged %s", n.Line, tag)
+			return node{}, fmt.Errorf("%s: line %d: a mapping tagged %s", c.verb, n.Line, tag)
 		}
 		return c.mapping(n, depth)
 	case yaml.SequenceNode:
 		if strings.HasPrefix(tag, "!!") && tag != "!!seq" && tag != "!!omap" && tag != "!!pairs" {
-			return node{}, fmt.Errorf("yaml.decode: line %d: a sequence tagged %s", n.Line, tag)
+			return node{}, fmt.Errorf("%s: line %d: a sequence tagged %s", c.verb, n.Line, tag)
 		}
 		return c.sequence(n, depth)
 	}
 	if tag == "!!map" || tag == "!!seq" || tag == "!!set" || tag == "!!omap" || tag == "!!pairs" {
-		return node{}, fmt.Errorf("yaml.decode: line %d: a scalar tagged %s", n.Line, tag)
+		return node{}, fmt.Errorf("%s: line %d: a scalar tagged %s", c.verb, n.Line, tag)
 	}
 	return c.scalar(n)
 }
@@ -246,12 +249,12 @@ func (c *converter) mapping(n *yaml.Node, depth int) (node, error) {
 			keyNode = keyNode.Alias
 		}
 		if keyNode.Kind != yaml.ScalarNode {
-			return node{}, fmt.Errorf("yaml.decode: mapping key must be scalar, got node kind %d", keyNode.Kind)
+			return node{}, fmt.Errorf("%s: mapping key must be scalar, got node kind %d", c.verb, keyNode.Kind)
 		}
 		// Duplicate keys would produce a map with a repeated key, breaking the
 		// unique-key invariant; reject them (as json / toml / xml decode do).
 		if seen[keyNode.Value] {
-			return node{}, fmt.Errorf("yaml.decode: duplicate mapping key %q", keyNode.Value)
+			return node{}, fmt.Errorf("%s: duplicate mapping key %q", c.verb, keyNode.Value)
 		}
 		val, err := c.node(n.Content[i+1], depth+1)
 		if err != nil {
@@ -298,7 +301,7 @@ func (c *converter) mergeSources(n *yaml.Node, depth int) ([]node, error) {
 				return nil, err
 			}
 			if v.Kind() != doctree.KindMap {
-				return nil, fmt.Errorf("yaml.decode: merge (<<) source must be a mapping, got a %s", v.TypeName())
+				return nil, fmt.Errorf("%s: merge (<<) source must be a mapping, got a %s", c.verb, v.TypeName())
 			}
 			out = append(out, v)
 		}
@@ -309,7 +312,7 @@ func (c *converter) mergeSources(n *yaml.Node, depth int) ([]node, error) {
 		return nil, err
 	}
 	if v.Kind() != doctree.KindMap {
-		return nil, fmt.Errorf("yaml.decode: merge (<<) source must be a mapping, got a %s", v.TypeName())
+		return nil, fmt.Errorf("%s: merge (<<) source must be a mapping, got a %s", c.verb, v.TypeName())
 	}
 	return []node{v}, nil
 }
@@ -333,7 +336,7 @@ func (c *converter) sequence(n *yaml.Node, depth int) (node, error) {
 // is the plain string.
 func (c *converter) scalar(n *yaml.Node) (node, error) {
 	bad := func(what string) (node, error) {
-		return node{}, fmt.Errorf("yaml.decode: line %d: %q is not %s", n.Line, n.Value, what)
+		return node{}, fmt.Errorf("%s: line %d: %q is not %s", c.verb, n.Line, shortText(n.Value), what)
 	}
 	switch n.ShortTag() {
 	case "!!null":
@@ -349,7 +352,7 @@ func (c *converter) scalar(n *yaml.Node) (node, error) {
 		}
 		return doctree.Bool(b), nil
 	case "!!int":
-		if err := checkCoreNumber(n); err != nil {
+		if err := c.checkCoreNumber(n); err != nil {
 			return node{}, err
 		}
 		var i int64
@@ -359,22 +362,21 @@ func (c *converter) scalar(n *yaml.Node) (node, error) {
 		// Outside int64: keep every digit as an integer node (asDecimal reads
 		// it, asInt refuses it), never a float that would silently corrupt an
 		// id or counter.
-		if isIntegerText(n.Value) {
-			return doctree.BigInt(strings.TrimPrefix(n.Value, "+")), nil
+		if v, ok, err := c.bigInteger(n); ok {
+			return v, err
 		}
-		return bad("an integer that fits 64 bits")
+		return bad("an integer")
 	case "!!float":
-		if err := checkCoreNumber(n); err != nil {
+		if err := c.checkCoreNumber(n); err != nil {
 			return node{}, err
 		}
-		// yaml.v3 re-tags an integer too large for int64 as !!float. Such a value
-		// is all digits (no '.' / exponent); keep it as an exact integer node
-		// rather than a lossy float64 - a 20+-digit id or counter must not
-		// silently change value. Genuine floats (with '.' / 'e') decode normally.
-		if isIntegerText(n.Value) {
-			if _, err := strconv.ParseInt(n.Value, 10, 64); err != nil {
-				return doctree.BigInt(strings.TrimPrefix(n.Value, "+")), nil
-			}
+		// yaml.v3 resolves a plain integer too large for int64 (up to float
+		// range) to !!float. Such a value is all digits; keep it as an exact
+		// integer node rather than a lossy float64 - a 20+-digit id or counter
+		// must not silently change value. A !!float tag written in the text
+		// is the author's: that value is a float.
+		if n.Style&yaml.TaggedStyle == 0 && isIntegerText(n.Value) {
+			return doctree.BigInt(n.Value), nil
 		}
 		var f float64
 		if err := n.Decode(&f); err != nil {
@@ -403,8 +405,139 @@ func (c *converter) scalar(n *yaml.Node) (node, error) {
 		}
 		return doctree.Bytes(data), nil
 	default:
+		// A plain untagged scalar yaml.v3 left a string although it is a
+		// YAML 1.2 number: an integer past its range (decimal beyond float64,
+		// hex / octal beyond uint64) or a float that overflows.
+		if n.Style == 0 && n.ShortTag() == "!!str" && numberShape(n.Value) {
+			if err := c.checkCoreNumber(n); err != nil {
+				return node{}, err
+			}
+			if v, ok, err := c.bigInteger(n); ok {
+				return v, err
+			}
+			if strings.ContainsAny(n.Value, "xo") {
+				return doctree.String(n.Value), nil // `0o9`: not a number in YAML 1.2
+			}
+			return bad("a float in range")
+		}
 		return doctree.String(n.Value), nil
 	}
+}
+
+// maxRadixDigits caps the digits of a hex / octal integer past uint64:
+// converting one to the decimal digits a big integer keeps costs time
+// quadratic in its length.
+const maxRadixDigits = 4096
+
+// bigInteger reads an integer scalar past int64 (its spelling already passed
+// checkCoreNumber) as a big integer node: decimal digits are kept as they
+// are, a 0x / 0o one is converted. ok is false for any other text.
+func (c *converter) bigInteger(n *yaml.Node) (node, bool, error) {
+	s := n.Value
+	if isIntegerText(s) {
+		return doctree.BigInt(s), true, nil
+	}
+	if len(s) < 3 || s[0] != '0' || (s[1] != 'x' && s[1] != 'o') {
+		return node{}, false, nil
+	}
+	base := 16
+	if s[1] == 'o' {
+		base = 8
+	}
+	digits := s[2:]
+	for i := 0; i < len(digits); i++ {
+		if digitVal(digits[i]) >= base {
+			return node{}, false, nil
+		}
+	}
+	if len(digits) > maxRadixDigits {
+		return node{}, true, limits.Capf("%s: line %d: base-%d integer of %d digits is over the %d-digit limit", c.verb, n.Line, base, len(digits), maxRadixDigits)
+	}
+	b, _ := new(big.Int).SetString(digits, base)
+	return doctree.BigInt(b.String()), true, nil
+}
+
+// digitVal is a hex digit's value, 99 for any other byte.
+func digitVal(b byte) int {
+	switch {
+	case b >= '0' && b <= '9':
+		return int(b - '0')
+	case b >= 'a' && b <= 'f':
+		return int(b-'a') + 10
+	case b >= 'A' && b <= 'F':
+		return int(b-'A') + 10
+	}
+	return 99
+}
+
+// numberShape reports text spelled like a YAML number (a decimal integer or
+// float, or a base-prefixed integer, `_` separators allowed so checkCoreNumber
+// names them): a sign, then a digit or a '.' and a digit, then only digits,
+// letters (base digits, prefixes, exponent), '.', '_' and an exponent's sign.
+// It is checked only on plain scalars yaml.v3 did not resolve to a number.
+func numberShape(s string) bool {
+	body := strings.TrimLeft(s, "+-")
+	if len(s)-len(body) > 1 || body == "" {
+		return false
+	}
+	if body[0] == '.' {
+		body = body[1:]
+		if body == "" || body[0] < '0' || body[0] > '9' {
+			return false
+		}
+		return floatShape(body)
+	}
+	if body[0] < '0' || body[0] > '9' {
+		return false
+	}
+	if len(body) > 2 && body[0] == '0' && strings.IndexByte("xXoObB", body[1]) >= 0 {
+		for i := 2; i < len(body); i++ {
+			if digitVal(body[i]) == 99 && body[i] != '_' {
+				return false
+			}
+		}
+		return true
+	}
+	return floatShape(body)
+}
+
+// floatShape reports digits with '_', at most one '.', and an optional
+// exponent (e, an optional sign, digits).
+func floatShape(s string) bool {
+	dot := false
+	for i := 0; i < len(s); i++ {
+		switch b := s[i]; {
+		case b >= '0' && b <= '9' || b == '_':
+		case b == '.' && !dot:
+			dot = true
+		case b == 'e' || b == 'E':
+			e := s[i+1:]
+			if e != "" && (e[0] == '+' || e[0] == '-') {
+				e = e[1:]
+			}
+			if e == "" {
+				return false
+			}
+			for j := 0; j < len(e); j++ {
+				if e[j] < '0' || e[j] > '9' {
+					return false
+				}
+			}
+			return true
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// shortText is a scalar's text as a message shows it: whole up to 40
+// bytes, else its first 40 and the length.
+func shortText(s string) string {
+	if len(s) <= 40 {
+		return s
+	}
+	return s[:40] + "... (" + strconv.Itoa(len(s)) + " bytes)"
 }
 
 // checkCoreNumber refuses the number spellings yaml.v3 still reads the YAML
@@ -414,7 +547,7 @@ func (c *converter) scalar(n *yaml.Node) (node, error) {
 // signed base prefix. Picking either reading silently would make the same file
 // mean different things to different parsers - a zip code `01234` became 668 -
 // so it is an error that names the fix.
-func checkCoreNumber(n *yaml.Node) error {
+func (c *converter) checkCoreNumber(n *yaml.Node) error {
 	s := n.Value
 	body := strings.TrimLeft(s, "+-")
 	signed := len(body) != len(s)
@@ -426,6 +559,6 @@ func checkCoreNumber(n *yaml.Node) error {
 	default:
 		return nil
 	}
-	return fmt.Errorf("yaml.decode: line %d: %q is a number only in YAML 1.1 and reads differently in YAML 1.2; "+
-		"quote it for a string, or write it as a plain decimal, 0x hex or 0o octal number", n.Line, s)
+	return fmt.Errorf("%s: line %d: %q is a number only in YAML 1.1 and reads differently in YAML 1.2; "+
+		"quote it for a string, or write it as a plain decimal, 0x hex or 0o octal number", c.verb, n.Line, shortText(s))
 }

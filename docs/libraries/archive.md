@@ -33,7 +33,8 @@ listed [below](#errors).
 call (summed across every entry) is capped at 256 MiB (32 MiB on
 `jennifer-tiny`) and the member count at 65536; past either cap it raises a catchable `Error{kind:
 "limit"}` instead of expanding a small "zip bomb" into gigabytes of memory. It
-also rejects any member whose name is an absolute path or contains a `..`
+also rejects any member whose name is an absolute path, starts with a drive
+letter (`C:/x`, and the drive-relative `C:foo`, on every platform), or contains a `..`
 segment (a "zip-slip" name), so a naive extraction loop
 (`fs.writeBytes($dir + "/" + $e.name, $e.data)`) can't be tricked into
 writing outside the target directory. Peak memory is a small multiple of the
@@ -89,7 +90,7 @@ left-out field takes its zero value (so `0`, the default cap).
 
 | Kind | Raised for |
 |---|---|
-| `"archive"` | a bundle `unpack` / `unpackWith` cannot read: not the format, truncated, corrupt compressed data or a checksum mismatch, an absolute or `..` member name, a symbolic link / device / FIFO / socket member (without `skipSpecial`), a hard link to no earlier regular file |
+| `"archive"` | a bundle `unpack` / `unpackWith` cannot read: not the format, truncated (a tar without its end-of-archive marker included), corrupt compressed data or a checksum mismatch (a tar.gz's gzip trailer included), data after the end (anything but NUL padding after a tar's end-of-archive marker, bytes after a tar.gz's gzip member that are not another one), an absolute, drive-letter or `..` member name, a symbolic link / device / FIFO / socket member (without `skipSpecial`), a hard link to no earlier regular file |
 | `"limit"` | a reached cap: the total size, an entry's size, the member count |
 | `"runtime"` | misuse: a wrong argument, an unknown format, a negative `UnpackOptions` cap, an entry `pack` refuses (an unsafe name, a `mode` outside `0` to `0o7777`) |
 

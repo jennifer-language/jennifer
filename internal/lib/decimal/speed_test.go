@@ -11,9 +11,10 @@ import (
 )
 
 // within fails when f takes longer than d (the per-factor loops took 0.5-2.3 s
-// on these inputs).
+// on these inputs), d widened by raceScale under the race detector.
 func within(t *testing.T, d time.Duration, what string, f func()) {
 	t.Helper()
+	d *= raceScale
 	start := time.Now()
 	f()
 	if el := time.Since(start); el > d {

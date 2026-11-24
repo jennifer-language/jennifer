@@ -39,16 +39,20 @@ const maxParseDepth = 128
 
 // guardDepth rejects src when its collections nest deeper than
 // maxParseDepth.
-func guardDepth(src string) error {
+func guardDepth(src string) error { return guardDepthAs("yaml.decode", src) }
+
+// guardDepthAs is guardDepth with verb (yaml.decode, yaml.decodeWith, ...)
+// opening its messages.
+func guardDepthAs(verb, src string) error {
 	// yaml.v3 reads a UTF-16 byte-order mark and decodes the rest as UTF-16,
 	// which this byte scan would misread. Such text is never valid UTF-8, and
 	// neither is anything else a Jennifer string should hold, so it is
 	// refused outright.
 	if !utf8.ValidString(src) {
-		return fmt.Errorf("yaml.decode: input is not valid UTF-8")
+		return fmt.Errorf("%s: input is not valid UTF-8", verb)
 	}
 	if scanDepth(src, maxParseDepth) > maxParseDepth {
-		return limits.Capf("yaml.decode: nesting too deep (limit %d); refusing to parse to avoid a stack overflow", maxParseDepth)
+		return limits.Capf("%s: nesting too deep (limit %d); refusing to parse to avoid a stack overflow", verb, maxParseDepth)
 	}
 	return nil
 }

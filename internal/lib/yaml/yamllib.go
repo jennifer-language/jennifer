@@ -175,7 +175,7 @@ func decodeWithFn(args []interpreter.Value) (interpreter.Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	tree, err := decodeYamlCaps(args[0].Str(), caps)
+	tree, err := decodeYamlCaps(fn, args[0].Str(), caps)
 	if err != nil {
 		return interpreter.Null(), err
 	}
