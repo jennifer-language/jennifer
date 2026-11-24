@@ -8,9 +8,9 @@ package cryptolib
 import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	crand "crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -52,7 +52,11 @@ func independentJWK(t *testing.T, keyPEM []byte) string {
 	case *ecdsa.PublicKey:
 		size := (p.Curve.Params().BitSize + 7) / 8
 		crv := map[int]string{256: "P-256", 384: "P-384", 521: "P-521"}[p.Curve.Params().BitSize]
-		m = map[string]string{"kty": "EC", "crv": crv, "x": b64(leftPadInt(p.X, size)), "y": b64(leftPadInt(p.Y, size))}
+		point, err := p.Bytes() // 0x04 || x || y
+		if err != nil {
+			t.Fatal(err)
+		}
+		m = map[string]string{"kty": "EC", "crv": crv, "x": b64(point[1 : 1+size]), "y": b64(point[1+size:])}
 	default:
 		t.Fatal("independentJWK: unexpected key type")
 	}
@@ -68,16 +72,6 @@ func publicOf(k any) any {
 		return &kk.PublicKey
 	}
 	return nil
-}
-
-func leftPadInt(x *big.Int, size int) []byte {
-	b := x.Bytes()
-	if len(b) >= size {
-		return b[len(b)-size:]
-	}
-	out := make([]byte, size)
-	copy(out[size-len(b):], b)
-	return out
 }
 
 // TestJWKMatchesIndependentOracle cross-checks jwkPublic's hand-built canonical
@@ -152,10 +146,9 @@ func TestJWKThumbprintStable(t *testing.T) {
 	if a.Str() != b.Str() {
 		t.Fatal("jwkPublic is not deterministic for the same key")
 	}
-	// The thumbprint is just SHA-256 of the canonical JWK - confirm it hashes.
-	sum := sha256.Sum256([]byte(a.Str()))
-	if len(sum) != 32 {
-		t.Fatal("unexpected digest length")
+	// The thumbprint (RFC 7638) hashes the required members in lexical order.
+	if !strings.HasPrefix(a.Str(), `{"crv":"P-256","kty":"EC","x":"`) {
+		t.Fatalf("not the canonical member order: %s", a.Str())
 	}
 }
 
@@ -291,5 +284,39 @@ func TestJwkToPemRejectsOversizedModulus(t *testing.T) {
 	jwk2 := `{"kty":"RSA","e":"AQAB","n":"` + base64.RawURLEncoding.EncodeToString(ok) + `"}`
 	if _, err := jwkToPemFn(noCtx, []interpreter.Value{interpreter.StringVal(jwk2)}); err != nil {
 		t.Fatalf("jwkToPem rejected a normal 2048-bit modulus: %v", err)
+	}
+}
+
+// TestJwkToPemCoordinates: an EC coordinate longer than the curve's size is
+// refused unless the extra bytes are leading zeros, and a coordinate past the
+// field (x = p) is not a point.
+func TestJwkToPemCoordinates(t *testing.T) {
+	_, kv := genKeypair(t, "p256")
+	jwk, err := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(kv)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]string
+	if err := json.Unmarshal([]byte(jwk.Str()), &m); err != nil {
+		t.Fatal(err)
+	}
+	x, _ := base64.RawURLEncoding.DecodeString(m["x"])
+	enc := func(x []byte) string {
+		return `{"kty":"EC","crv":"P-256","x":"` + base64.RawURLEncoding.EncodeToString(x) + `","y":"` + m["y"] + `"}`
+	}
+	want, err := jwkToPemFn(noCtx, []interpreter.Value{interpreter.StringVal(jwk.Str())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := jwkToPemFn(noCtx, []interpreter.Value{interpreter.StringVal(enc(append([]byte{0}, x...)))})
+	if err != nil || string(got.Bytes()) != string(want.Bytes()) {
+		t.Errorf("a leading zero byte: %v", err)
+	}
+	if _, err := jwkToPemFn(noCtx, []interpreter.Value{interpreter.StringVal(enc(append([]byte{1}, x...)))}); err == nil || !strings.Contains(err.Error(), "overflowing coordinate") {
+		t.Errorf("33-byte coordinate: %v", err)
+	}
+	p := elliptic.P256().Params().P.Bytes()
+	if _, err := jwkToPemFn(noCtx, []interpreter.Value{interpreter.StringVal(enc(p))}); err == nil {
+		t.Error("x = p accepted")
 	}
 }

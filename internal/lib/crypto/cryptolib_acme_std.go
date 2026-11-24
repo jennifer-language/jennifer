@@ -11,6 +11,7 @@
 package cryptolib
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -126,8 +127,13 @@ func jwkPublicFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 		if err != nil {
 			return interpreter.Null(), dataerr.New("crypto", "crypto.jwkPublic: %v", err)
 		}
-		jwk := `{"crv":"` + crv + `","kty":"EC","x":"` + b64uRaw.EncodeToString(leftPad(pub.X, size)) +
-			`","y":"` + b64uRaw.EncodeToString(leftPad(pub.Y, size)) + `"}`
+		// Bytes is the uncompressed point: 0x04, then x and y of size bytes.
+		point, err := pub.Bytes()
+		if err != nil || len(point) != 1+2*size {
+			return interpreter.Null(), dataerr.New("crypto", "crypto.jwkPublic: invalid EC public key")
+		}
+		jwk := `{"crv":"` + crv + `","kty":"EC","x":"` + b64uRaw.EncodeToString(point[1:1+size]) +
+			`","y":"` + b64uRaw.EncodeToString(point[1+size:]) + `"}`
 		return interpreter.StringVal(jwk), nil
 	default:
 		return interpreter.Null(), dataerr.New("crypto", "crypto.jwkPublic: unsupported key type")
@@ -230,7 +236,23 @@ func jwkToPemFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		if err != nil {
 			return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: bad EC coordinate \"y\": %v", err)
 		}
-		pub = &ecdsa.PublicKey{Curve: curve, X: new(big.Int).SetBytes(xb), Y: new(big.Int).SetBytes(yb)}
+		// The uncompressed point 0x04 || x || y, each coordinate left-padded
+		// to the curve's size; ParseUncompressedPublicKey checks the range
+		// and that the point is on the curve.
+		size := coordBytes(curve.Params().BitSize)
+		xb, yb = bytes.TrimLeft(xb, "\x00"), bytes.TrimLeft(yb, "\x00")
+		if len(xb) > size || len(yb) > size {
+			return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: overflowing coordinate")
+		}
+		point := make([]byte, 1+2*size)
+		point[0] = 4
+		copy(point[1+size-len(xb):1+size], xb)
+		copy(point[1+2*size-len(yb):], yb)
+		ecPub, err := ecdsa.ParseUncompressedPublicKey(curve, point)
+		if err != nil {
+			return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: invalid public key: %v", err)
+		}
+		pub = ecPub
 	default:
 		return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: unsupported key type %q (want \"RSA\" or \"EC\")", jwk.Kty)
 	}

@@ -114,3 +114,33 @@ func TestWriteLock(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// A holder whose lock was broken (judged stale) and taken by another writer
+// before its rename writes nothing: only the new holder may proceed.
+func TestBrokenLockHolderStepsBack(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "st.kv")
+	r := &registry{stores: map[int64]*store{}}
+	s := call(t, r.openFileFn, str(path))
+	call(t, r.setFn, s, str("x"), str("1"), iv(0))
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testHookLocked = func(lp string) {
+		// A breaker moved this lock away and a third writer created its own.
+		if err := os.WriteFile(lp, []byte("other "+itoa(time.Now().Unix())), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer func() { testHookLocked = nil }()
+	_, err = r.setFn(ctx, []interpreter.Value{s, str("y"), str("2"), iv(0)})
+	if dataerr.KindOf(err) != "kv" || !strings.Contains(err.Error(), "write lock was broken") {
+		t.Errorf("flush after the lock was taken over: %v, want a kv error", err)
+	}
+	if after, _ := os.ReadFile(path); string(after) != string(before) {
+		t.Error("the store was written without the lock")
+	}
+	if b, _ := os.ReadFile(path + ".lock"); !strings.HasPrefix(string(b), "other ") {
+		t.Error("the new holder's lock was removed")
+	}
+}

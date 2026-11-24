@@ -58,11 +58,15 @@ var lockSeq atomic.Int64
 // rename. A changed, created or deleted file is refused with kind "kv" and left
 // as it is. The caller holds s.mu and removes tmp on error.
 func (s *store) commitLocked(tmp string) error {
-	release, err := acquireLock(s.path + ".lock")
+	lp := s.path + ".lock"
+	release, held, err := acquireLock(lp)
 	if err != nil {
 		return err
 	}
 	defer release()
+	if testHookLocked != nil {
+		testHookLocked(lp)
+	}
 	now, err := currentVersion(s.path)
 	if err != nil {
 		return err
@@ -77,13 +81,22 @@ func (s *store) commitLocked(tmp string) error {
 		}
 		return dataerr.New("kv", "%s %s since this store last read or wrote it (another writer); not written, close every handle and reopen to continue from its content", s.path, what)
 	}
+	// A writer that judged this lock stale (held past lockStale) may have
+	// broken it and another may hold it now: then this one steps back.
+	if !held() {
+		return dataerr.New("kv", "%s: the write lock was broken by another writer while this one held it; not written, close every handle and reopen to continue", s.path)
+	}
 	return os.Rename(tmp, s.path)
 }
 
+// testHookLocked, when set by a test, runs once the write lock is taken.
+var testHookLocked func(lp string)
+
 // acquireLock creates the lock file exclusively, holding "<id> <unix seconds>",
-// and returns a release that removes it while it still holds that id. A lock
-// older than lockStale is broken; one held past lockWait is a "timeout" error.
-func acquireLock(lp string) (func(), error) {
+// and returns a release that removes it while it still holds that id, and a
+// held that reports whether it still does. A lock older than lockStale is
+// broken; one held past lockWait is a "timeout" error.
+func acquireLock(lp string) (release func(), held func() bool, err error) {
 	id := fmt.Sprintf("%d.%d.%d %d", os.Getpid(), time.Now().UnixNano(), lockSeq.Add(1), time.Now().Unix())
 	deadline := time.Now().Add(lockWait)
 	for {
@@ -96,20 +109,24 @@ func acquireLock(lp string) (func(), error) {
 			}
 			if werr != nil {
 				_ = os.Remove(lp)
-				return nil, werr
+				return nil, nil, werr
+			}
+			held := func() bool {
+				b, rerr := os.ReadFile(lp)
+				return rerr == nil && string(b) == id
 			}
 			return func() {
-				if b, rerr := os.ReadFile(lp); rerr == nil && string(b) == id {
+				if held() {
 					_ = os.Remove(lp)
 				}
-			}, nil
+			}, held, nil
 		}
 		if !os.IsExist(err) {
-			return nil, err
+			return nil, nil, err
 		}
 		breakStale(lp)
 		if time.Now().After(deadline) {
-			return nil, dataerr.New("timeout", "%s: the write lock is still held after %s", lp, lockWait)
+			return nil, nil, dataerr.New("timeout", "%s: the write lock is still held after %s", lp, lockWait)
 		}
 		time.Sleep(lockPoll)
 	}
@@ -118,7 +135,10 @@ func acquireLock(lp string) (func(), error) {
 // breakStale removes the lock at lp if its holder is older than lockStale. The
 // lock is first renamed to a unique scratch name, so two breakers never both act
 // on one file; if the moved lock turns out not to be the stale one observed (a
-// new holder took it meanwhile), it is put back with an exclusive create.
+// new holder took it meanwhile), it is put back with an exclusive create. When
+// a third writer created the lock in that window the put-back fails and the
+// moved holder has lost its lock: its held check before the rename sees that
+// and it writes nothing, so only the new holder proceeds.
 func breakStale(lp string) {
 	holder, err := os.ReadFile(lp)
 	if err != nil || !lockIsStale(lp, string(holder)) {

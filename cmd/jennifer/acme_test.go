@@ -197,11 +197,18 @@ func verifySig(alg string, jwk map[string]any, input, sig []byte) bool {
 		if joseCurve(alg) != crv {
 			return false
 		}
+		size := (curve.Params().BitSize + 7) / 8
 		x := b64uBig(jwk["x"])
 		y := b64uBig(jwk["y"])
-		pub := &ecdsa.PublicKey{Curve: curve, X: x, Y: y}
-		size := (curve.Params().BitSize + 7) / 8
-		if len(sig) != 2*size {
+		if x.BitLen() > 8*size || y.BitLen() > 8*size {
+			return false
+		}
+		point := make([]byte, 1+2*size)
+		point[0] = 4
+		x.FillBytes(point[1 : 1+size])
+		y.FillBytes(point[1+size:])
+		pub, err := ecdsa.ParseUncompressedPublicKey(curve, point)
+		if err != nil || len(sig) != 2*size {
 			return false
 		}
 		r := new(big.Int).SetBytes(sig[:size])
