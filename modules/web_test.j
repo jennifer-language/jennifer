@@ -423,3 +423,40 @@ func testParseFormGo() {
     testing.assertEqual($f["b"], "3");
     testing.assertEqual(parseCookie(strings.replicate(";", 65536) + "sid=x", "sid"), "x");
 }
+
+func zeroAllocBudget() {
+    allocBudget(new(), 0);
+}
+
+func negativeAllocBudget() {
+    allocBudget(new(), -1);
+}
+
+func overSmallBudget() {
+    task.setAllocBudget(1000);
+    def xs as list of int init [];
+    for (def i in 0..1000000000) {
+        $xs[] = $i;
+    }
+}
+
+# M29.3: web.allocBudget sets the per-request budget; math.MAX_INT removes it,
+# 0 or a negative value is a misconfiguration. overBudget tells the budget's
+# "limit" (answered 500) from a cap's (413).
+func testAllocBudget() {
+    testing.assertEqual(new().allocBudget, 0);
+    def app as App init allocBudget(new(), 1000);
+    testing.assertEqual($app.allocBudget, 1000);
+    testing.assertEqual(allocBudget($app, math.MAX_INT).allocBudget, 0);
+    testing.assertThrows("zeroAllocBudget", "web");
+    testing.assertThrows("negativeAllocBudget", "web");
+    def t as task of bool init spawn {
+        try {
+            overSmallBudget();
+        } catch (e) {
+            return $e.kind == "limit" and overBudget($app) and not overBudget(new());
+        }
+        return false;
+    };
+    testing.assertTrue(task.wait($t));
+}

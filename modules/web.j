@@ -57,6 +57,7 @@ use os;
 use task;
 use channel;
 use regex;
+use math;
 import "./multipart.j" as formdata;
 
 /**
@@ -87,6 +88,7 @@ export def struct Route {
  * @field cors {CorsOptions} the CORS policy applied by the serve loop (zero-value = off)
  * @field onError {func} the error-handler (only when hasOnError); see web.onError
  * @field hasOnError {bool} whether an error handler is set (stderr always logs regardless)
+ * @field allocBudget {int} the per-request allocation budget in bytes (0 = none); see web.allocBudget
  */
 export def struct App {
     routes as list of Route,
@@ -95,7 +97,8 @@ export def struct App {
     hasNotFound as bool,
     cors as CorsOptions,
     onError as func,
-    hasOnError as bool
+    hasOnError as bool,
+    allocBudget as int
 };
 
 /**
@@ -169,7 +172,8 @@ export func new() {
         hasNotFound: false,
         cors: $noCors,
         onError: $noHandler,
-        hasOnError: false
+        hasOnError: false,
+        allocBudget: 0
     };
 }
 
@@ -355,6 +359,44 @@ export func onError(app as App, handler as func) {
     $out.onError = $handler;
     $out.hasOnError = true;
     return $out;
+}
+
+/**
+ * Set a per-request allocation budget, returning a new App. Each request's
+ * worker task calls `task.setAllocBudget(bytes)` before routing, so the
+ * middleware, the handler and every task they spawn count what they allocate
+ * against it. A request that passes it raises a catchable `"limit"` in its
+ * handler; one that escapes is answered `500` and written to stderr (the server
+ * refusing to spend more on the request, not a client sending too much), and
+ * the other requests are unaffected. The count is cumulative (bytes allocated,
+ * not live), see `task.setAllocBudget`. `math.MAX_INT` removes the budget.
+ * @param app {App} the router to extend
+ * @param limit {int} the budget per request in bytes, > 0 (`math.MAX_INT` for none)
+ * @return {App} a new App with the budget set
+ * @throws {WebError} kind "web", status 500, for 0 or a negative `limit`
+ */
+export func allocBudget(app as App, limit as int) {
+    if ($limit <= 0) {
+        throw WebError{
+            kind: "web",
+            message: "web.allocBudget: limit must be > 0 (math.MAX_INT for no budget), got " +
+                convert.toString($limit),
+            status: 500
+        };
+    }
+    def out as App init $app;
+    $out.allocBudget = $limit;
+    if ($limit == math.MAX_INT) {
+        $out.allocBudget = 0;
+    }
+    return $out;
+}
+
+# overBudget reports whether the calling request worker's allocation budget
+# (web.allocBudget) has been passed, which tells a "limit" the budget raised
+# from a "limit" of a cap (413).
+func overBudget(app as App) {
+    return $app.allocBudget > 0 and task.allocated() > $app.allocBudget;
 }
 
 # --- request / response helpers (on a Context) ------------------------------
@@ -1057,7 +1099,9 @@ func dispatch(app as App, handler as func, ctx as Context, req as httpd.Request)
         }
         # Middleware or handler failed. A client fault is answered with its
         # status: a WebError (400 for a body that cannot be read) or a "limit"
-        # (413: the request was too large for a cap). Anything else is a 500.
+        # (413: the request was too large for a cap). Anything else is a 500,
+        # including a "limit" from the request's allocation budget
+        # (web.allocBudget): the server declined to spend more on it.
         # A typed def throws for a value of another type, which tells them apart.
         def status as int init 500;
         def reason as string init "500 internal server error\n";
@@ -1080,7 +1124,7 @@ func dispatch(app as App, handler as func, ctx as Context, req as httpd.Request)
         if ($isWeb and $we.status >= 400 and $we.status < 500) {
             $status = $we.status;
             $reason = convert.toString($status) + " " + $we.message + "\n";
-        } elseif ($isError and $ge.kind == "limit") {
+        } elseif ($isError and $ge.kind == "limit" and not overBudget($app)) {
             $status = 413;
             $reason = "413 content too large\n";
         }
@@ -1471,6 +1515,9 @@ export func serveOn(app as App, srv as httpd.Server) {
             def worker as task of null init spawn {
                 defer channel.recv($slots);
                 try {
+                    if ($app.allocBudget > 0) {
+                        task.setAllocBudget($app.allocBudget);
+                    }
                     handleOne($app, $req);
                 } catch (reqErr) {
                     ensureAnswered($req, 500, "500 internal server error\n");

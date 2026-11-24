@@ -4,7 +4,8 @@
 // Package tasklib implements Jennifer's `task` library:
 // wait, poll, discard, waitAll, waitAny, cancel, cancelled and the bounded
 // waitTimeout / waitAnyTimeout / waitAllTimeout - the operations on
-// `task of T` values produced by `spawn { ... }` blocks.
+// `task of T` values produced by `spawn { ... }` blocks - and the calling
+// task's allocation budget, setAllocBudget / allocated.
 //
 // `task.wait` blocks on the underlying done channel and returns the
 // stored result (or re-raises the stored error so `try`/`catch` can
@@ -42,6 +43,9 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "waitTimeout", makeWaitTimeout(in))
 	in.RegisterNamespaced(LibraryName, "waitAnyTimeout", waitAnyTimeoutFn)
 	in.RegisterNamespaced(LibraryName, "waitAllTimeout", makeWaitAllTimeout(in))
+	// Per-task allocation budget.
+	in.RegisterNamespaced(LibraryName, "setAllocBudget", setAllocBudgetFn)
+	in.RegisterNamespaced(LibraryName, "allocated", allocatedFn)
 }
 
 // maxTimeoutMillis is the largest ms value that fits in a time.Duration (int64
@@ -56,13 +60,13 @@ func requireMillis(fnName string, v interpreter.Value) (time.Duration, error) {
 	if v.Kind != interpreter.KindInt {
 		return 0, fmt.Errorf("%s: timeout (ms) must be int, got %s", fnName, v.Kind)
 	}
-	if v.Int < 0 {
-		return 0, fmt.Errorf("%s: timeout (ms) must be >= 0, got %d", fnName, v.Int)
+	if v.Int() < 0 {
+		return 0, fmt.Errorf("%s: timeout (ms) must be >= 0, got %d", fnName, v.Int())
 	}
-	if v.Int > maxTimeoutMillis {
-		return 0, fmt.Errorf("%s: timeout (ms) %d is too large (max %d)", fnName, v.Int, maxTimeoutMillis)
+	if v.Int() > maxTimeoutMillis {
+		return 0, fmt.Errorf("%s: timeout (ms) %d is too large (max %d)", fnName, v.Int(), maxTimeoutMillis)
 	}
-	return time.Duration(v.Int) * time.Millisecond, nil
+	return time.Duration(v.Int()) * time.Millisecond, nil
 }
 
 // extractTask pulls the *TaskState out of a KindTask Value. Errors
@@ -71,10 +75,10 @@ func extractTask(fnName string, v interpreter.Value) (*interpreter.TaskState, er
 	if v.Kind != interpreter.KindTask {
 		return nil, fmt.Errorf("%s: argument must be a task, got %s", fnName, v.Kind)
 	}
-	if v.Task == nil {
+	if v.Task() == nil {
 		return nil, fmt.Errorf("%s: task has no state (internal error)", fnName)
 	}
-	return v.Task, nil
+	return v.Task(), nil
 }
 
 // awaitDone blocks until state finishes (true), timeout fires (false, nil) or
@@ -164,8 +168,8 @@ func extractTaskList(fnName string, v interpreter.Value) ([]*interpreter.TaskSta
 	if v.Kind != interpreter.KindList {
 		return nil, nil, fmt.Errorf("%s: argument must be a list of task, got %s", fnName, v.Kind)
 	}
-	out := make([]*interpreter.TaskState, len(v.List))
-	for i, e := range v.List {
+	out := make([]*interpreter.TaskState, len(v.List()))
+	for i, e := range v.List() {
 		state, err := extractTask(fmt.Sprintf("%s: element %d", fnName, i), e)
 		if err != nil {
 			return nil, nil, err
@@ -175,8 +179,8 @@ func extractTaskList(fnName string, v interpreter.Value) ([]*interpreter.TaskSta
 	// The input's declared element type is `task of T`; pull T out
 	// so waitAll's returned list carries the right type.
 	var innerT *parser.Type
-	if v.ElemTyp != nil && v.ElemTyp.Kind == parser.TypeTask && v.ElemTyp.Element != nil {
-		innerT = v.ElemTyp.Element
+	if v.ElemTyp() != nil && v.ElemTyp().Kind == parser.TypeTask && v.ElemTyp().Element != nil {
+		innerT = v.ElemTyp().Element
 	}
 	return out, innerT, nil
 }
@@ -231,7 +235,7 @@ func collectAll(in *interpreter.Interpreter, states []*interpreter.TaskState, in
 	if innerT != nil {
 		return interpreter.ListVal(*innerT, results), nil
 	}
-	return interpreter.Value{Kind: interpreter.KindList, List: results}, nil
+	return interpreter.GenericListVal(results), nil
 }
 
 // makeWaitAllTimeout is task.waitAll bounded by one millisecond deadline for
@@ -266,7 +270,7 @@ func makeWaitAllTimeout(in *interpreter.Interpreter) interpreter.Builtin {
 				return interpreter.Null(), err
 			}
 			if !done {
-				return interpreter.Null(), interpreter.KindedError("timeout", fmt.Sprintf("task.waitAllTimeout: timed out after %d ms", args[1].Int))
+				return interpreter.Null(), interpreter.KindedError("timeout", fmt.Sprintf("task.waitAllTimeout: timed out after %d ms", args[1].Int()))
 			}
 		}
 		return collectAll(in, states, innerT)
@@ -394,7 +398,7 @@ func makeWaitTimeout(in *interpreter.Interpreter) interpreter.Builtin {
 			return interpreter.Null(), err
 		}
 		if !done {
-			return interpreter.Null(), interpreter.KindedError("timeout", fmt.Sprintf("task.waitTimeout: timed out after %d ms", args[1].Int))
+			return interpreter.Null(), interpreter.KindedError("timeout", fmt.Sprintf("task.waitTimeout: timed out after %d ms", args[1].Int()))
 		}
 		in.MarkObserved(state)
 		if state.Err != nil {
@@ -430,7 +434,43 @@ func waitAnyTimeoutFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (int
 		return interpreter.Null(), err
 	}
 	if !ok {
-		return interpreter.Null(), interpreter.KindedError("timeout", fmt.Sprintf("task.waitAnyTimeout: timed out after %d ms", args[1].Int))
+		return interpreter.Null(), interpreter.KindedError("timeout", fmt.Sprintf("task.waitAnyTimeout: timed out after %d ms", args[1].Int()))
 	}
 	return interpreter.IntVal(int64(chosen)), nil
+}
+
+// setAllocBudgetFn sets the calling task's allocation budget: past `bytes`
+// counted bytes the task's next charged operation raises a catchable
+// Error{kind: "limit"}. The first call starts the count at zero; a later one
+// changes the limit and keeps the count. math.MAX_INT lifts the limit (the count
+// goes on). Tasks the caller spawns afterwards share the budget. 0 or a negative
+// value is a caller error.
+func setAllocBudgetFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("task.setAllocBudget expects 1 argument (bytes), got %d", len(args))
+	}
+	if args[0].Kind != interpreter.KindInt {
+		return interpreter.Null(), fmt.Errorf("task.setAllocBudget: bytes must be int, got %s", args[0].Kind)
+	}
+	n := args[0].Int()
+	if n <= 0 {
+		return interpreter.Null(), fmt.Errorf("task.setAllocBudget: bytes must be > 0 (math.MAX_INT for no limit), got %d", n)
+	}
+	if err := ctx.SetAllocBudget(n); err != nil {
+		return interpreter.Null(), fmt.Errorf("task.setAllocBudget: %w", err)
+	}
+	return interpreter.Null(), nil
+}
+
+// allocatedFn returns the bytes counted so far by the calling task's allocation
+// budget (shared with the tasks spawned under it), or 0 when it has none.
+func allocatedFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 0 {
+		return interpreter.Null(), fmt.Errorf("task.allocated expects 0 arguments, got %d", len(args))
+	}
+	b := ctx.AllocBudget()
+	if b == nil {
+		return interpreter.IntVal(0), nil
+	}
+	return interpreter.IntVal(b.Used()), nil
 }

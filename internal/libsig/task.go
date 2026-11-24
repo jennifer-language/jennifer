@@ -15,5 +15,7 @@ cancelled() bool
 waitTimeout(task of any, int) any
 waitAnyTimeout(list of task of any, int) int
 waitAllTimeout(list of task of any, int) list of any
+setAllocBudget(int) null
+allocated() int
 `)
 }
