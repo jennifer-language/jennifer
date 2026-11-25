@@ -673,7 +673,7 @@ included; `strings.join`'s separator optional like `binary.join`'s;
   [its own section](#weak-algorithms-by-name-never-by-default).
 - **`mtweiKeygen` / `mtweiId` / `mtweiClientKey` in `crypto`**: MikroTik's
   EC-SRP needs curve arithmetic that only Go does at an acceptable speed; the
-  `@jennifer/mactelnet` deck calls them (the bundled module did until 0.28.0).
+  `@deckyard/mactelnet` deck calls them (the bundled module did until 0.28.0).
 - **`uuid.v4()` / `v7()`**, a function per version: two fixed versions, chosen
   when the code is written, never at run time.
 - **`images.decode` detects the format**: PNG, JPEG and GIF identify themselves

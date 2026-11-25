@@ -421,7 +421,7 @@ key in advance), or a man in the middle can run one exchange with each side.
 (replacing the older MD5 salt). It is a port (`math/big` + `crypto/sha256`) of
 the reference algorithm over Curve25519 in short-Weierstrass form, and works on
 both binaries. The
-[`@jennifer/mactelnet`](https://github.com/jennifer-language/deck-mactelnet)
+[`@deckyard/mactelnet`](https://github.com/deckyard/deck-mactelnet)
 deck drives these; you rarely call them directly.
 
 | Call | Returns | Notes |
