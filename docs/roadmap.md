@@ -1130,20 +1130,20 @@ time of every worker (10 s of load showed as 68 s).
 **Done.** Nine single-vendor clients graduate into decks (see
 M26): four notification clients, three metrics clients and two MikroTik
 clients. Each deck lives in
-the `jennifer-language` organization with the module's surface, so migrating
+the `deckyard` organization with the module's surface, so migrating
 changes only the import:
 
 | Module | Deck | Import |
 |---|---|---|
-| `gotify` | [`deck-gotify`](https://github.com/jennifer-language/deck-gotify) | `import "@jennifer/gotify/" as gotify;` |
-| `slack` | [`deck-slack`](https://github.com/jennifer-language/deck-slack) | `import "@jennifer/slack/" as slack;` |
-| `discord` | [`deck-discord`](https://github.com/jennifer-language/deck-discord) | `import "@jennifer/discord/" as discord;` |
-| `telegram` | [`deck-telegram`](https://github.com/jennifer-language/deck-telegram) | `import "@jennifer/telegram/" as telegram;` |
-| `prometheus` | [`deck-prometheus`](https://github.com/jennifer-language/deck-prometheus) | `import "@jennifer/prometheus/" as prometheus;` |
-| `statsd` | [`deck-statsd`](https://github.com/jennifer-language/deck-statsd) | `import "@jennifer/statsd/" as statsd;` |
-| `influxdb` | [`deck-influxdb`](https://github.com/jennifer-language/deck-influxdb) | `import "@jennifer/influxdb/" as influxdb;` |
-| `mikrotik` | [`deck-mikrotik`](https://github.com/jennifer-language/deck-mikrotik) | `import "@jennifer/mikrotik/" as mikrotik;` |
-| `mactelnet` | [`deck-mactelnet`](https://github.com/jennifer-language/deck-mactelnet) | `import "@jennifer/mactelnet/" as mactelnet;` |
+| `gotify` | [`deck-gotify`](https://github.com/deckyard/deck-gotify) | `import "@deckyard/gotify/" as gotify;` |
+| `slack` | [`deck-slack`](https://github.com/deckyard/deck-slack) | `import "@deckyard/slack/" as slack;` |
+| `discord` | [`deck-discord`](https://github.com/deckyard/deck-discord) | `import "@deckyard/discord/" as discord;` |
+| `telegram` | [`deck-telegram`](https://github.com/deckyard/deck-telegram) | `import "@deckyard/telegram/" as telegram;` |
+| `prometheus` | [`deck-prometheus`](https://github.com/deckyard/deck-prometheus) | `import "@deckyard/prometheus/" as prometheus;` |
+| `statsd` | [`deck-statsd`](https://github.com/deckyard/deck-statsd) | `import "@deckyard/statsd/" as statsd;` |
+| `influxdb` | [`deck-influxdb`](https://github.com/deckyard/deck-influxdb) | `import "@deckyard/influxdb/" as influxdb;` |
+| `mikrotik` | [`deck-mikrotik`](https://github.com/deckyard/deck-mikrotik) | `import "@deckyard/mikrotik/" as mikrotik;` |
+| `mactelnet` | [`deck-mactelnet`](https://github.com/deckyard/deck-mactelnet) | `import "@deckyard/mactelnet/" as mactelnet;` |
 
 `gotify` is the archetype and the first-party sample deck. All nine are
 deprecated from 0.26.0: a module-level `@deprecated` in `modules/<name>.j`, a
@@ -1187,7 +1187,7 @@ kept the old ones `@deprecated` for one minor release: `orm.hasOne` /
 `mikrotik` `insecure`, `soap` / `webdav` `withInsecure` and `withCaCert`. They
 go in 0.28.0; the survey's "Deprecated names still shipped" section is then
 empty of the bundled names, and lists whatever the next round deprecates (it
-still shows `@jennifer/mikrotik.insecure`, which goes in that deck's next
+still shows `@deckyard/mikrotik.insecure`, which goes in that deck's next
 minor release). `mikrotik`'s `insecure` went with the module (M29.33).
 
 #### M29.35 - remove the slice duplicates and the one-value printf
@@ -1908,7 +1908,7 @@ rather than being truncated):
 call, and a consumer installs a release, not `main`: a program using one of
 them stops working the day 0.28.0 is released. `main` of every deck was
 migrated (no removed call left, floor `>=0.27.0`); the releases
-were not. 57 decks (11 `@jennifer`, 1 `@mplx`, 45 `@deckyard`) have a removed call
+were not. 57 decks (10 `@jennifer`, 2 `@mplx`, 45 `@deckyard`) have a removed call
 in code, not only in comments, in their newest `N.N.N` tag.
 
 | Deck | Release | Next |
@@ -1923,7 +1923,7 @@ in code, not only in comments, in their newest `N.N.N` tag.
 | `@jennifer/slack` | 0.1.0 | 0.2.0 |
 | `@jennifer/statsd` | 0.3.0 | 0.4.0 |
 | `@jennifer/telegram` | 0.3.0 | 0.4.0 |
-| `@jennifer/texttransform` | 0.3.0 | 0.4.0 |
+| `@mplx/texttransform` | 0.3.0 | 0.4.0 |
 | `@mplx/clispinner` | 0.2.0 | 0.3.0 |
 | `@deckyard/abif` | 0.2.0 | 0.3.0 |
 | `@deckyard/anthropic` | 0.1.0 | 0.2.0 |
@@ -1983,17 +1983,20 @@ in code, not only in comments, in their newest `N.N.N` tag.
   list too; their next release is also the first one users need once the
   modules are gone.
 
-**The `@jennifer` decks move to `@deckyard`.** They exist only because their
-modules left the core; the project does not keep a deck scope of its own. All
-eleven `@jennifer` decks in the table make their "Next" release as
-`@deckyard/<name>` instead:
+**Every `@jennifer` deck moves to `@deckyard`.** The project ships the
+language and its standard library; decks live in Deckyard, where others can
+co-maintain them. The ten: discord, gotify, influxdb, mactelnet, mikrotik,
+oauthext, prometheus, slack, statsd and telegram. `@jennifer` keeps no decks
+(the scope table is in `decks.md`); the bundled `oauth` module points to
+`@deckyard/oauthext` for provider presets. Each moving deck's first release
+under the new name continues its version series (the next minor after its
+last `@jennifer` release):
 
 - Each repository moves to the `deckyard` organisation on GitHub and Forgejo;
   the manifest name, the imports (`@deckyard/<name>/`), the docs and the
-  README install line change. A one-off transfer, not a promotion under
-  deckyard's CONTRIBUTING rule (users and a maintainer vote); recorded there.
-- Every `@jennifer/*` version is yanked: a lockfile that pins one still
-  fetches it, a new resolution does not.
+  README install line change.
+- Every version of a moved `@jennifer/*` deck is yanked: a lockfile that
+  pins one still fetches it, a new resolution does not.
 - **A moved deck.** The registry gets a per-deck `movedTo` record
   (`deckadmin move @jennifer/slack @deckyard/slack`), shown in the API and on
   the deck page; `jvc add` / `install` / `update` refuse a moved deck with a

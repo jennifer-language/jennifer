@@ -31,7 +31,7 @@ LAN appliances and servers, usually behind a self-signed certificate.
 | `midea` | Planned | Midea-family appliances on the LAN: UDP discovery (6445 / 20086), then the V3 "8370" protocol on TCP 6444 around the AES-128-ECB + MD5 frame. v1 types `0xAC` (air conditioner) and `0xA1` (dehumidifier); token and key come from one separate, fragile cloud call. `net`. |
 | [onvif](https://registry.jennifer-lang.dev/deck/deckyard/onvif) | Done | IP cameras and NVRs over ONVIF SOAP 1.2 (profiles S, T, G) on the bundled `soap`: WS-Discovery, WS-Security digest and HTTP Digest, device, media, PTZ, imaging and pull-point events. Returns stream URLs, decodes no video. |
 | [proxmox](https://registry.jennifer-lang.dev/deck/deckyard/proxmox) | Done | Proxmox VE REST / JSON API with `PVEAPIToken` header auth. |
-| [routeros](https://registry.jennifer-lang.dev/deck/deckyard/routeros) | Done | A full MikroTik RouterOS abstraction layer, well beyond the `@jennifer/mikrotik` API client. |
+| [routeros](https://registry.jennifer-lang.dev/deck/deckyard/routeros) | Done | A full MikroTik RouterOS abstraction layer, well beyond the `@deckyard/mikrotik` API client. |
 | [synology](https://registry.jennifer-lang.dev/deck/deckyard/synology) | Done | Synology DSM Web API: `SYNO.API.Auth` login to a session `sid`, JSON replies. |
 | [unraid](https://registry.jennifer-lang.dev/deck/deckyard/unraid) | Done | Unraid's GraphQL API (`/graphql`, 7.2+, `x-api-key`) over the `graphql` module: system, array, disks, shares, Docker, VMs, notifications. No subscriptions yet. |
 | [virtualbox](https://registry.jennifer-lang.dev/deck/deckyard/virtualbox) | Done | VirtualBox 7.x through `VBoxManage` (`--machinereadable` parsed into structs), locally or over an `ssh` prefix. Capability `exec`, default binary only. |
@@ -53,7 +53,7 @@ LAN appliances and servers, usually behind a self-signed certificate.
 | `llm` | Planned | Provider-neutral facade over `openai`, `anthropic` and `gemini`, as `codehost` is over the forges: a neutral request builder, `chat`, `runTools`, one `LlmError`, `vendor(c)` for vendor features. A conversation stays in its vendor's format. Needs the three checked live once; streaming waits for M30.9. |
 | `mailgun` | Planned | Mailgun sending API: Basic auth `api:<key>`, US or EU region, `multipart/form-data` messages, events, suppressions; webhooks checked by HMAC-SHA256 in constant time with a maximum age. No core gap. |
 | `mailtrap` | Planned | Mailtrap Email Sending (bearer, JSON, templates) and the Email Testing sandbox, whose caught messages are read back to test other mail code in CI. No core gap. |
-| [oauthext](https://registry.jennifer-lang.dev/deck/jennifer/oauthext) | Done | Vendor-specific OAuth2 over core `oauth`: the `google` / `microsoft` presets and `googleServiceAccount` through the RFC 7523 JWT-bearer grant. RS256, default binary only. |
+| [oauthext](https://registry.jennifer-lang.dev/deck/deckyard/oauthext) | Done | Vendor-specific OAuth2 over core `oauth`: the `google` / `microsoft` presets and `googleServiceAccount` through the RFC 7523 JWT-bearer grant. RS256, default binary only. |
 | `onedrive` | Planned | OneDrive and SharePoint through the Microsoft Graph v1.0 drive API, OAuth2 only (device code through `oauthext`, `clientCredentials` for business). Downloads follow the redirect without `Authorization`; upload sessions above 250 MB in 320 KiB multiples; `delta`, sharing, versions. Bodies in memory until M30.9; `net`. |
 | [openai](https://registry.jennifer-lang.dev/deck/deckyard/openai) | Done | OpenAI-compatible Chat Completions (Ollama, vLLM, OpenRouter and others by base URL; Azure as a config variant): tools, structured output, embeddings, models. Streaming waits for M30.9. |
 | `resend` | Planned | Resend API (bearer): emails with `Idempotency-Key`, batches of 100, scheduling, domains, contacts and broadcasts; Svix-style HMAC-SHA256 webhook signatures; backs off on `429`. No core gap. |
@@ -140,7 +140,7 @@ HL7 v2, FHIR and the ASTM lab-instrument protocol; the readers are strict.
 Changes to existing decks that are planned but not done. Each item names the
 deck; core gaps, if any, are M entries in the [roadmap](roadmap.md).
 
-- **`@jennifer/discord`: bots, not only webhooks.** **Planned.** The deck posts
+- **`@deckyard/discord`: bots, not only webhooks.** **Planned.** The deck posts
   to a channel through a webhook, so it can notify but not answer. Add what a
   bot needs, keeping the webhook API as it is:
   - **Interactions endpoint** (slash commands, buttons): verify each request's
@@ -158,7 +158,7 @@ deck; core gaps, if any, are M entries in the [roadmap](roadmap.md).
     event queue. Needed for bots that read messages instead of commands.
   - **Tests offline**: a fake API and gateway server, signature test vectors.
   - No core gap.
-- **`@jennifer/telegram`: the rest of an interactive bot.** **Planned.** Found
+- **`@deckyard/telegram`: the rest of an interactive bot.** **Planned.** Found
   writing the academy's Telegram bot talk, which works around each of these
   through the raw update JSON:
   - `getUpdates` keeps only text messages; return every update kind (or a
@@ -186,7 +186,15 @@ deck; core gaps, if any, are M entries in the [roadmap](roadmap.md).
   - drift detection: the plan of a device already in sync is empty.
   - Restoring a backup over the API is out of scope (it reboots the router);
     the deck documents that.
-  Lands after the move to `@jennifer/mikrotik` (before 0.28.0). No core gap.
+  Lands after the move to `@deckyard/mikrotik` (before 0.28.0). No core gap.
+
+## Scopes
+
+| Scope | What it holds |
+| --- | --- |
+| `@deckyard` | community decks, and every deck that was `@jennifer` (moved in 0.28.0) |
+| `@jennifer` | reserved for the project, no decks; its old names answer with a moved record |
+| `@<user>` | a single maintainer's decks (`@mplx/...`); promoted to `@deckyard` under deckyard's CONTRIBUTING rule |
 
 ## Ideas (not planned yet)
 

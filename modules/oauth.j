@@ -16,7 +16,7 @@
  * accounts authenticate). `discover` reads a provider's endpoints from its
  * metadata document. The module is provider-neutral: presets with a provider's
  * endpoints, and Google service-account key files, are in the
- * `@jennifer/oauthext` deck. Because it builds on `http` (which uses
+ * `@deckyard/oauthext` deck. Because it builds on `http` (which uses
  * `net`), this module needs the default `jennifer` binary. A token-endpoint
  * error, a reply that is malformed (a missing or mistyped field, an empty
  * token, a lifetime out of range), and a malformed HTTP reply surface as a

@@ -557,14 +557,14 @@ import "./util.j" as u; # load util.j as a module, addressed u.fn(...) / u.CONST
 
 ### Decks (packages)
 
-A **deck** is a third-party package with a scoped name: `@jennifer/NAME`
-(official), `@deckyard/NAME` (community), others; versions and manuals in the
+A **deck** is a third-party package with a scoped name: `@deckyard/NAME`
+(community, curated), `@<user>/NAME`, others; versions and manuals in the
 registry <https://registry.jennifer-lang.dev/> (`/browse`,
 `/deck/<scope>/<deck>`). Bare names (`import "http.j";`) are the bundled modules
 below, never decks.
 
 ```sh
-jvc add "@jennifer/slack" "^0.1.0"   # record the requirement in deck.toml
+jvc add "@deckyard/slack" "^0.2.0"   # record the requirement in deck.toml
 jvc install                          # resolve, vendor into ./vendor/, pin camcorder.lock
 jvc update                           # move to the newest versions the ranges allow
 ```
@@ -578,11 +578,11 @@ a later release breaks the deck):
 jennifer = ">=0.25.0"
 
 [decks]
-"@jennifer/slack" = "^0.1.0"
+"@deckyard/slack" = "^0.2.0"
 ```
 
 ```jennifer
-import "@jennifer/slack/" as slack;           # the deck's entry module (slack.j)
+import "@deckyard/slack/" as slack;           # the deck's entry module (slack.j)
 import "@deckyard/forensicgenetics/lineage.j" as lineage;  # another module in it
 ```
 
@@ -1160,7 +1160,7 @@ copy), then `NAME.fn(...)` / `NAME.Struct`. Conventions for every entry:
   `authorize[With]` -> `awaitCode codeFromRedirect` -> `exchangeCode[With]`,
   `jwtBearer(cfg, jwtAssertion(...))`, `discover[Metadata][Tls](issuer, ...)`;
   `Config.tls` (`http.TlsOptions`, private CA); `isExpired`, `save`/`load`
-  (0600). Presets: `@jennifer/oauthext`. Feeds `sasl`.
+  (0600). Presets: `@deckyard/oauthext`. Feeds `sasl`.
 - **`orm`** `[full]` - data mapper over `sql` (structs have no methods). Schema:
   `schema(table, pk, dialect)` + `column(s, name, kind)` (`Dialect.Mysql
   Postgres`; `ColumnKind.Int String Float Bool Bytes`), with `notNull unique
@@ -1289,7 +1289,11 @@ copy), then `NAME.fn(...)` / `NAME.Struct`. Conventions for every entry:
   body}`, `handler(req as Request{version, action, headers, body})` returns the
   result element, `senderFault(reason)`, `requestAction(contentType,
   soapAction)`; codec `envelope parse`/`parseFault -> Fault`/
-  `faultEnvelope`. Details: https://docs.jennifer-lang.dev/modules/soap.html
+  `faultEnvelope`. WSDL 1.1: `parseWsdl(text)`/`parseWsdlWith(text, imports)`
+  -> `Wsdl{ports, bindings}`, `wsdlCall(w, op)`/`wsdlCallAt(w, port, op)`/
+  `wsdlCallTo(w, address, op)` -> `WsdlCall{address, version, operation}`,
+  `wsdlConnect(target)`, `wsdlRequest(target, params)`. Details:
+  https://docs.jennifer-lang.dev/modules/soap.html
 - **`sqlmigrate`** `[full]` - `Migration{version, description, up, down}` (DDL
   strings); `migrate(conn, migrations)` (lexical version order, one transaction
   each, tracked in `schema_migrations`), `rollbackMigrations(conn, migrations,
@@ -1386,7 +1390,7 @@ copy), then `NAME.fn(...)` / `NAME.Struct`. Conventions for every entry:
   Details: https://docs.jennifer-lang.dev/modules/zmq.html
 - **Decks since 0.28.0, no longer bundled** - `discord`, `gotify`, `influxdb`,
   `mactelnet`, `mikrotik`, `prometheus`, `slack`, `statsd`, `telegram`: `jvc add
-  "@jennifer/NAME" ...`, `import "@jennifer/NAME/" as NAME;`
+  "@deckyard/NAME" ...`, `import "@deckyard/NAME/" as NAME;`
   ([Decks](#decks-packages)).
 
 ## Two complete programs

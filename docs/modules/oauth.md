@@ -166,7 +166,7 @@ tenant (`https://login.microsoftonline.com/<tenant-id>/v2.0`), Okta, Auth0,
 Keycloak, Oracle Identity Domains, AWS Cognito - so a preset is rarely needed.
 Entra ID's multi-tenant `common` metadata names a placeholder issuer
 (`.../{tenantid}/v2.0`), which `discover` refuses; use the
-`@jennifer/oauthext` preset for it.
+`@deckyard/oauthext` preset for it.
 
 ## Client assertions
 
@@ -362,7 +362,7 @@ reading the file (`"limit"` for a file past `fs`'s read cap, `"timeout"`,
   [`jwt.verifyJwks`](jwt.md) against the provider's `jwks_uri`.
 - **Anything provider-specific** - endpoint presets, Google's
   service-account key files, a provider's claim conventions. They are in the
-  [`@jennifer/oauthext`](https://jennifer-language.github.io/deck-oauthext/)
+  [`@deckyard/oauthext`](https://deckyard.github.io/deck-oauthext/)
   deck (`oauthext.google`, `oauthext.microsoft`,
   `oauthext.googleServiceAccount`), so a new provider is a deck change, not an
   interpreter one. Without the deck, `oauth.discover` with the provider's
