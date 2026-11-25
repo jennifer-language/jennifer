@@ -19,9 +19,10 @@ def result as xml.Value init soap.call($c, "http://tempuri.org/Add", $op);
 io.printf("%s\n", soap.values($result)["AddResult"]);    # 5
 ```
 
-There is no WSDL processing: take the target namespace, the operation and
-parameter names, the SOAPAction and the SOAP version from the service's WSDL
-or its documentation.
+[WSDL](#wsdl) 1.1 descriptions are read for their ports, bindings and
+operations: the endpoint, the SOAP version, each operation's SOAPAction and
+the element its request carries. The schema types are not read, so the
+parameter names still come from the service's documentation.
 
 Runnable: [`examples/modules/soap_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/soap_demo.j).
 
@@ -76,6 +77,58 @@ unqualified (the JAX-WS default). For nested or repeated parameters, build
 the element with `xml.elementNS` / `xml.append`. Of repeated names `values`
 keeps the first; read those with `xml.findAll`.
 
+## WSDL
+
+`parseWsdl` reads a WSDL 1.1 document; `parseWsdlWith` also takes the
+documents it imports, as a map from each `wsdl:import` `location` to the text
+(nothing is fetched). Only SOAP 1.1 and 1.2 bindings over HTTP and their
+ports are kept; HTTP GET / POST and MIME bindings, and SOAP over another
+transport (JMS, ...), are left out.
+
+```jennifer
+use fs;
+use io;
+use xml;
+import "soap.j" as soap;
+
+def w as soap.Wsdl init soap.parseWsdl(fs.readString("checkVatService.wsdl"));
+def target as soap.WsdlCall init soap.wsdlCall($w, "checkVat");
+def body as xml.Value init soap.wsdlRequest(
+    $target, {"countryCode": "DE", "vatNumber": "123456789"});
+def result as xml.Value init soap.call(soap.wsdlConnect($target), $target.operation.action, $body);
+io.printf("%s\n", soap.values($result)["valid"]);
+```
+
+| Function | Returns | Does |
+|---|---|---|
+| `soap.parseWsdl(text)` | `Wsdl` | a description that imports no other WSDL |
+| `soap.parseWsdlWith(text, imports)` | `Wsdl` | `imports`: `location` -> document text; an import of an import is looked up in the same map, each location and each document text read once (an import back to the importing document is no error), at most `MAX_WSDL_DOCUMENTS` (32) documents |
+| `soap.wsdlCall(w, name)` | `WsdlCall` | the operation at the first SOAP port that offers it |
+| `soap.wsdlCallAt(w, port, name)` | `WsdlCall` | the operation at the named port |
+| `soap.wsdlCallTo(w, address, name)` | `WsdlCall` | the operation from the first SOAP binding that has it, sent to `address`: for a description with no `service` (ONVIF's device WSDLs) or whose ports name another host |
+| `soap.wsdlConnect(target)` | `Client` | `connect` to the address with the binding's SOAP version |
+| `soap.wsdlRequest(target, params)` | `xml.Value` | the request body with one text child per parameter: document/literal the part's element (children qualified when an inline schema sets `elementFormDefault="qualified"`), rpc/literal a wrapper named after the operation in the `soap:body` namespace |
+
+| Struct | Fields |
+|---|---|
+| `Wsdl` | `name`, `targetNamespace`, `ports`, `bindings` |
+| `WsdlPort` | `service`, `name`, `address`, `version` (`1.1` / `1.2`), `binding`, `bindingNamespace` |
+| `WsdlBinding` | `name`, `namespace`, `version`, `style`, `operations` |
+| `WsdlOperation` | `name`, `action`, `style` (`document` / `rpc`), `bodyUse` (`literal` / `encoded`), `namespace` (rpc only), `input` / `output` (the Body's parts: the message's, or those `soap:body parts` names), `inputHeaders` / `outputHeaders` (the parts `soap:header` names) |
+| `WsdlPart` | `name`, `elementNamespace` + `element` or `typeNamespace` + `typeName`, `qualified` |
+| `WsdlCall` | `address`, `version`, `operation` |
+
+The reader is strict: a DOCTYPE, a root other than WSDL 1.1 `definitions`
+(WSDL 2.0 is refused by name), a missing required attribute, a QName with an
+undeclared prefix, a name defined twice, an overloaded operation, a style
+other than `document` / `rpc`, a binding with two SOAP binding elements or
+none with a `transport`, a port whose binding is not SOAP or is of the other
+SOAP version, a reference to an undefined message, port type, binding or
+part, and an import missing from `imports` all throw `SoapError` kind
+`"soap"`. `wsdlRequest` refuses an `encoded` operation (the module writes no
+SOAP encoding), a document operation whose Body is not one element part, and
+an element in no namespace; build those bodies with the `xml` builders. XML Schema imports (`xs:import`) are not followed.
+
 ## Server
 
 `soap.handle(body, action, handler)` turns a request body into a
@@ -117,18 +170,19 @@ while (true) {
 |---|---|---|
 | `soap.handle(body, action, handler)` | `Response` | dispatch one request; no header block is understood |
 | `soap.handleWith(body, action, handler, understood)` | `Response` | the same; `understood` lists the header blocks the handler processes, by Clark name (`{ns}local`) |
-| `soap.requestAction(contentType, soapAction)` | `string` | a request's SOAPAction: the `SOAPAction` header, else the 1.2 `action` parameter, unquoted |
+| `soap.requestAction(contentType, soapAction)` | `string` | a request's SOAPAction: the `SOAPAction` header, else the 1.2 `action` parameter, unquoted (parameters are read in turn, so `action=` inside another one's quoted value is not taken) |
 | `soap.senderFault(reason)` | | throw from a handler: answer with a Client / Sender fault |
 
 `handle` answers the protocol errors itself:
 
 | Request | Fault | Status |
 |---|---|---|
-| malformed XML, a DOCTYPE, no or several Bodies, a Body without exactly one element | `Client` (1.1) / `Sender` (1.2) | 500 / 400 |
+| malformed XML, a DOCTYPE, no or several Bodies, a Header that is not the first element, a header block in no namespace, text directly in the Envelope or Body, a Body without exactly one element | `Client` (1.1) / `Sender` (1.2) | 500 / 400 |
+| a `mustUnderstand` other than `1` / `0` (1.1) or `true` / `false` / `1` / `0` (1.2) | `Client` / `Sender` | 500 / 400 |
 | an `Envelope` in another namespace | `VersionMismatch` (as 1.1) | 500 |
-| a header block for this node with `mustUnderstand="1"` / `"true"` that is not in `understood` | `MustUnderstand` | 500 |
+| a header block for this node with `mustUnderstand="1"` (or `"true"` in 1.2) that is not in `understood` | `MustUnderstand` | 500 |
 | the handler calls `senderFault(reason)` | `Client` / `Sender` with `reason` | 500 / 400 |
-| the handler throws anything else | `Server` / `Receiver`, reason `internal error` | 500 |
+| the handler throws anything else, a value that is not an `Error` included | `Server` / `Receiver`, reason `internal error` | 500 |
 
 `handle` acts as the ultimate receiver: a block is for it when it has no
 `actor` (1.1) / `role` (1.2), the 1.1 `next` actor, or the 1.2 `next` or
@@ -148,7 +202,7 @@ transport or for a message stored or queued:
 | Function | Returns | Does |
 |---|---|---|
 | `soap.envelope(version, headers, body)` | `string` | an envelope with an XML declaration; `headers` (header blocks) and `body` are `list of xml.Value` |
-| `soap.parse(text)` | `Envelope` | decode an envelope of either version: `{version, headers, body}` |
+| `soap.parse(text)` | `Envelope` | decode an envelope of either version: `{version, headers, body}`; refuses a `Fault` with other elements beside it, a `Header` that is not first, a header block in no namespace, and text directly in the Envelope or Body |
 | `soap.isFault(env)` | `bool` | whether its Body holds one `Fault` |
 | `soap.parseFault(env)` | `Fault` | read the fault of either version |
 | `soap.faultElement(version, fault)` | `xml.Value` | a `Fault` element |
@@ -163,7 +217,7 @@ transport or for a message stored or queued:
 | `subcode` | `""` | the first `Subcode` value, as `{ns}local` or a bare name |
 | `reason` | `faultstring` | the first `Reason/Text` |
 | `actor` | `faultactor` | `Role` |
-| `detail` | the detail's content, as XML when it holds elements, else as text | the same |
+| `detail` | the detail's content, as XML when it holds elements, else as text; for elements mixed with text, the whole detail element's XML | the same |
 
 `code` is resolved against the namespace bindings and has no prefix, so
 `soap:Client` reads as `Client` whatever the prefix.
@@ -175,7 +229,8 @@ When writing a fault:
 - A 1.2 `code` must be one of the five standard codes. An application code
   goes in `subcode`, which is written unqualified or with its `{ns}`.
 - A 1.1 code that is not standard is written without the envelope prefix.
-- A `detail` that starts with `<` is parsed as XML.
+- A `detail` that starts with `<` is parsed as XML, text between its elements
+  included. It must declare the prefixes it uses.
 - Characters XML 1.0 does not allow are written as `?` in `reason`, `actor`
   and a text `detail`.
 
@@ -215,21 +270,24 @@ messages, so a fault reason cannot inject terminal escapes.
   `SoapError`.
 - Redirects are not followed and nothing is retried: a call may not be
   idempotent.
-- `operation` refuses an empty namespace and a value holding a character XML
-  1.0 does not allow.
+- `operation` refuses an empty or reserved (`xml`, `xmlns`) namespace, one
+  with a control character, and a value holding a character XML 1.0 does not
+  allow; so does a fault code's `{ns}`.
 - `withSoapHeader` takes a namespaced element only.
 - `connect` refuses credentials, a fragment and control characters in the
   URL; use `withBasicAuth`, `withToken` or `withDigestAuth` (the last one set
   wins). Digest answers only the endpoint itself; a redirect is not followed
   for the challenge. A transport error names the endpoint without its
   query, which may carry a key.
-- A client with an `Authorization` or `Proxy-Authorization` header
-  (`withBasicAuth`, `withToken`, `withHeader`) throws a `SoapError` (status
+- A client with credentials (`withBasicAuth`, `withToken`, `withDigestAuth`,
+  an `Authorization` or `Proxy-Authorization` header from `withHeader`) throws a `SoapError` (status
   0) before connecting when the endpoint is `http://` on a host other than
   loopback (`127.0.0.0/8`, `[::1]`, `localhost`). For plain HTTP on a trusted
   LAN, set the client's `allowInsecureHttp` field
-  (`$c.allowInsecureHttp = true;`). Digest sends no reusable secret and is
-  not refused.
+  (`$c.allowInsecureHttp = true;`). Digest sends no reusable secret, but a
+  listener can crack its response offline, so it is refused too.
+- `withHeader` replaces a header of the same name in any letter case, and
+  `withBasicAuth` / `withToken` replace any `Authorization` header set before.
 - `withHeader` refuses the headers the client sets itself (`Content-Type`,
   `SOAPAction`) and those that frame a request (`Host`, `Content-Length`,
   ...). A SOAPAction with a quote, a backslash or a control character is
@@ -237,7 +295,7 @@ messages, so a fault reason cannot inject terminal escapes.
 - `handle` hides the handler's internal errors behind a generic `Server` /
   `Receiver` fault.
 
-Not covered: WSDL, SOAP encoding (`soap-enc` arrays and multi-ref values),
+Not covered: WSDL 2.0, reading XML Schema types, SOAP encoding (`soap-enc` arrays and multi-ref values),
 attachments (SwA, MTOM), and WS-* processing. WS-Security headers can be
 built with `xml` and sent with `withSoapHeader`.
 
@@ -245,7 +303,7 @@ built with `xml` and sent with `withSoapHeader`.
 
 | Talk | What it shows |
 | ---- | ------------- |
-| [Invoicing with web services: VAT, SOAP and GraphQL](https://academy.jennifer-lang.dev/talks/mplx/invoicing/) | calling the VIES VAT check without a WSDL |
+| [Invoicing with web services: VAT, SOAP and GraphQL](https://academy.jennifer-lang.dev/talks/mplx/invoicing/) | calling the VIES VAT check by hand, without the WSDL reader |
 
 ## API reference
 

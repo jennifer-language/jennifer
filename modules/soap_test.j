@@ -1050,7 +1050,9 @@ func testCredentialsNeedHttps() {
         withBasicAuth($plain, "u", "p"),
         withToken($plain, "t"),
         withHeader($plain, "authorization", "x"),
-        withHeader($plain, "Proxy-Authorization", "x")
+        withHeader($plain, "Proxy-Authorization", "x"),
+        # Digest sends no reusable secret, but its hash can be cracked offline
+        withDigestAuth($plain, "u", "p")
     ]) {
         try {
             send($c, "", addOp());
@@ -1062,8 +1064,6 @@ func testCredentialsNeedHttps() {
             testing.assertFalse($se.isFault);
         }
     }
-    # Digest sends no reusable secret: it is not refused
-    testing.assertFalse(hasCredentials(withDigestAuth($plain, "u", "p").headers));
     def lan as Client init withToken(connect("http://host.invalid/svc"), "t");
     $lan.allowInsecureHttp = true;
     try {
@@ -1072,5 +1072,709 @@ func testCredentialsNeedHttps() {
     } catch (e) {
         # the name does not resolve; what matters is that it was tried
         testing.assertEqual($e.kind, "net");
+    }
+}
+
+# --- WSDL -----------------------------------------------------------------
+
+# An ASMX-style description: document/literal, a qualified inline schema,
+# SOAP 1.1 and 1.2 ports and an HTTP GET port that is not SOAP. ADDRESS is
+# replaced with the endpoint.
+def const CALC_WSDL as string init '<?xml version="1.0" encoding="utf-8"?>
+<wsdl:definitions name="Calculator" targetNamespace="http://tempuri.org/"
+    xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/"
+    xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+    xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/"
+    xmlns:http="http://schemas.xmlsoap.org/wsdl/http/"
+    xmlns:s="http://www.w3.org/2001/XMLSchema"
+    xmlns:tns="http://tempuri.org/">
+  <wsdl:documentation>Adds two numbers.</wsdl:documentation>
+  <wsdl:types>
+    <s:schema elementFormDefault="qualified" targetNamespace="http://tempuri.org/">
+      <s:element name="Add"/>
+      <s:element name="AddResponse"/>
+    </s:schema>
+  </wsdl:types>
+  <wsdl:message name="AddSoapIn"><wsdl:part name="parameters" element="tns:Add"/></wsdl:message>
+  <wsdl:message name="AddSoapOut">
+    <wsdl:part name="parameters" element="tns:AddResponse"/>
+  </wsdl:message>
+  <wsdl:message name="AddHttpGetIn"><wsdl:part name="intA" type="s:string"/></wsdl:message>
+  <wsdl:portType name="CalculatorSoap">
+    <wsdl:operation name="Add">
+      <wsdl:input message="tns:AddSoapIn"/>
+      <wsdl:output message="tns:AddSoapOut"/>
+    </wsdl:operation>
+  </wsdl:portType>
+  <wsdl:portType name="CalculatorHttpGet">
+    <wsdl:operation name="Add"><wsdl:input message="tns:AddHttpGetIn"/></wsdl:operation>
+  </wsdl:portType>
+  <wsdl:binding name="CalculatorSoap" type="tns:CalculatorSoap">
+    <soap:binding transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="Add">
+      <soap:operation soapAction="http://tempuri.org/Add" style="document"/>
+      <wsdl:input><soap:body use="literal"/></wsdl:input>
+      <wsdl:output><soap:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:binding name="CalculatorSoap12" type="tns:CalculatorSoap">
+    <soap12:binding transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="Add">
+      <soap12:operation soapAction="http://tempuri.org/Add" style="document"/>
+      <wsdl:input><soap12:body use="literal"/></wsdl:input>
+      <wsdl:output><soap12:body use="literal"/></wsdl:output>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:binding name="CalculatorHttpGet" type="tns:CalculatorHttpGet">
+    <http:binding verb="GET"/>
+    <wsdl:operation name="Add"><http:operation location="/Add"/></wsdl:operation>
+  </wsdl:binding>
+  <wsdl:service name="Calculator">
+    <wsdl:port name="CalculatorSoap" binding="tns:CalculatorSoap">
+      <soap:address location="ADDRESS"/>
+    </wsdl:port>
+    <wsdl:port name="CalculatorSoap12" binding="tns:CalculatorSoap12">
+      <soap12:address location="https://example.com/calc12.asmx"/>
+    </wsdl:port>
+    <wsdl:port name="CalculatorHttpGet" binding="tns:CalculatorHttpGet">
+      <http:address location="https://example.com/calc.asmx"/>
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>';
+
+# An rpc/literal SOAP 1.2 description with a default namespace and no prefix
+# on its references.
+def const RPC_WSDL as string init '<definitions xmlns="http://schemas.xmlsoap.org/wsdl/"
+    xmlns:soap12="http://schemas.xmlsoap.org/wsdl/soap12/"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:t="urn:stock" targetNamespace="urn:stock">
+  <message name="QuoteIn"><part name="symbol" type="xsd:string"/></message>
+  <message name="QuoteOut"><part name="price" type="xsd:decimal"/></message>
+  <message name="Ping"/>
+  <portType name="Stock">
+    <operation name="Quote"><input message="t:QuoteIn"/><output message="t:QuoteOut"/></operation>
+    <operation name="Notify"><input message="t:Ping"/></operation>
+  </portType>
+  <binding name="StockBinding" type="t:Stock">
+    <soap12:binding style="rpc" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <operation name="Quote">
+      <soap12:operation soapAction="urn:stock#Quote"/>
+      <input><soap12:body use="literal" namespace="urn:stock:rpc"/></input>
+      <output><soap12:body use="literal" namespace="urn:stock:rpc"/></output>
+    </operation>
+    <operation name="Notify">
+      <soap12:operation style="document"/>
+      <input><soap12:body use="literal" namespace="urn:ignored"/></input>
+    </operation>
+  </binding>
+  <service name="StockService">
+    <port name="StockPort" binding="t:StockBinding">
+      <soap12:address location="https://example.com/stock"/>
+    </port>
+  </service>
+</definitions>';
+
+# A service whose binding, port type and messages sit in an imported document.
+def const IMPORTING_WSDL as string init '<w:definitions xmlns:w="http://schemas.xmlsoap.org/wsdl/"
+    xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+    xmlns:b="urn:vbox" targetNamespace="urn:vbox:service">
+  <w:import namespace="urn:vbox" location="vboxweb.wsdl"/>
+  <w:service name="vboxService">
+    <w:port name="vboxServicePort" binding="b:vboxBinding">
+      <soap:address location="http://localhost:18083/"/>
+    </w:port>
+  </w:service>
+</w:definitions>';
+
+def const IMPORTED_WSDL as string init '<w:definitions xmlns:w="http://schemas.xmlsoap.org/wsdl/"
+    xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+    xmlns:v="urn:vbox" targetNamespace="urn:vbox">
+  <w:import namespace="urn:vbox:service" location="vboxwebService.wsdl"/>
+  <w:message name="logonRequest">
+    <w:part name="parameters" element="v:IWebsessionManager_logon"/>
+  </w:message>
+  <w:message name="logonResponse">
+    <w:part name="parameters" element="v:IWebsessionManager_logonResponse"/>
+  </w:message>
+  <w:portType name="vboxPortType">
+    <w:operation name="IWebsessionManager_logon">
+      <w:input message="v:logonRequest"/>
+      <w:output message="v:logonResponse"/>
+    </w:operation>
+  </w:portType>
+  <w:binding name="vboxBinding" type="v:vboxPortType">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <w:operation name="IWebsessionManager_logon">
+      <soap:operation soapAction=""/>
+      <w:input><soap:body use="literal"/></w:input>
+      <w:output><soap:body use="literal"/></w:output>
+    </w:operation>
+  </w:binding>
+</w:definitions>';
+
+# wsdlFailure is the kind and message a WSDL read fails with, "ok" when it
+# does not.
+func wsdlFailure(text as string, imports as map of string to string) {
+    try {
+        parseWsdlWith($text, $imports);
+    } catch (e) {
+        return $e.kind + ": " + $e.message;
+    }
+    return "ok";
+}
+
+func testParseWsdlDocumentLiteral() {
+    def w as Wsdl init parseWsdl(CALC_WSDL);
+    testing.assertEqual($w.name, "Calculator");
+    testing.assertEqual($w.targetNamespace, TEMPURI);
+    testing.assertEqual(len($w.ports), 2);
+    testing.assertEqual($w.ports[0].service, "Calculator");
+    testing.assertEqual($w.ports[0].name, "CalculatorSoap");
+    testing.assertEqual($w.ports[0].version, "1.1");
+    testing.assertEqual($w.ports[1].version, "1.2");
+    testing.assertEqual($w.ports[1].address, "https://example.com/calc12.asmx");
+    testing.assertEqual(len($w.bindings), 2);
+    def op as WsdlOperation init $w.bindings[0].operations[0];
+    testing.assertEqual($op.name, "Add");
+    testing.assertEqual($op.action, "http://tempuri.org/Add");
+    testing.assertEqual($op.style, "document");
+    testing.assertEqual($op.bodyUse, "literal");
+    testing.assertEqual($op.namespace, "");
+    testing.assertEqual($op.input[0].element, "Add");
+    testing.assertEqual($op.input[0].elementNamespace, TEMPURI);
+    testing.assertTrue($op.input[0].qualified);
+    testing.assertEqual($op.output[0].element, "AddResponse");
+}
+
+func testWsdlCallPicksAPort() {
+    def w as Wsdl init parseWsdl(CALC_WSDL);
+    def first as WsdlCall init wsdlCall($w, "Add");
+    testing.assertEqual($first.address, "ADDRESS");
+    testing.assertEqual($first.version, "1.1");
+    def at12 as WsdlCall init wsdlCallAt($w, "CalculatorSoap12", "Add");
+    testing.assertEqual($at12.version, "1.2");
+    testing.assertEqual($at12.operation.action, "http://tempuri.org/Add");
+    def kind as string init "";
+    try {
+        wsdlCallAt($w, "CalculatorHttpGet", "Add");
+    } catch (e) {
+        $kind = $e.kind;
+        testing.assertContains($e.message, "no SOAP port named");
+    }
+    testing.assertEqual($kind, "soap");
+    try {
+        wsdlCall($w, "Subtract");
+        missed();
+    } catch (e) {
+        testing.assertEqual($e.kind, "soap");
+        testing.assertContains($e.message, "offers the operation \"Subtract\"");
+    }
+}
+
+func testWsdlRequestDocumentLiteral() {
+    def target as WsdlCall init wsdlCall(parseWsdl(CALC_WSDL), "Add");
+    def body as xml.Value init wsdlRequest($target, {"intA": "2", "intB": "3"});
+    testing.assertEqual(xml.encode($body), xml.encode(addOp()));
+}
+
+func testParseWsdlRpc() {
+    def w as Wsdl init parseWsdl(RPC_WSDL);
+    testing.assertEqual($w.bindings[0].style, "rpc");
+    def quote as WsdlCall init wsdlCall($w, "Quote");
+    testing.assertEqual($quote.version, "1.2");
+    testing.assertEqual($quote.operation.style, "rpc");
+    testing.assertEqual($quote.operation.namespace, "urn:stock:rpc");
+    testing.assertEqual($quote.operation.input[0].typeName, "string");
+    testing.assertEqual(
+        $quote.operation.input[0].typeNamespace,
+        "http://www.w3.org/2001/XMLSchema");
+    def body as xml.Value init wsdlRequest($quote, {"symbol": "ACME"});
+    testing.assertEqual(xml.localName($body), "Quote");
+    testing.assertEqual(xml.namespace($body), "urn:stock:rpc");
+    testing.assertEqual(values($body), {"symbol": "ACME"});
+    # a document operation in an rpc binding: no wrapper namespace, one-way
+    def notify as WsdlOperation init wsdlCall($w, "Notify").operation;
+    testing.assertEqual($notify.style, "document");
+    testing.assertEqual($notify.namespace, "");
+    testing.assertEqual($notify.input, []);
+    testing.assertEqual($notify.output, []);
+    testing.assertContains(wsdlRequestFailure(wsdlCall($w, "Notify")), "is not one schema element");
+}
+
+# wsdlRequestFailure is the message wsdlRequest fails with.
+func wsdlRequestFailure(target as WsdlCall) {
+    try {
+        wsdlRequest($target, {});
+    } catch (e) {
+        return $e.kind + ": " + $e.message;
+    }
+    return "ok";
+}
+
+func testParseWsdlWithImports() {
+    def imports as map of string to string init {
+        "vboxweb.wsdl": IMPORTED_WSDL,
+        "vboxwebService.wsdl": IMPORTING_WSDL
+    };
+    def w as Wsdl init parseWsdlWith(IMPORTING_WSDL, $imports);
+    testing.assertEqual($w.targetNamespace, "urn:vbox:service");
+    def target as WsdlCall init wsdlCall($w, "IWebsessionManager_logon");
+    testing.assertEqual($target.address, "http://localhost:18083/");
+    testing.assertEqual($target.operation.action, "");
+    testing.assertEqual($target.operation.input[0].elementNamespace, "urn:vbox");
+    testing.assertFalse($target.operation.input[0].qualified);
+    testing.assertContains(
+        wsdlFailure(IMPORTING_WSDL, {}),
+        "soap: soap: the WSDL imports \"vboxweb.wsdl\"");
+}
+
+func testParseWsdlRefusals() {
+    def cases as list of list of string init [
+        ['<definitions xmlns="http://www.w3.org/ns/wsdl"/>', "WSDL 2.0 is not supported"],
+        ['<definitions/>', "not a WSDL 1.1 definitions element"],
+        ['<!DOCTYPE d [<!ENTITY x "y">]><d/>', "must not carry a DOCTYPE"],
+        ['<w:definitions', "the WSDL is not XML"],
+        [
+            strings.replace(
+                CALC_WSDL,
+                'binding="tns:CalculatorSoap12"',
+                'binding="q:CalculatorSoap12"'),
+            "uses an undeclared prefix"
+        ],
+        [
+            strings.replace(CALC_WSDL, 'binding="tns:CalculatorSoap12"', 'binding="tns:Nope"'),
+            "names the undefined binding"
+        ],
+        [
+            strings.replace(CALC_WSDL, 'message="tns:AddSoapOut"', 'message="tns:Nope"'),
+            "names the undefined message"
+        ],
+        [
+            strings.replace(
+                CALC_WSDL,
+                '<wsdl:message name="AddHttpGetIn">',
+                '<wsdl:message name="AddSoapIn">'),
+            "defines message"
+        ],
+        [
+            strings.replace(CALC_WSDL, 'style="document"/>', 'style="literal"/>'),
+            "style is document or rpc"
+        ],
+        [
+            strings.replace(CALC_WSDL, 'element="tns:Add"/>', 'element="tns:Add" type="s:int"/>'),
+            "names exactly one of element and type"
+        ],
+        [
+            strings.replace(
+                RPC_WSDL,
+                '<operation name="Notify"><input',
+                '<operation name="Quote"><input'),
+            "overloading is not supported"
+        ],
+        [
+            strings.replace(
+                RPC_WSDL,
+                '<operation name="Notify"><input message="t:Ping"/></operation>',
+                '<operation name="Gone"><input message="t:Ping"/></operation>'),
+            "is not in its port type"
+        ],
+        [
+            strings.replace(CALC_WSDL, '<soap:address location="ADDRESS"/>', '<soap:address/>'),
+            "has no location attribute"
+        ],
+        [
+            strings.replace(
+                CALC_WSDL,
+                '<http:address location="https://example.com/calc.asmx"/>',
+                '<soap:address location="https://example.com/calc.asmx"/>'),
+            "binding CalculatorHttpGet is not SOAP"
+        ]
+    ];
+    for (def c in $cases) {
+        def got as string init wsdlFailure($c[0], {});
+        testing.assertEqual(strings.split($got, ":")[0], "soap");
+        testing.assertContains($got, $c[1]);
+    }
+}
+
+func testWsdlRequestRefusesEncoded() {
+    def encoded as string init strings.replace(
+        RPC_WSDL,
+        '<input><soap12:body use="literal" namespace="urn:stock:rpc"/></input>',
+        '<input><soap12:body use="encoded" namespace="urn:stock:rpc"/></input>');
+    def target as WsdlCall init wsdlCall(parseWsdl($encoded), "Quote");
+    testing.assertEqual($target.operation.bodyUse, "encoded");
+    testing.assertContains(wsdlRequestFailure($target), "uses SOAP encoding");
+}
+
+func testParseWsdlImportCap() {
+    def imports as map of string to string init {};
+    for (def i in 0..MAX_WSDL_DOCUMENTS + 1) {
+        def next as string init "d" + convert.toString($i + 1);
+        $imports["d" + convert.toString($i)] = '<definitions xmlns="' + WSDL_NS + '">' +
+            '<import location="' + $next + '"/></definitions>';
+    }
+    def got as string init wsdlFailure($imports["d0"], $imports);
+    testing.assertEqual(strings.split($got, ":")[0], "limit");
+}
+
+func testWsdlEndToEnd() {
+    def f as Fake init fake([canned(200, ADD_REPLY)]);
+    def w as Wsdl init parseWsdl(strings.replace(CALC_WSDL, "ADDRESS", $f.url));
+    def target as WsdlCall init wsdlCall($w, "Add");
+    def result as xml.Value init call(
+        wsdlConnect($target),
+        $target.operation.action,
+        wsdlRequest($target, {"intA": "2", "intB": "3"}));
+    testing.assertEqual(values($result)["AddResult"], "5");
+    def seen as list of Seen init finish($f);
+    testing.assertEqual($seen[0].headers["SOAPAction"], "\"http://tempuri.org/Add\"");
+    testing.assertEqual(values(parse($seen[0].body).body[0]), {"intA": "2", "intB": "3"});
+}
+
+# A description without a service, as ONVIF's device WSDLs are.
+func testWsdlCallToAnAddress() {
+    def bindingOnly as string init strings.replace(
+        RPC_WSDL,
+        '<service name="StockService">',
+        '<service name="StockService"><documentation>no ports</documentation>');
+    def w as Wsdl init parseWsdl(CALC_WSDL);
+    def target as WsdlCall init wsdlCallTo($w, "http://10.0.0.5/onvif/device_service", "Add");
+    testing.assertEqual($target.address, "http://10.0.0.5/onvif/device_service");
+    testing.assertEqual($target.version, "1.1");
+    testing.assertEqual($target.operation.action, "http://tempuri.org/Add");
+    def stock as Wsdl init parseWsdl($bindingOnly);
+    testing.assertEqual(wsdlCallTo($stock, "https://x/", "Quote").version, "1.2");
+    try {
+        wsdlCallTo($stock, "https://x/", "Sell");
+        missed();
+    } catch (e) {
+        testing.assertEqual($e.kind, "soap");
+        testing.assertContains($e.message, "no SOAP binding of the WSDL has the operation");
+    }
+}
+
+# --- strictness and guards ---------------------------------------------------
+
+func stringHandler(req as Request) {
+    throw "oops"; # lint-disable: L104
+}
+
+# A handler may throw any value: one that is not an Error is a Server fault
+# too, not a "runtime" error out of handle.
+func testHandleNonErrorThrow() {
+    def resp as Response init handle(envelope("1.1", [], [addOp()]), "", stringHandler);
+    testing.assertEqual($resp.status, 500);
+    def f as Fault init parseFault(parse($resp.body));
+    testing.assertEqual($f.code, "Server");
+    testing.assertEqual($f.reason, "internal error");
+}
+
+# envelopeOf wraps Body content and Envelope content around a 1.1 envelope.
+func envelopeOf(inEnvelope as string, inBody as string) {
+    return "<s:Envelope xmlns:s=\"" + SOAP11_NS + "\">" + $inEnvelope + "<s:Body>" + $inBody +
+        "</s:Body></s:Envelope>";
+}
+
+func testParseRefusesStrayContent() {
+    def fault as string init "<s:Fault><faultcode>s:Server</faultcode>" +
+        "<faultstring>boom</faultstring></s:Fault>";
+    def cases as map of string to string init {
+        "a Fault is the only element": envelopeOf("", $fault + "<x/>"),
+        "the Body holds text": envelopeOf("", "junk<x/>"),
+        "the Envelope holds text": envelopeOf("junk", "<x/>"),
+        "a header block is namespace-qualified": "<s:Envelope xmlns:s=\"" + SOAP12_NS +
+            "\"><s:Header><h/></s:Header><s:Body><x/></s:Body></s:Envelope>",
+        "a Header is the Envelope's first element": "<s:Envelope xmlns:s=\"" + SOAP11_NS +
+            "\"><s:Body><x/></s:Body><s:Header/></s:Envelope>"
+    };
+    for (def want in $cases) {
+        try {
+            parse($cases[$want]);
+            missed();
+        } catch (e) {
+            testing.assertContains(messageOf($e), $want);
+        }
+    }
+    # A 1.1 Header after the Body would skip the mustUnderstand check.
+    def late as string init "<s:Envelope xmlns:s=\"" + SOAP11_NS + "\"><s:Body>" +
+        xml.encode(addOp()) + "</s:Body><s:Header><a:h xmlns:a=\"urn:a\" " +
+        "s:mustUnderstand=\"1\"/></s:Header></s:Envelope>";
+    def resp as Response init handle($late, "", addHandler);
+    testing.assertEqual(parseFault(parse($resp.body)).code, "Client");
+    # SOAP 1.1 requires qualified header blocks too
+    def bare as string init "<s:Envelope xmlns:s=\"" + SOAP11_NS + "\"><s:Header><h/></s:Header>" +
+        "<s:Body>" + xml.encode(addOp()) + "</s:Body></s:Envelope>";
+    testing.assertEqual(parseFault(parse(handle($bare, "", addHandler).body)).code, "Client");
+}
+
+func testMustUnderstandValues() {
+    # 1.2 takes xs:boolean, 1.1 only 0 and 1; anything else is the sender's error
+    testing.assertEqual(mustValue("1.2", "yes"), "Sender");
+    testing.assertEqual(mustValue("1.1", "true"), "Client");
+    testing.assertEqual(mustValue("1.2", "true"), "MustUnderstand");
+    testing.assertEqual(mustValue("1.2", "false"), "");
+    testing.assertEqual(mustValue("1.1", " 0 "), "");
+}
+
+# mustValue is the fault code handle answers a block with mustUnderstand set to
+# `value` with, "" for none.
+func mustValue(version as string, value as string) {
+    def ns as string init namespaceOf($version);
+    def block as xml.Value init xml.setAttrNS(
+        xml.elementNS("urn:auth", "a:Token"),
+        $ns,
+        "soap:mustUnderstand",
+        $value);
+    def resp as Response init handle(envelope($version, [$block], [addOp()]), "", addHandler);
+    if ($resp.status == 200) {
+        return "";
+    }
+    return parseFault(parse($resp.body)).code;
+}
+
+func testAuthHeadersReplaceAnyCase() {
+    def c as Client init withHeader(connect("https://h/"), "authorization", "Basic old");
+    $c = withBasicAuth($c, "u", "p");
+    testing.assertEqual(maps.keys($c.headers), ["Authorization"]);
+    $c = withHeader($c, "AUTHORIZATION", "x");
+    $c = withToken($c, "t");
+    testing.assertEqual($c.headers, {"Authorization": "Bearer t"});
+    $c = withHeader(withHeader($c, "x-extra", "1"), "X-Extra", "2");
+    testing.assertEqual($c.headers["X-Extra"], "2");
+    testing.assertFalse(maps.has($c.headers, "x-extra"));
+}
+
+func testReservedNamespacesRefused() {
+    for (def ns in [XML_NS, XMLNS_NS, "urn:a\u0001", ""]) {
+        try {
+            operation($ns, "Op", {}, false);
+            missed();
+        } catch (e) {
+            testing.assertContains(messageOf($e), "namespace URI");
+        }
+    }
+    for (def ns in [XML_NS, XMLNS_NS, "urn:a\u0001"]) {
+        def f as Fault init Fault{
+            code: "\{" + $ns + "\}Busy",
+            subcode: "",
+            reason: "",
+            actor: "",
+            detail: ""
+        };
+        try {
+            faultElement("1.1", $f);
+            missed();
+        } catch (e) {
+            testing.assertContains(messageOf($e), "namespace URI");
+        }
+        $f.code = "Sender";
+        $f.subcode = "\{" + $ns + "\}Busy";
+        try {
+            faultElement("1.2", $f);
+            missed();
+        } catch (e) {
+            testing.assertContains(messageOf($e), "namespace URI");
+        }
+    }
+    def rpc as string init strings.replace(
+        RPC_WSDL,
+        'namespace="urn:stock:rpc"/></input>',
+        'namespace="' + XMLNS_NS + '"/></input>');
+    testing.assertContains(
+        wsdlRequestFailure(wsdlCall(parseWsdl($rpc), "Quote")),
+        "soap: soap: an operation's namespace");
+}
+
+func testFaultDetailMixedContent() {
+    def f as Fault init Fault{
+        code: "Server",
+        subcode: "",
+        reason: "r",
+        actor: "",
+        detail: "<a xmlns=\"urn:d\">1</a> and more"
+    };
+    for (def version in ["1.1", "1.2"]) {
+        if ($version == "1.2") {
+            $f.code = "Receiver";
+        }
+        def text as string init faultEnvelope($version, $f);
+        testing.assertContains($text, "</a> and more</");
+        # read back, mixed content is the whole detail element
+        def got as string init parseFault(parse($text)).detail;
+        testing.assertContains($got, "<a xmlns=\"urn:d\">1</a> and more");
+        testing.assertTrue(strings.startsWith($got, "<"));
+    }
+    # Content stands on its own: the wrapper's soap: prefix is not lent to it.
+    $f.detail = "<soap:x/>";
+    try {
+        faultElement("1.2", $f);
+        missed();
+    } catch (e) {
+        testing.assertContains(messageOf($e), "is XML");
+    }
+}
+
+func testCredentialsAllowedWithOptIn() {
+    def c as Client init withDigestAuth(connect("http://host.invalid/svc"), "u", "p");
+    $c.allowInsecureHttp = true;
+    try {
+        send(withTimeout($c, 2000), "", addOp());
+        missed();
+    } catch (e) {
+        # the name does not resolve; what matters is that it was tried
+        testing.assertEqual($e.kind, "net");
+    }
+}
+
+func testRequestActionQuotedParameters() {
+    def ct as string init "application/soap+xml; x=\"a;action=evil\"; action=\"urn:good\"";
+    testing.assertEqual(requestAction($ct, ""), "urn:good");
+    testing.assertEqual(requestAction("application/soap+xml; x=\"a;action=evil\"", ""), "");
+    testing.assertEqual(
+        requestAction("application/soap+xml; action=\"urn:a\\\"b\"", ""),
+        "urn:a\"b");
+    testing.assertEqual(
+        requestAction("application/soap+xml; charset=utf-8;action=urn:c", ""),
+        "urn:c");
+    # parameters that do not parse carry no action
+    testing.assertEqual(requestAction("application/soap+xml; junk; action=urn:d", ""), "");
+}
+
+# --- WSDL strictness ---------------------------------------------------------
+
+func testWsdlPortVersionMatchesBinding() {
+    def mismatch as string init strings.replace(
+        CALC_WSDL,
+        '<soap12:address location="https://example.com/calc12.asmx"/>',
+        '<soap:address location="https://example.com/calc12.asmx"/>');
+    testing.assertContains(
+        wsdlFailure($mismatch, {}),
+        "has a SOAP 1.1 address but binding CalculatorSoap12 is SOAP 1.2");
+}
+
+func testWsdlBindingRefusals() {
+    def two as string init strings.replace(
+        CALC_WSDL,
+        '<soap:binding transport="http://schemas.xmlsoap.org/soap/http"/>',
+        '<soap:binding transport="http://schemas.xmlsoap.org/soap/http"/>' +
+            '<soap12:binding transport="http://schemas.xmlsoap.org/soap/http"/>');
+    testing.assertContains(wsdlFailure($two, {}), "has two SOAP binding elements");
+    def none as string init strings.replace(
+        CALC_WSDL,
+        '<soap:binding transport="http://schemas.xmlsoap.org/soap/http"/>',
+        '<soap:binding/>');
+    testing.assertContains(wsdlFailure($none, {}), "without transport");
+    def unknown as string init strings.replace(
+        CALC_WSDL,
+        '<wsdl:input><soap:body use="literal"/></wsdl:input>',
+        '<wsdl:input><soap:body use="literal" parts="nope"/></wsdl:input>');
+    testing.assertContains(wsdlFailure($unknown, {}), "names the part \"nope\"");
+}
+
+# A binding over another transport (JMS) is left out with its ports.
+func testWsdlOtherTransportLeftOut() {
+    def jms as string init strings.replace(
+        CALC_WSDL,
+        '<soap12:binding transport="http://schemas.xmlsoap.org/soap/http"/>',
+        '<soap12:binding transport="http://www.w3.org/2010/soapjms/"/>');
+    def w as Wsdl init parseWsdl($jms);
+    testing.assertEqual(len($w.bindings), 1);
+    testing.assertEqual(len($w.ports), 1);
+    testing.assertEqual($w.ports[0].name, "CalculatorSoap");
+}
+
+# soap:body parts picks the Body's parts; soap:header names the header blocks.
+def const HEADER_WSDL as string init '<definitions xmlns="http://schemas.xmlsoap.org/wsdl/"
+    xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:t="urn:t" targetNamespace="urn:t">
+  <message name="In">
+    <part name="session" element="t:Session"/>
+    <part name="body" element="t:Op"/>
+  </message>
+  <message name="Out"><part name="result" element="t:OpResponse"/></message>
+  <message name="Trace"><part name="id" element="t:TraceId"/></message>
+  <portType name="PT">
+    <operation name="Op"><input message="t:In"/><output message="t:Out"/></operation>
+  </portType>
+  <binding name="B" type="t:PT">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <operation name="Op">
+      <soap:operation soapAction="urn:t#Op"/>
+      <input>
+        <soap:header message="t:In" part="session" use="literal"/>
+        <soap:body parts="body" use="literal"/>
+      </input>
+      <output>
+        <soap:header message="t:Trace" part="id" use="literal"/>
+        <soap:body use="literal"/>
+      </output>
+    </operation>
+  </binding>
+  <service name="S">
+    <port name="P" binding="t:B"><soap:address location="https://example.com/t"/></port>
+  </service>
+</definitions>';
+
+func testWsdlBodyAndHeaderParts() {
+    def op as WsdlOperation init wsdlCall(parseWsdl(HEADER_WSDL), "Op").operation;
+    testing.assertEqual(len($op.input), 1);
+    testing.assertEqual($op.input[0].element, "Op");
+    testing.assertEqual(len($op.inputHeaders), 1);
+    testing.assertEqual($op.inputHeaders[0].element, "Session");
+    testing.assertEqual($op.output[0].element, "OpResponse");
+    testing.assertEqual($op.outputHeaders[0].element, "TraceId");
+    # with the header part out of the Body, the request is one element again
+    def body as xml.Value init wsdlRequest(wsdlCall(parseWsdl(HEADER_WSDL), "Op"), {});
+    testing.assertEqual(xml.localName($body), "Op");
+    def badHeader as string init strings.replace(HEADER_WSDL, 'part="id"', 'part="nope"');
+    testing.assertContains(wsdlFailure($badHeader, {}), "names the part \"nope\"");
+}
+
+func testWsdlRequestElementInNoNamespace() {
+    # prefixed, so an unprefixed QName is in no namespace
+    def nons as string init '<w:definitions xmlns:w="' + WSDL_NS + '" ' +
+        'xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:t="urn:t" ' +
+        'targetNamespace="urn:t"><w:message name="In"><w:part name="p" element="Op"/>' +
+        '</w:message><w:portType name="PT"><w:operation name="Op"><w:input message="t:In"/>' +
+        '</w:operation></w:portType><w:binding name="B" type="t:PT">' +
+        '<soap:binding transport="http://schemas.xmlsoap.org/soap/http"/>' +
+        '<w:operation name="Op"><w:input><soap:body use="literal"/></w:input></w:operation>' +
+        '</w:binding></w:definitions>';
+    testing.assertContains(
+        wsdlRequestFailure(wsdlCallTo(parseWsdl($nons), "https://h/", "Op")),
+        "is in no namespace");
+}
+
+# An import back to the root, which has no location of its own, is read once.
+func testWsdlImportBackToRoot() {
+    def root as string init strings.replace(
+        HEADER_WSDL,
+        '<message name="In">',
+        '<import namespace="urn:u" location="b.wsdl"/><message name="In">');
+    def b as string init '<definitions xmlns="' + WSDL_NS + '" targetNamespace="urn:u">' +
+        '<import namespace="urn:t" location="root.wsdl"/></definitions>';
+    def w as Wsdl init parseWsdlWith($root, {"b.wsdl": $b, "root.wsdl": $root});
+    testing.assertEqual(len($w.ports), 1);
+    testing.assertEqual(len($w.bindings), 1);
+}
+
+# Many ports on one binding: a missing operation searches that binding once.
+func testWsdlManyPortsOneBinding() {
+    def ports as list of string init [];
+    for (def i in 0..3) {
+        $ports[] = '<port name="P' + convert.toString($i) + '" binding="t:B">' +
+            '<soap:address location="https://example.com/' + convert.toString($i) + '"/></port>';
+    }
+    def text as string init strings.replace(
+        HEADER_WSDL,
+        '<port name="P" binding="t:B"><soap:address location="https://example.com/t"/></port>',
+        strings.join($ports, ""));
+    def w as Wsdl init parseWsdl($text);
+    testing.assertEqual(wsdlCallAt($w, "P2", "Op").address, "https://example.com/2");
+    try {
+        wsdlCall($w, "Missing");
+        missed();
+    } catch (e) {
+        testing.assertContains(messageOf($e), "offers the operation \"Missing\"");
     }
 }
