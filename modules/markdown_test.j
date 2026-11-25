@@ -1552,12 +1552,13 @@ func testPdfStandard14Golden() {
     def out as bytes init toPdfWith($md, $o);
     testing.assertEqual(
         encoding.toText("hex", hash.compute("sha256", pdfCanonical($out))),
-        "2300d9bb0c7ebb65b1687bb7b9be3c566d5a6d48c9180bc8f0e5b71be8d8375f");
+        "b5b43a748d59bdaa7eaef1a92a6cd4f61dd24e15b92228e55c7aba9375997c4f");
 }
 
 # pdfCanonical is a PDF with every FlateDecode stream inflated and every
-# `/Length` masked: the compressed bytes depend on the Go release's DEFLATE
-# encoder, the content does not, so the golden holds on any toolchain.
+# `/Length`, xref offset and `startxref` masked: the compressed bytes, and so
+# every byte offset after them, depend on the Go release's DEFLATE encoder, the
+# content does not, so the golden holds on any toolchain.
 func pdfCanonical(pdf as bytes) {
     def parts as list of bytes;
     def open as bytes init encoding.encode("utf-8", ">>\nstream\n");
@@ -1589,7 +1590,12 @@ func pdfCanonical(pdf as bytes) {
 
 func maskLengths(b as bytes) {
     def text as string init encoding.decode("iso-8859-1", $b);
-    return encoding.encode("iso-8859-1", regex.replace('/Length1? [0-9]+', $text, "/Length ?"));
+    # Compressed lengths shift every later object, so the xref offsets and
+    # `startxref` differ between Go versions too.
+    $text = regex.replace('/Length1? [0-9]+', $text, "/Length ?");
+    $text = regex.replace('[0-9]{10} [0-9]{5} n', $text, "?????????? ????? n");
+    $text = regex.replace('startxref\n[0-9]+', $text, "startxref\n?");
+    return encoding.encode("iso-8859-1", $text);
 }
 
 # dejaVu returns the path of a DejaVu face on this machine, or "".
