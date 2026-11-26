@@ -670,11 +670,21 @@ export func reconnect(client as Client) {
     closeQuietly($client.conn);
     def out as Client init connectWith($opts, $will, $clean);
     errdefer closeQuietly($out.conn);
+    # The queued messages are copied, not moved: if a re-subscribe below
+    # throws, the caller still holds the old Client, and a retry (or a
+    # queuePublish on it) must find its queue and byte count as they were.
+    def queued as list of Message;
     while (channel.len($client.pending) > 0) {
-        channel.send($out.pending, channel.recv($client.pending));
+        $queued[] = channel.recv($client.pending);
     }
+    for (def m in $queued) {
+        channel.send($client.pending, $m);
+        channel.send($out.pending, $m);
+    }
+    def bytesQueued as int init channel.recv($client.pendingBytes);
+    channel.send($client.pendingBytes, $bytesQueued);
     channel.recv($out.pendingBytes);
-    channel.send($out.pendingBytes, channel.recv($client.pendingBytes));
+    channel.send($out.pendingBytes, $bytesQueued);
     for (def s in $subs) {
         if ($s.qos > 0) {
             $out = subscribeQos1($out, $s.topic);

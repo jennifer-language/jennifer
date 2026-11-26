@@ -519,6 +519,48 @@ func testReconnectKeepsQueuedMessages() {
     net.close($listener);
 }
 
+# A reconnect whose re-subscribe fails leaves the old Client as it was: a
+# retry neither hangs on its queue counter nor loses the queued message.
+func brokerFailedResubscribe(listener as net.Listener) {
+    def first as net.Conn init net.accept($listener);
+    brokerConnack($first);
+    brokerRead($first, 8);
+    net.writeBytes($first, buildPublish("a", encoding.encode("utf-8", "one"), 0, 0, false, false));
+    net.writeBytes($first, bytesOf([0x90, 3, 0, 1, 0]));
+    net.close($first);
+    def second as net.Conn init net.accept($listener);
+    brokerConnack($second);
+    brokerRead($second, 8);
+    net.close($second);
+    def third as net.Conn init net.accept($listener);
+    defer net.close($third);
+    brokerConnack($third);
+    brokerRead($third, 8);
+    net.writeBytes($third, bytesOf([0x90, 3, 0, 1, 0]));
+    brokerRead($third, 14);
+    return null;
+}
+func testAReconnectCanBeRetried() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        return brokerFailedResubscribe($listener);
+    };
+    def c as Client init connect(fakeOptions($listener));
+    $c = subscribe($c, "a");
+    def failed as bool init false;
+    try {
+        $c = reconnect($c);
+    } catch (e) {
+        $failed = true;
+    }
+    testing.assertTrue($failed);
+    $c = reconnect($c);
+    testing.assertEqual(encoding.decode("utf-8", receive($c).payload), "one");
+    disconnect($c);
+    task.wait($server);
+    net.close($listener);
+}
+
 # A full queue throws kind "limit" before acknowledging the message.
 func overfullQueue() {
     def pending as channel of Message init channel.make(MAX_PENDING);
