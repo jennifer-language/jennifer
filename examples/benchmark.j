@@ -865,7 +865,6 @@ func benchMLFit() {
     while ($r < ML_REPS) {
         def m as ml.Model init ml.linearRegression($x, $y);
         ml.predict($m, $x);
-        ml.free($m);
         $r = $r + 1;
     }
     def gap as time.Duration init time.sub(time.now(), $start);
@@ -880,7 +879,6 @@ func benchKMeans() {
     while ($r < KMEANS_REPS) {
         math.randSeed(8);
         def m as ml.Model init ml.kMeans($x, 4);
-        ml.free($m);
         $r = $r + 1;
     }
     def gap as time.Duration init time.sub(time.now(), $start);
