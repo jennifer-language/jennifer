@@ -161,6 +161,14 @@ func isIntegerText(s string) bool {
 
 // node converts one yaml.Node into a tree node.
 func (c *converter) node(n *yaml.Node, depth int) (node, error) {
+	// The document wrapper is not a value: its content is the root, at the
+	// same depth and counted once, as json / toml count theirs.
+	if n.Kind == yaml.DocumentNode {
+		if len(n.Content) == 0 {
+			return doctree.Null(), nil
+		}
+		return c.node(n.Content[0], depth)
+	}
 	if depth > c.maxDepth {
 		return node{}, limits.Capf("%s: nesting too deep (limit %d)", c.verb, c.maxDepth)
 	}
@@ -169,11 +177,6 @@ func (c *converter) node(n *yaml.Node, depth int) (node, error) {
 		return node{}, limits.Capf("%s: document expands to too many nodes (limit %d); possible alias bomb", c.verb, c.maxNodes)
 	}
 	switch n.Kind {
-	case yaml.DocumentNode:
-		if len(n.Content) == 0 {
-			return doctree.Null(), nil
-		}
-		return c.node(n.Content[0], depth+1)
 	case yaml.AliasNode:
 		if n.Alias == nil {
 			return node{}, fmt.Errorf("%s: alias %q has no anchor", c.verb, n.Value)

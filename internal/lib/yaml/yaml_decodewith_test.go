@@ -80,6 +80,21 @@ func TestDecodeWithCaps(t *testing.T) {
 	}
 }
 
+// The document wrapper is not counted: the caps allow exactly what json's do.
+func TestDecodeWithCapsAreExact(t *testing.T) {
+	s := interpreter.StringVal
+	mustYaml(t, "decodeWith", s("[1]"), yamlOpts(1, 2))
+	mustYaml(t, "decodeWith", s("1"), yamlOpts(0, 1))
+	for doc, o := range map[string]interpreter.Value{
+		"[[1]]":  yamlOpts(1, 0),
+		"[1, 2]": yamlOpts(0, 2),
+	} {
+		if _, err := yamlCall(t, "decodeWith", s(doc), o); dataerr.KindOf(err) != "limit" {
+			t.Errorf("%s: %v, want limit", doc, err)
+		}
+	}
+}
+
 // M29.47: asBytes reads a !!binary node; any other node is misuse.
 func TestAsBytes(t *testing.T) {
 	s := interpreter.StringVal
