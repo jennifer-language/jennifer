@@ -878,7 +878,7 @@ func benchKMeans() {
     def r as int init 0;
     while ($r < KMEANS_REPS) {
         math.randSeed(8);
-        def m as ml.Model init ml.kMeans($x, 4);
+        ml.kMeans($x, 4);
         $r = $r + 1;
     }
     def gap as time.Duration init time.sub(time.now(), $start);
