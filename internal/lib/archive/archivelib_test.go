@@ -556,3 +556,21 @@ func TestGitArchiveTarball(t *testing.T) {
 		t.Errorf("git archive: %+v, %v; want a.txt", es, err)
 	}
 }
+
+// A zip mtime outside zip's 32-bit unsigned time field is refused, not stored
+// as another time (-1 came back as 4294967295); tar keeps it.
+func TestZipMtimeOutOfRange(t *testing.T) {
+	for _, m := range []int64{-1, 1 << 32} {
+		in := []entry{{name: "a", data: []byte("x"), mode: 0o644, mtime: m}}
+		if _, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("zip"), entriesVal(in)}); err == nil {
+			t.Errorf("zip mtime %d: packed, want an error", m)
+		}
+		if back := roundtrip(t, "tar", in); back[0].mtime != m {
+			t.Errorf("tar mtime %d came back as %d", m, back[0].mtime)
+		}
+	}
+	in := []entry{{name: "a", data: []byte("x"), mode: 0o644, mtime: 1<<32 - 1}}
+	if back := roundtrip(t, "zip", in); back[0].mtime != 1<<32-1 {
+		t.Errorf("zip max mtime came back as %d", back[0].mtime)
+	}
+}

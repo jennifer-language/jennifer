@@ -679,6 +679,11 @@ func packZip(entries []entry) ([]byte, error) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	for _, e := range entries {
+		// zip stores the time as 32-bit unsigned seconds (the extended
+		// timestamp field); a value outside would come back as another time.
+		if e.mtime < 0 || e.mtime > math.MaxUint32 {
+			return nil, fmt.Errorf("archive.pack: zip entry %q: mtime %d does not fit zip's time field (0 to %d)", e.name, e.mtime, uint32(math.MaxUint32))
+		}
 		hdr := &zip.FileHeader{
 			Name:     e.name,
 			Method:   zip.Deflate,
