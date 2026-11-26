@@ -273,6 +273,7 @@ func settle(path as string, data as string, attempts as int, what as string) {
  * chip; a label selects the chip with exactly that sysfs `label`; gpio.GLOBAL
  * makes pin numbers sysfs global numbers.
  * @param label {string} gpio.AUTO, gpio.GLOBAL, or a chip label such as "pinctrl-bcm2711"
+ * @deprecated use `gpio.open(path)` from the `gpio` library; removed in 0.29.0
  */
 export func useChip(label as string) {
     os.setEnv(CHIP_ENV, $label);
@@ -285,6 +286,7 @@ export func useChip(label as string) {
  * @param pin {int} the line offset on the selected chip (the BCM GPIO number on a Raspberry Pi)
  * @param direction {string} the pin direction, gpio.IN or gpio.OUT (the "in" / "out" strings)
  * @throws {Error} kind "gpio" on a negative pin, a direction other than gpio.IN / gpio.OUT, an absent sysfs GPIO tree, no or several matching chips, a pin past the chip's lines, or a write failure
+ * @deprecated use `gpio.setup(chip, pin, direction)` from the `gpio` library; removed in 0.29.0
  */
 export func setup(pin as int, direction as string) {
     if (not ($direction == IN or $direction == OUT)) {
@@ -321,6 +323,7 @@ export func setup(pin as int, direction as string) {
  * @param pin {int} the line offset on the selected chip (the BCM GPIO number on a Raspberry Pi)
  * @param value {int} the value to write, 0 or 1
  * @throws {Error} kind "gpio" on a negative pin, a value other than 0 / 1, an absent sysfs GPIO tree, no or several matching chips, a pin past the chip's lines, or a write failure
+ * @deprecated use `gpio.write(chip, pin, value)` from the `gpio` library; removed in 0.29.0
  */
 export func write(pin as int, value as int) {
     if (not ($value == 0 or $value == 1)) {
@@ -336,6 +339,7 @@ export func write(pin as int, value as int) {
  * @param pin {int} the line offset on the selected chip (the BCM GPIO number on a Raspberry Pi)
  * @return {int} the pin's current value, 0 or 1
  * @throws {Error} kind "gpio" on a negative pin, an absent sysfs GPIO tree, no or several matching chips, a pin past the chip's lines, a read failure, or a value file holding anything but 0 / 1
+ * @deprecated use `gpio.read(chip, pin)` from the `gpio` library; removed in 0.29.0
  */
 export func read(pin as int) {
     def dir as string init base();
@@ -355,6 +359,7 @@ export func read(pin as int) {
  * Unexport a pin.
  * @param pin {int} the line offset on the selected chip (the BCM GPIO number on a Raspberry Pi)
  * @throws {Error} kind "gpio" on a negative pin, an absent sysfs GPIO tree, no or several matching chips, a pin past the chip's lines, or a write failure
+ * @deprecated use `gpio.release(chip, pin)` from the `gpio` library; removed in 0.29.0
  */
 export func release(pin as int) {
     checkPin($pin);
