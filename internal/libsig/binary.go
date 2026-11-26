@@ -22,5 +22,13 @@ readUint(string, bytes, int, int) int
 readFloat(string, bytes, int, int) float
 readInts(string, bytes, int, int, int, int?) list of int
 readFloats(string, bytes, int, int, int, int?) list of float
+fromInt(string, int, int) bytes
+fromUint(string, int, int) bytes
+fromFloat(string, float, int) bytes
+fromInts(string, list of int, int) bytes
+fromFloats(string, list of float, int) bytes
+setInt(string, bytes, int, int, int) bytes
+setUint(string, bytes, int, int, int) bytes
+setFloat(string, bytes, int, float, int) bytes
 `)
 }

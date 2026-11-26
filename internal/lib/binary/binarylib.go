@@ -3,7 +3,7 @@
 
 // Package binarylib implements Jennifer's `binary` library: bulk
 // operations on `bytes` (concat, join, slice, search, split, bitwise
-// ops, fixed-width number reads) run in Go instead of a per-byte `.j`
+// ops, fixed-width number reads and writes) run in Go instead of a per-byte `.j`
 // loop. Named `binary` because `bytes` is a type keyword.
 //
 // Every function is non-mutating; each result is freshly allocated and
@@ -52,6 +52,14 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "readFloat", readFloatFn)
 	in.RegisterNamespaced(LibraryName, "readInts", readIntsFn)
 	in.RegisterNamespaced(LibraryName, "readFloats", readFloatsFn)
+	in.RegisterNamespaced(LibraryName, "fromInt", fromIntFn)
+	in.RegisterNamespaced(LibraryName, "fromUint", fromUintFn)
+	in.RegisterNamespaced(LibraryName, "fromFloat", fromFloatFn)
+	in.RegisterNamespaced(LibraryName, "fromInts", fromIntsFn)
+	in.RegisterNamespaced(LibraryName, "fromFloats", fromFloatsFn)
+	in.RegisterNamespaced(LibraryName, "setInt", setIntFn)
+	in.RegisterNamespaced(LibraryName, "setUint", setUintFn)
+	in.RegisterNamespaced(LibraryName, "setFloat", setFloatFn)
 }
 
 // takeBytes reads a positional bytes argument.

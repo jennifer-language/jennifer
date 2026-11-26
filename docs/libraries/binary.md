@@ -92,6 +92,52 @@ non-finite bit pattern. A format that encodes missing values as NaN payloads
 `readUint` with size 8 throws above 2^63 - 1; read such fields as two 4-byte
 halves.
 
+## Writing numbers
+
+The writers are the inverse of the `read*` functions: `from*` builds a fresh
+`bytes` holding the value, `set*` returns a copy of `b` with the value written
+at `offset` (assign it back). A value that does not fit its size throws; it is
+never truncated.
+
+| Function | Returns | Description |
+| -------- | ------- | ----------- |
+| `binary.fromInt(order, n, size)` | bytes | `n` in `size` bytes (1, 2, 4 or 8), two's complement. |
+| `binary.fromUint(order, n, size)` | bytes | `n` unsigned in `size` bytes; size 8 takes 0 up to 2^63 - 1. |
+| `binary.fromFloat(order, x, size)` | bytes | `x` as an IEEE 754 float of 4 or 8 bytes. |
+| `binary.fromInts(order, xs, size)` | bytes | Every element of a `list of int`, back to back. |
+| `binary.fromFloats(order, xs, size)` | bytes | Every element of a `list of float`, back to back. |
+| `binary.setInt(order, b, offset, n, size)` | bytes | `b` with `n` written at `offset`, as `fromInt`. |
+| `binary.setUint(order, b, offset, n, size)` | bytes | `b` with `n` written at `offset`, as `fromUint`. |
+| `binary.setFloat(order, b, offset, x, size)` | bytes | `b` with `x` written at `offset`, as `fromFloat`. |
+
+| Size | `fromInt` / `setInt` | `fromUint` / `setUint` |
+| ---- | -------------------- | ---------------------- |
+| 1 | -128 to 127 | 0 to 255 |
+| 2 | -32,768 to 32,767 | 0 to 65,535 |
+| 4 | -2^31 to 2^31 - 1 | 0 to 2^32 - 1 |
+| 8 | the whole int range | 0 to 2^63 - 1 |
+
+A 4-byte float is rounded to the nearest float32; a value beyond the float32
+range (magnitude above ~3.4e38) throws instead of becoming an infinity. The
+value argument of `fromFloat` / `setFloat` is a `float` (`2.0`, not `2`).
+
+```jennifer
+use binary;
+
+# a ZIP end-of-central-directory record: signature, then little-endian fields
+def eocd as bytes init binary.concat(binary.fromUint("le", 0x06054b50, 4), binary.make(18));
+$eocd = binary.setUint("le", $eocd, 8, $entries, 2);
+$eocd = binary.setUint("le", $eocd, 10, $entries, 2);
+$eocd = binary.setUint("le", $eocd, 12, $dirSize, 4);
+$eocd = binary.setUint("le", $eocd, 16, $dirOffset, 4);
+# 16-bit PCM samples
+def pcm as bytes init binary.fromInts("le", $samples, 2);
+```
+
+Each `set*` call copies `b`, so patching many fields of a large buffer is
+O(n) per call; build the parts with `from*` and `binary.join` them instead.
+An in-place update for `$b = binary.setUint(..., $b, ...)` is planned (M30.29).
+
 ## Errors
 
 All are positioned, catchable errors. The size and count caps are kind
@@ -109,6 +155,8 @@ All are positioned, catchable errors. The size and count caps are kind
 | `bitXor` / `bitAnd` / `bitOr` | an empty `key` | `"runtime"` |
 | `read*` | a span past the end of `b`, a negative offset, a size outside the allowed set, an order other than `"le"` / `"be"`, a non-finite float, an 8-byte unsigned value above the int range, a `count` outside `[0, len(b)]`, a `stride` below 1 (the offset is checked even when `count` is 0) | `"runtime"` |
 | `readInts` / `readFloats` | a `count` above 16,777,216 (1,048,576 on `jennifer-tiny`) | `"limit"` |
+| `from*` / `set*` | an order other than `"le"` / `"be"`, a size outside the allowed set, a value outside the size's range (`fromUint("le", 256, 1)`, a negative unsigned), a float beyond the float32 range at size 4, a NaN or infinity, a `set*` span past the end of `b` or a negative offset, a list element of the wrong type | `"runtime"` |
+| `fromInts` / `fromFloats` | a result above 256 MiB (32 MiB on `jennifer-tiny`) | `"limit"` |
 | any | a wrong argument type (`binary.make("3")`), or the wrong number of arguments | `"runtime"` |
 
 ## Performance

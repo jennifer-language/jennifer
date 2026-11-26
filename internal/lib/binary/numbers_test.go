@@ -154,3 +154,30 @@ func TestReadNumberArgErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestWriteNumbersProgram: the writers from a program, through the checker's
+// signatures: a header built with from* and patched with set*, read back,
+// and a refusal caught as a runtime error.
+func TestWriteNumbersProgram(t *testing.T) {
+	out, err := runProg(t, `use io; use binary;
+		def h as bytes init binary.concat(binary.fromUint("be", 0x89504E47, 4), binary.make(4));
+		$h = binary.setUint("le", $h, 4, 513, 2);
+		$h = binary.setInt("le", $h, 6, -1, 1);
+		io.printf("%d %d %d %d\n", len($h), binary.readUint("be", $h, 0, 4), binary.readUint("le", $h, 4, 2), binary.readInt("le", $h, 6, 1));
+		io.printf("%v\n", binary.readInts("be", binary.fromInts("be", [-2, 300], 2), 0, 2, 2));
+		io.printf("%v\n", binary.readFloats("le", binary.fromFloats("le", [1.5, -0.25], 4), 0, 2, 4));
+		io.printf("%v\n", binary.readFloat("be", binary.setFloat("be", binary.fromFloat("be", 0.0, 8), 0, 2.5, 8), 0, 8));
+		try {
+			binary.fromUint("le", 256, 1);
+		} catch (e) {
+			io.printf("%s: %s\n", $e.kind, $e.message);
+		}
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "8 2303741511 513 -1\n[-2, 300]\n[1.5, -0.25]\n2.5\nruntime: binary.fromUint: value 256 is outside the 1-byte range [0, 255]\n"
+	if out != want {
+		t.Fatalf("got %q, want %q", out, want)
+	}
+}
