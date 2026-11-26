@@ -538,9 +538,9 @@ the length). The rule holds for every new name: the conventions survey lists
 these eleven as recorded exceptions, and anything else spelled like a keyword
 is a finding.
 
-## Two error kinds outside a module's own
+## Error kinds outside a module's own
 
-The catalogue asks a module to throw its own kind or a generic one. Two
+The catalogue asks a module to throw its own kind or a generic one. Three
 modules throw another, on purpose:
 
 - **`mcp`** throws `jsonrpc.RpcError` (kind `"jsonrpc"`) from its HTTP
@@ -550,6 +550,9 @@ modules throw another, on purpose:
 - **`pop`** throws `"pop3"` for the server's refusals and `"pop"` for its own
   guards, both as one `pop.PopError`. The protocol's name and the module's
   differ; both kinds were released, and a kind keeps its name.
+- **`s3presign`** throws `"s3"`, as its own `s3presign.S3Error`. It is the
+  local half of `s3` (M29.17): the same client and the same checks, so a
+  caller that moves a presign from `s3` to `s3presign` keeps its catch.
 
 ## Weak algorithms by name, never by default
 

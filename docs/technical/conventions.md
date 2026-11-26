@@ -2,8 +2,8 @@
 
 The rules behind [stance 8](../design-stances.md), "one convention
 everywhere": the same situation looks and behaves the same in every built-in
-library, bundled module and `@jennifer/*` deck. Decks of other scopes are
-outside the project; for them the catalogue is a recommendation, and a deck on
+library and bundled module. Decks are outside the project (the `@jennifer`
+decks moved to `@deckyard` in M29.55); for them the catalogue is a recommendation, and a deck on
 the shared CI layer gets its checks with the next sync. A reader who has learnt one
 library should be able to guess the next one; a reader who finds two libraries
 doing the same thing differently has found a bug.
@@ -34,7 +34,7 @@ recorded in [design-decisions.md](design-decisions.md) and named here.
 | Builders are value-semantic: they return the updated value, which the caller threads. | `$f = feed.add($f, $e);` | the language |
 | A result that holds no operating-system resource is an immutable value the garbage collector frees, not a handle into a registry with a `free`. | `json.Value`, `ml.Model` | review |
 | The zero value of an options struct is the safe default. `0` may mean "the default" only where the docs say so; a negative count or duration throws. | `def o as totp.Options;` | survey |
-| A wait has one of three shapes: an options field (`timeoutMs`) on a call that takes options, `xTimeout(ms)` for a blocking primitive, stream settings on a stream (a deadline, `setReadDeadline`, bounds the whole exchange; an idle timeout, `setIdleTimeout`, bounds a stall; with both, the first to pass fires). An options field's `0` is its default and `math.MAX_INT` none; a stream setting's `0` is none. An `xTimeout`'s `ms` is the wait itself: `0` checks once (polls), and on `"timeout"` the work keeps running. A negative or oversized value throws `"runtime"` everywhere. `time.sleep` takes a `time.Duration` (a length, not a bound): `0` returns at once, negative throws. | `net.connectWith(a, net.ConnectOptions{timeoutMs: 5000})`, `sql.openWith(d, dsn, sql.Options{queryTimeoutMs: 5000})`, `channel.recvTimeout`, `channel.selectTimeout`, `task.waitAllTimeout`, `os.waitTimeout`, `net.setReadDeadline`, `net.setIdleTimeout` | review |
+| A wait has one of three shapes: an options field (`timeoutMs`) on a call that takes options, `xTimeout(ms)` for a blocking primitive, stream settings on a stream (a deadline, `setReadDeadline`, bounds the whole exchange; an idle timeout, `setIdleTimeout`, bounds a stall; with both, the first to pass fires). An options field's `0` is its default and `math.MAX_INT` none; a stream setting's `0` is none. An `xTimeout`'s `ms` is the wait itself: `0` checks once (polls), and on `"timeout"` the work keeps running. A negative or oversized value throws `"runtime"` in the built-in libraries, the module's kind in modules. `time.sleep` takes a `time.Duration` (a length, not a bound): `0` returns at once, negative throws. | `net.connectWith(a, net.ConnectOptions{timeoutMs: 5000})`, `sql.openWith(d, dsn, sql.Options{queryTimeoutMs: 5000})`, `channel.recvTimeout`, `channel.selectTimeout`, `task.waitAllTimeout`, `os.waitTimeout`, `net.setReadDeadline`, `net.setIdleTimeout` | review |
 | Decimal rounding is half to even on the shortest decimal that reads back as the value, everywhere a number is rounded for output. | `%f\|prec`, `intl.formatNumber`, `decimal.round`'s default | per-library tests |
 | Text that comes from outside is returned as `string` only after UTF-8 validation (the error names the byte offset); binary data has a `bytes` form. | `fs.readString`, `os.runBytes`, `os.getEnv` / `getEnvBytes`, `os.ARGS` / `argsBytes()` | survey |
 | A search that finds nothing returns a "not found" value where its result type has one, and throws where it cannot (an element of any type has none to spare). | `lists.indexOf` -1, `regex.find`'s `Match` with `start` -1; `lists.find` throws | review |
@@ -48,7 +48,7 @@ for raising them.
 
 | Rule | Example | Checked by |
 |---|---|---|
-| Bad input data (decoding, parsing, decompressing, decrypting, verifying) throws the library's or module's own kind (`mcp` and `pop` are [recorded exceptions](design-decisions.md#two-error-kinds-outside-a-modules-own)). Misuse (wrong type, unknown algorithm name, wrong key length) is `"runtime"` in the built-in libraries, the module's kind elsewhere. | `"json"`, `"crypto"`, `"totp"` | survey; built-ins: each library's data kind in `internal/libsig` and its kind test |
+| Bad input data (decoding, parsing, decompressing, decrypting, verifying) throws the library's or module's own kind (`mcp`, `pop` and `s3presign` are [recorded exceptions](design-decisions.md#error-kinds-outside-a-modules-own)). Misuse (wrong type, unknown algorithm name, wrong key length) is `"runtime"` in the built-in libraries, the module's kind elsewhere. | `"json"`, `"crypto"`, `"totp"` | survey; built-ins: each library's data kind in `internal/libsig` and its kind test |
 | A situation every library shares has its generic kind: a reached cap `"limit"`, a deadline `"timeout"`, a closed handle or peer `"closed"`, a cancelled task `"cancelled"`, a network failure `"net"` (`net.NetError`). | `fs.readSecretBytes` over 1 MiB is `"limit"` | per-library tests |
 | An error that carries a server's status or codes is one exported struct for every throw of its kind (`kind` + `message` + fields), so its fields are safe to read once the kind matches. | `rest.HttpError`, `smtp.SmtpError`, `sql.SqlError` | lint L104; survey |
 | A wrapper that rewraps what it caught passes the generic kinds on unchanged (`throw $e;`). | | survey |
@@ -61,7 +61,7 @@ for raising them.
 | Rule | Example | Checked by |
 |---|---|---|
 | Every reader of outside data has a default cap on size, depth or count, which the caller can lower; reaching it is `"limit"`. | parser nesting caps, `net.readAll` | survey |
-| A caller-set cap is a field of an options struct taken by an `xWith` variant, never a positional argument: `0` is the default, a negative value throws `"runtime"`, `math.MAX_INT` is unlimited. A decoder's depth / node caps only lower the default. | `compress.unpackWith(f, b, compress.UnpackOptions{maxBytes: math.MAX_INT})`, `toml.decodeWith(s, toml.DecodeOptions{maxDepth: 32})` | review |
+| A caller-set cap is a field of an options struct taken by an `xWith` variant, never a positional argument: `0` is the default, a negative value throws (`"runtime"` in the built-in libraries, the module's kind in modules), `math.MAX_INT` is unlimited. A decoder's depth / node caps only lower the default, and a value above it throws `"runtime"`; `ml`'s hyper-parameters are cost caps, and a value past the ceiling is `"limit"`. | `compress.unpackWith(f, b, compress.UnpackOptions{maxBytes: math.MAX_INT})`, `toml.decodeWith(s, toml.DecodeOptions{maxDepth: 32})` | review |
 | Every network call has a default deadline, which the caller can change (`timeoutMs`). | | survey |
 | Credentials need TLS unless the caller opts out with `allowInsecureAuth` / `allowInsecureHttp` / `allowInsecure` (`sql.Options`); a loopback host or Unix socket is exempt. | `smtp`, `imap`, `webdav`, `sql` | survey |
 | Secrets are compared with `hash.equal` (constant time), drawn from `crypto` randomness, and read from files with `fs.readSecretBytes`. | | survey |
@@ -82,13 +82,13 @@ for raising them.
 
 The survey writes them to [conventions-findings.md](conventions-findings.md),
 one line per deviation, so the list shrinking is visible in its history. From
-the repository root of a workspace with the decks checked out beside it:
+the repository root:
 
 ```sh
-jennifer run scripts/conventions-survey.j ../decks/deck-discord ... \
-    > docs/technical/conventions-findings.md
+jennifer run scripts/conventions-survey.j > docs/technical/conventions-findings.md
 ```
 
-It names every `@jennifer/*` deck surveyed. Not yet surveyed mechanically:
-argument order, the kind of each data error (pending the per-library kind
-tests of M29.21), caps without `"limit"`, and the documentation rules.
+Not yet surveyed mechanically: argument order, the kind of each data error in
+modules (the built-ins' are tested since M29.21), caps without `"limit"`, an
+`xWith` that takes something other than one options struct, and the
+documentation rules.

@@ -122,7 +122,8 @@ def const EXCEPTIONS as list of string init [
     "asn1.null",
     # kinds outside a module's own, kept (design-decisions.md)
     "mcp:jsonrpc",
-    "pop:pop3"
+    "pop:pop3",
+    "s3presign:s3"
 ];
 
 # A name ending in one of these is a duration and needs its unit (Ms / Sec).
