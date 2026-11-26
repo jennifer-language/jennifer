@@ -1006,6 +1006,20 @@ func testFaceDrawsEveryScript() {
     testing.assertTrue(pdfHas(pdf.render($res.doc), "/ToUnicode"));
 }
 
+# A tab drawn with the space glyph records the space's code point, so the one
+# ToUnicode entry of that glyph keeps copying as a space.
+func testATabDrawnAsSpaceCopiesAsSpace() {
+    def o as PdfOptions init faceOpts();
+    $o.monoFace = $o.bodyFace;
+    def res as PdfResult init layoutPdf(tDoc([tCode("x\ty"), tPara("a b")]), $o);
+    def cps as list of int init [];
+    for (def gu in $res.doc.pages[0].glyphUses) {
+        $cps[] = $gu.cp;
+    }
+    testing.assertContains($cps, 32);
+    testing.assertFalse(lists.contains($cps, 9));
+}
+
 # Widths come from the face's advances, exactly as pdf.measureTextUnicode
 # measures them.
 func testFaceWidthsMatchTheFace() {

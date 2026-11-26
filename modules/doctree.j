@@ -2693,7 +2693,10 @@ func pickRole(
         }
         def pk as int init pickOne($chain, $i, $at, $glyphs, $enc);
         if ($pk >= 0) {
-            $pk = $pk + $cp * PICK_CP;
+            # The code point the glyph stands for: one glyph id has one
+            # ToUnicode entry, so a tab drawn as the space glyph must not
+            # claim it (every space would copy as a tab).
+            $pk = $pk + $cps[$at] * PICK_CP;
         }
         $pick[$chars[$i]] = $pk;
     }
