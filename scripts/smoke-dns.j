@@ -59,7 +59,7 @@ def server as task of int init spawn {
 
 def got as list of string init net.lookupWith(
     "example.test",
-    net.ConnectOptions{dnsServers: [$addr], timeoutMs: 20000});
+    net.LookupOptions{dnsServers: [$addr], timeoutMs: 20000});
 task.wait($server);
 net.close($sock);
 if (len($got) != 1 or $got[0] != "192.0.2.7") {

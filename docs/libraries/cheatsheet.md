@@ -295,13 +295,13 @@ library prefix links to the per-library doc, which is authoritative.
 | [`net`](net.md)`.listen(address)`                     | Bind TCP `"host:port"` (use `":0"` for ephemeral). Returns a `net.Listener`.                                                        |
 | [`net`](net.md)`.listenUDP(address)`                  | Bind a UDP socket. Returns a `net.UDPSocket`; usable as both client and server.                                                     |
 | [`net`](net.md)`.lookup(host)` | DNS: resolve `host` to a `list of string` IPs, within the default 30 s. |
-| [`net`](net.md)`.lookupWith(host, net.ConnectOptions)` | `lookup` within the options' `timeoutMs`; with `dnsServers`, ask those DNS servers only (no hosts file, no search list). |
+| [`net`](net.md)`.lookupWith(host, net.LookupOptions)` | `lookup` within the options' `timeoutMs`; with `dnsServers`, ask those DNS servers only (no hosts file, no search list). |
 | [`net`](net.md)`.readAll($conn [, maxBytes])` | Read to EOF, returning the whole stream as one `bytes` in a single Go loop (whole-body / object download). `maxBytes>0` caps (catchable). |
 | [`net`](net.md)`.readBytes($conn, n)`                 | Read up to `n` bytes; blocks for at least one byte. Empty `bytes` once the peer closed (sticky EOF).                                |
 | [`net`](net.md)`.readN($conn, n)` | Read **exactly** `n` bytes for a length-prefixed frame; a close before `n` bytes is a catchable error, not a truncated return. |
 | [`net`](net.md)`.recvFrom($sock, n)`                  | Block for one UDP datagram, up to `n` bytes. Returns `net.Datagram{data, peer, truncated}` (`truncated`: it was longer than `n`). |
 | [`net`](net.md)`.reverseLookup(ip)`                   | Reverse DNS: IP address to a `list of string` of hostnames.                                                                         |
-| [`net`](net.md)`.reverseLookupWith(ip, net.ConnectOptions)` | `reverseLookup` within the options' `timeoutMs`. |
+| [`net`](net.md)`.reverseLookupWith(ip, net.LookupOptions)` | `reverseLookup` within the options' `timeoutMs`. |
 | [`net`](net.md)`.sendTo($sock, peer, bytes)`          | Send one UDP datagram to `peer` (`"host:port"`).                                                                                    |
 | [`net`](net.md)`.setBroadcast($sock, on)`             | Enable/disable `SO_BROADCAST` so a `sendTo` may target a broadcast address. Off by default; Linux/Unix only.                         |
 | [`net`](net.md)`.bindToDevice($sock, iface)`          | Pin a UDP socket's egress/ingress to one interface via `SO_BINDTODEVICE` (`""` clears). The multi-homed-host fix a wildcard bind can't give. Linux-only; unprivileged on 5.7+ for an unbound socket, else `CAP_NET_RAW`. |
@@ -472,7 +472,7 @@ library prefix links to the per-library doc, which is authoritative.
 | [`strings`](strings.md)`.trimPrefix(s, prefix)` / `.trimSuffix(s, suffix)` | `s` without the exact affix, removed once; `s` unchanged when it does not carry it.                       |
 | [`strings`](strings.md)`.trimSet(s, cutset)` / `.trimLeftSet` / `.trimRightSet` | Strip leading and/or trailing runes that occur in `cutset` (`trimRightSet("1.500", "0")` -> `1.5`).   |
 | [`strings`](strings.md)`.upper(s)`                    | Uppercase `s` (Unicode-aware).                                                                                                      |
-| [`task`](task.md)`.allocated()`                       | Bytes the calling task's allocation budget has counted (0 without one).                                                              |
+| [`task`](task.md)`.allocatedBytes()`                  | Bytes the calling task's allocation budget has counted (0 without one).                                                              |
 | [`task`](task.md)`.cancel($t)`                        | Request cooperative cancellation of `$t`; the body stops at its next loop checkpoint. Non-blocking.                                 |
 | [`task`](task.md)`.cancelled()`                       | Non-raising poll: true if the current spawn body has been cancelled (false on main).                                                |
 | [`task`](task.md)`.discard($t)`                       | Mark a `task of T` fire-and-forget; suppresses exit-time loud-fail. Returns null.                                                   |

@@ -498,7 +498,7 @@ its allocations (copies at every level, appends, growing writes, string `+` and
 interpolation, literals, estimated builtin results; cumulative); past `bytes`
 the next one throws a catchable `Error{kind: "limit"}` in that task only.
 Spawned tasks share the budget; a second call changes the limit, keeps the
-count; `math.MAX_INT` lifts it; 0 / negative throws. `task.allocated()` reads
+count; `math.MAX_INT` lifts it; 0 / negative throws. `task.allocatedBytes()` reads
 the count. Off unless set.
 
 **Channels.** `channel of T` streams values between goroutines.
@@ -814,7 +814,7 @@ replacement at each call.
   = logical position), polling `watch(path)`/`watchWith(path,
   WatchOptions{intervalMs})` -> `Watcher` (`next hasEvent close`).
 - **`net`** `[full]` - TCP `connect(addr)`/`connectWith(addr,
-  ConnectOptions{timeoutMs, tls, tlsOptions, dnsServers})`/`listen accept
+  ConnectOptions{timeoutMs, tls, tlsOptions})`/`listen accept
   readBytes` (empty once the peer closed)/`writeBytes readAll readN` (>256 MiB
   per call: `"limit"`, also `recvFrom`). `timeoutMs` (0=30 s) bounds connect +
   handshake or a lookup, never later reads; for streams `setReadDeadline
@@ -825,8 +825,8 @@ replacement at each call.
   TLSOptions])`/`startTLS(conn[, TLSOptions])`/`startTLSWith(conn,
   ConnectOptions)` (`TLSOptions{skipVerify, caCert}`); UDP `listenUDP sendTo`/
   `recvFrom -> Datagram{data, peer, truncated}`/`setBroadcast bindToDevice`;
-  DNS `lookup reverseLookup lookupWith reverseLookupWith` (`dnsServers` `"ip"`/
-  `"ip:port"`: only those); `close address`. Resolver: `$JENNIFER_RESOLV_CONF`/
+  DNS `lookup reverseLookup lookupWith reverseLookupWith` (`LookupOptions{
+  timeoutMs, dnsServers}`; `dnsServers` `"ip"`/`"ip:port"`: only those); `close address`. Resolver: `$JENNIFER_RESOLV_CONF`/
   `$JENNIFER_HOSTS`, else `<PREFIX>/etc`, `/etc`. Details:
   https://docs.jennifer-lang.dev/libraries/net.html
 - **`regex`** - RE2: `matches find findAll replace split escape`; `Match{text,
@@ -1301,7 +1301,7 @@ copy), then `NAME.fn(...)` / `NAME.Struct`. Conventions for every entry:
   body}`, `handler(req as Request{version, action, headers, body})` returns the
   result element, `senderFault(reason)`, `requestAction(contentType,
   soapAction)`; codec `envelope parse`/`parseFault -> Fault`/
-  `faultEnvelope`. WSDL 1.1: `parseWsdl(text)`/`parseWsdlWith(text, imports)`
+  `faultEnvelope`. WSDL 1.1: `parseWsdl(text)`/`parseWsdlWith(text, WsdlOptions{imports, maxDocuments})`
   -> `Wsdl{ports, bindings}`, `wsdlCall(w, op)`/`wsdlCallAt(w, port, op)`/
   `wsdlCallTo(w, address, op)` -> `WsdlCall{address, version, operation}`,
   `wsdlConnect(target)`, `wsdlRequest(target, params)`. Details:

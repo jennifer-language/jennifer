@@ -80,7 +80,7 @@ func small(ctx as web.Context) {
     for (def i in 0..100) {
         $xs[] = $i;
     }
-    web.text($ctx, 200, convert.toString(len($xs)) + " " + convert.toString(task.allocated() > 0));
+    web.text($ctx, 200, convert.toString(len($xs)) + " " + convert.toString(task.allocatedBytes() > 0));
 }
 
 func echoForm(ctx as web.Context) {

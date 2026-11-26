@@ -32,7 +32,7 @@ io.printf("%d\n", $n);                      # 2
 | `task.waitAnyTimeout($ts, ms)`  | `int`           | Like `task.waitAny`, but throws a catchable `Error{kind: "timeout"}` if none finishes in `ms`. |
 | `task.waitAllTimeout($ts, ms)`  | `list of T`     | Like `task.waitAll`, but throws a catchable `Error{kind: "timeout"}` if not all finish in `ms`; the tasks keep running. |
 | `task.setAllocBudget(bytes)`    | `null`          | Give the calling task an allocation budget (see "Allocation budget"); `math.MAX_INT` lifts the limit. |
-| `task.allocated()`              | `int`           | Bytes counted so far by the calling task's budget; `0` without one. |
+| `task.allocatedBytes()`              | `int`           | Bytes counted so far by the calling task's budget; `0` without one. |
 
 `task.wait` is the core call; the rest are conveniences or
 non-blocking variants. More complex patterns compose from these.
@@ -265,7 +265,7 @@ def t as task of int init spawn {
 | A second call | Changes the limit and keeps the count; `math.MAX_INT` lifts the limit, the count goes on |
 | `0` or negative | Throws (kind `"runtime"`) |
 | Spawned tasks | A task spawned by a task with a budget shares it (count and limit); a task without one spawns tasks without one |
-| Nested | A task that sets a budget while running under one it inherited gets its own, nested: its bytes count toward both, either limit throws, and `task.allocated()` reads its own |
+| Nested | A task that sets a budget while running under one it inherited gets its own, nested: its bytes count toward both, either limit throws, and `task.allocatedBytes()` reads its own |
 | After a throw | The task gets 1 MiB of room to handle the error (log, answer); one that keeps allocating throws again |
 | Without a budget | Nothing is counted; the cost is one pointer check per counted operation |
 
@@ -273,7 +273,7 @@ The count is an estimate taken where the interpreter can see the value, not a
 measurement of the Go heap: a builtin that allocates a large buffer and returns
 a small value is counted by its result, and one huge allocation is counted
 after it is made (the library caps, kind `"limit"` as well, bound those). Size
-a budget from `task.allocated()` logged by a representative run, with headroom.
+a budget from `task.allocatedBytes()` logged by a representative run, with headroom.
 The `web` module sets one per request with
 [`web.allocBudget`](../modules/web.md#memory-per-request).
 

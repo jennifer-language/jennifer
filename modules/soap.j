@@ -1500,6 +1500,17 @@ def const HTTP_TRANSPORTS as list of string init [
 export def const MAX_WSDL_DOCUMENTS as int init 32;
 
 /**
+ * What `parseWsdlWith` reads besides the WSDL. The zero value reads no import
+ * and keeps the default document cap.
+ * @field imports {map of string to string} `wsdl:import` location to that document's text, read by the caller
+ * @field maxDocuments {int} documents read at most, the WSDL included: 0 is `MAX_WSDL_DOCUMENTS`, which a value may only lower
+ */
+export def struct WsdlOptions {
+    imports as map of string to string,
+    maxDocuments as int
+};
+
+/**
  * One part of a WSDL message: the schema element (document style) or type
  * (rpc style) it carries.
  *
@@ -2254,29 +2265,40 @@ func assemble(docs as list of WsdlDoc) {
  * @throws {Error} kind `"limit"` for a document past `xml`'s decoding caps
  */
 export func parseWsdl(text as string) {
-    return parseWsdlWith($text, {});
+    def o as WsdlOptions;
+    return parseWsdlWith($text, $o);
 }
 
 /**
  * Read a WSDL 1.1 description and the WSDL documents it imports. Nothing is
- * fetched: `imports` maps each `wsdl:import` `location` to that document's
+ * fetched: `o.imports` maps each `wsdl:import` `location` to that document's
  * text, read by the caller. An import of an import is looked up in the same
  * map; each location, and each document text, is read once, so an import back
  * to the importing document is no error. XML Schema imports (`xs:import`) are not
  * followed: the parts name their elements and types, not their contents.
  *
  * @param text {string} the WSDL document
- * @param imports {map of string to string} location to document text
+ * @param o {WsdlOptions} the imported documents and the document cap
  * @return {Wsdl} the SOAP ports and bindings of all the documents
  * @throws {SoapError} kind `"soap"` on malformed XML, a DOCTYPE, a root that is
  *   not WSDL 1.1 `definitions` (WSDL 2.0 is refused by name), a missing or
  *   malformed required attribute, an undeclared prefix, a name defined twice,
  *   an overloaded operation, a reference to an undefined message, port type or
- *   binding, a style other than document or rpc, or an import not in `imports`
- * @throws {Error} kind `"limit"` past `MAX_WSDL_DOCUMENTS` documents or `xml`'s
+ *   binding, a style other than document or rpc, an import not in `o.imports`,
+ *   or a `maxDocuments` below 0 or above `MAX_WSDL_DOCUMENTS`
+ * @throws {Error} kind `"limit"` past `maxDocuments` documents or `xml`'s
  *   decoding caps
  */
-export func parseWsdlWith(text as string, imports as map of string to string) {
+export func parseWsdlWith(text as string, o as WsdlOptions) {
+    def maxDocs as int init $o.maxDocuments;
+    if ($maxDocs < 0 or $maxDocs > MAX_WSDL_DOCUMENTS) {
+        fail("parseWsdlWith: maxDocuments must be 0 to " + convert.toString(MAX_WSDL_DOCUMENTS) +
+            " (0 = " + convert.toString(MAX_WSDL_DOCUMENTS) + "), got " + convert.toString($maxDocs));
+    }
+    if ($maxDocs == 0) {
+        $maxDocs = MAX_WSDL_DOCUMENTS;
+    }
+    def imports as map of string to string init $o.imports;
     def docs as list of WsdlDoc init [readWsdlDoc(wsdlRoot($text))];
     def seen as map of string to bool init {};
     # The texts read, so a document imported back (the root has no location of
@@ -2292,16 +2314,16 @@ export func parseWsdlWith(text as string, imports as map of string to string) {
             $seen[$location] = true;
             if (not maps.has($imports, $location)) {
                 fail("the WSDL imports " + shown($location) + "; pass that document in " +
-                    "parseWsdlWith's imports");
+                    "WsdlOptions.imports");
             }
             if (maps.has($texts, $imports[$location])) {
                 continue;
             }
             $texts[$imports[$location]] = true;
-            if (len($docs) >= MAX_WSDL_DOCUMENTS) {
+            if (len($docs) >= $maxDocs) {
                 throw Error{
                     kind: "limit",
-                    message: "soap: a WSDL reads at most " + convert.toString(MAX_WSDL_DOCUMENTS) +
+                    message: "soap: a WSDL reads at most " + convert.toString($maxDocs) +
                         " documents"
                 };
             }

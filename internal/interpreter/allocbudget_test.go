@@ -68,7 +68,7 @@ func TestAllocBudgetSiblingUnaffected(t *testing.T) {
 		def b as task of string init spawn {
 			def xs as list of int init [];
 			for (def i in 0..100000) { $xs[] = $i; }
-			return "built " + convert.toString(len($xs)) + " counted " + convert.toString(task.allocated());
+			return "built " + convert.toString(len($xs)) + " counted " + convert.toString(task.allocatedBytes());
 		};
 		use convert;
 		io.printf("%s / %s", task.wait($a), task.wait($b));
@@ -85,7 +85,7 @@ func TestAllocBudgetSpawnedChildShares(t *testing.T) {
 		use io;
 		use task;
 		task.setAllocBudget(50000);
-		def before as int init task.allocated();
+		def before as int init task.allocatedBytes();
 		def c as task of string init spawn {
 			def xs as list of int init [];
 			try {
@@ -95,7 +95,7 @@ func TestAllocBudgetSpawnedChildShares(t *testing.T) {
 			}
 			return "no trip";
 		};
-		io.printf("%s %t", task.wait($c), task.allocated() > 50000 + $before);
+		io.printf("%s %t", task.wait($c), task.allocatedBytes() > 50000 + $before);
 	`)
 	if out != "limit true" {
 		t.Fatalf("got %q", out)
@@ -114,12 +114,12 @@ func TestAllocBudgetMaxIntLiftsAndKeepsCount(t *testing.T) {
 		task.setAllocBudget(1000000);
 		def xs as list of int init [];
 		for (def i in 0..100) { $xs[] = $i; }
-		def n1 as int init task.allocated();
+		def n1 as int init task.allocatedBytes();
 		task.setAllocBudget(2000000);
-		def n2 as int init task.allocated();
+		def n2 as int init task.allocatedBytes();
 		task.setAllocBudget(math.MAX_INT);
 		for (def i in 0..100000) { $xs[] = $i; }
-		io.printf("%t %t %t", $n1 > 0, $n1 == $n2, task.allocated() > 3000000);
+		io.printf("%t %t %t", $n1 > 0, $n1 == $n2, task.allocatedBytes() > 3000000);
 	`)
 	if out != "true true true" {
 		t.Fatalf("got %q", out)
@@ -159,7 +159,7 @@ func TestAllocBudgetRejectsZeroAndNegative(t *testing.T) {
 				io.printf("%s: %s\n", $e.kind, $e.message);
 			}
 		}
-		io.printf("%d", task.allocated());
+		io.printf("%d", task.allocatedBytes());
 	`)
 	want := "runtime: task.setAllocBudget: bytes must be > 0 (math.MAX_INT for no limit), got 0\n" +
 		"runtime: task.setAllocBudget: bytes must be > 0 (math.MAX_INT for no limit), got -1\n0"
@@ -180,7 +180,7 @@ func TestAllocBudgetNoneCountsNothing(t *testing.T) {
 			$s = $s + "ab";
 			$xs[] = strings.replicate("x", 100);
 		}
-		io.printf("%d", task.allocated());
+		io.printf("%d", task.allocatedBytes());
 	`)
 	if out != "0" {
 		t.Fatalf("got %q", out)
@@ -231,7 +231,7 @@ func TestAllocBudgetChargedOperations(t *testing.T) {
 				def grid as list of list of int init [[]];
 				def i as int init 0;
 				task.setAllocBudget(200000);
-				def start as int init task.allocated();
+				def start as int init task.allocatedBytes();
 				try {
 					while (true) {
 						` + op + `
@@ -273,7 +273,7 @@ func TestAllocBudgetRaisesAgainAfterRecovery(t *testing.T) {
 }
 
 // A task that sets a budget under an inherited one nests it: its bytes count
-// toward both, the outer limit still holds, and allocated() reads its own.
+// toward both, the outer limit still holds, and allocatedBytes() reads its own.
 func TestAllocBudgetNestedUnderInherited(t *testing.T) {
 	out := runBudget(t, `
 		use io;
@@ -281,7 +281,7 @@ func TestAllocBudgetNestedUnderInherited(t *testing.T) {
 		task.setAllocBudget(60000);
 		def c as task of string init spawn {
 			task.setAllocBudget(1000000000);
-			def own as int init task.allocated();
+			def own as int init task.allocatedBytes();
 			def xs as list of int init [];
 			try {
 				while (true) { $xs[] = 1; }
@@ -343,13 +343,13 @@ func TestAllocBudgetChargesDeepCopiesInFull(t *testing.T) {
 		for (def i in 0..50) { $recs[] = Rec{id: $i, vals: 0..40}; }
 		def b as list of list of int init [[1, 2, 3], [4, 5, 6]];
 		task.setAllocBudget(1000000000);
-		def n0 as int init task.allocated();
+		def n0 as int init task.allocatedBytes();
 		def c as list of Rec init $recs;
-		def n1 as int init task.allocated();
+		def n1 as int init task.allocatedBytes();
 		def l as list of list of list of int init [$b, $b];
-		def n2 as int init task.allocated();
+		def n2 as int init task.allocatedBytes();
 		def x as Box init Box{rows: $b};
-		def n3 as int init task.allocated();
+		def n3 as int init task.allocatedBytes();
 		io.printf("%d %d %d", $n1 - $n0, $n2 - $n1, $n3 - $n2);
 	`)
 	cell := int(unsafe.Sizeof(interpreter.Value{}))
@@ -375,7 +375,7 @@ func TestAllocBudgetDeepCopiesTrip(t *testing.T) {
 		def keep as list of list of Rec;
 		try {
 			for (def k in 0..20) { def c as list of Rec init $recs; $keep[] = $c; }
-			io.printf("no trip at %d", task.allocated());
+			io.printf("no trip at %d", task.allocatedBytes());
 		} catch (e) {
 			io.printf("%s %d", $e.kind, len($keep));
 		}

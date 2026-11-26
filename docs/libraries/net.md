@@ -198,17 +198,20 @@ arrived yet" (`timeout`), "we closed it" (`closed`) and "the network failed"
 
 ### Connect options
 
-`net.connectWith(address, net.ConnectOptions)`, `net.startTLSWith($conn,
-net.ConnectOptions)`, `net.lookupWith(host, net.ConnectOptions)` and
-`net.reverseLookupWith(ip, net.ConnectOptions)` take one options struct; its
-zero value is the plain call (`connect`, `startTLS`, `lookup`,
-`reverseLookup`).
+`net.connectWith(address, net.ConnectOptions)` and `net.startTLSWith($conn,
+net.ConnectOptions)` take a `ConnectOptions`, `net.lookupWith(host,
+net.LookupOptions)` and `net.reverseLookupWith(ip, net.LookupOptions)` a
+`LookupOptions`; the zero value is the plain call (`connect`, `startTLS`,
+`lookup`, `reverseLookup`).
 
 ```text
 def struct net.ConnectOptions {
-    timeoutMs as int,           # bound on the connect, the TLS handshake or the lookup
+    timeoutMs as int,           # bound on the connect and the TLS handshake
     tls as bool,                # connectWith: TLS handshake on connect (as connectTLS)
-    tlsOptions as net.TLSOptions,
+    tlsOptions as net.TLSOptions
+};
+def struct net.LookupOptions {
+    timeoutMs as int,           # bound on the lookup
     dnsServers as list of string # lookupWith: ask these DNS servers only
 };
 ```
@@ -216,9 +219,9 @@ def struct net.ConnectOptions {
 | Field | Zero value | Read by | Notes |
 | --- | --- | --- | --- |
 | `timeoutMs` | the default, 30000 (30 s) | all four | `math.MAX_INT` is no deadline; a negative value throws `"runtime"`. A deadline past is kind `"timeout"`. |
-| `tls` | `false`: plaintext | `connectWith` | `startTLSWith` ignores it (the call is the request for TLS); the lookups ignore it. |
-| `tlsOptions` | verify against the system roots | `connectWith` with `tls`, `startTLSWith` | See [`net.TLSOptions`](#nettlsoptions). |
-| `dnsServers` | `[]`: the [configured resolver](#resolver-configuration) (hosts file, then the resolv.conf nameservers, with the search list) | `lookupWith` | Each entry is `"ip"` or `"ip:port"` (port 53 by default); at most 16. `lookupWith` asks only these, each in turn (UDP, TCP when the answer is truncated, at most 5 s each, all within `timeoutMs`): no hosts file, no search list, the IPv4 addresses then the IPv6 ones. A host name instead of an address, or more than 16 entries, throws `"runtime"` in every call that takes the options. `connectWith`, `startTLSWith` and `reverseLookupWith` ignore it and resolve through the configured resolver. |
+| `ConnectOptions.tls` | `false`: plaintext | `connectWith` | `startTLSWith` ignores it (the call is the request for TLS). |
+| `ConnectOptions.tlsOptions` | verify against the system roots | `connectWith` with `tls`, `startTLSWith` | See [`net.TLSOptions`](#nettlsoptions). |
+| `LookupOptions.dnsServers` | `[]`: the [configured resolver](#resolver-configuration) (hosts file, then the resolv.conf nameservers, with the search list) | `lookupWith` | Each entry is `"ip"` or `"ip:port"` (port 53 by default); at most 16. `lookupWith` asks only these, each in turn (UDP, TCP when the answer is truncated, at most 5 s each, all within `timeoutMs`): no hosts file, no search list, the IPv4 addresses then the IPv6 ones. A host name instead of an address, or more than 16 entries, throws `"runtime"`. `reverseLookupWith` asks the configured resolver and throws `"runtime"` for a non-empty list. |
 
 The deadline bounds the connect together with its TLS handshake, a
 `startTLS` handshake, or a lookup; it never carries over to the reads and
@@ -391,9 +394,9 @@ A client binds to `:0` (kernel picks a port) and sends to the remote peer.
 | Call                             | Returns          | Notes                                                                     |
 | -------------------------------- | ---------------- | ------------------------------------------------------------------------- |
 | `net.lookup(host)`               | `list of string` | Resolve `host` to a list of IP addresses (v4 and v6 mixed), within the default 30 s. |
-| `net.lookupWith(host, net.ConnectOptions)` | `list of string` | `lookup` within the options' `timeoutMs`; with `dnsServers`, ask those DNS servers only (no hosts file, no search list, the IPv4 addresses then the IPv6 ones). `tls` and `tlsOptions` are ignored. |
+| `net.lookupWith(host, net.LookupOptions)` | `list of string` | `lookup` within the options' `timeoutMs`; with `dnsServers`, ask those DNS servers only (no hosts file, no search list, the IPv4 addresses then the IPv6 ones). `tls` and `tlsOptions` are ignored. |
 | `net.reverseLookup(ip)`          | `list of string` | Reverse DNS: IP address to a list of hostnames, within the default 30 s. |
-| `net.reverseLookupWith(ip, net.ConnectOptions)` | `list of string` | `reverseLookup` within the options' `timeoutMs`, through the configured resolver; the other fields are ignored. |
+| `net.reverseLookupWith(ip, net.LookupOptions)` | `list of string` | `reverseLookup` within the options' `timeoutMs`, through the configured resolver; a non-empty `dnsServers` throws `"runtime"`. |
 
 ```jennifer
 use io;
@@ -417,7 +420,7 @@ use net;
 
 # What does this server answer?
 def ips as list of string init net.lookupWith("intranet.example",
-    net.ConnectOptions{dnsServers: ["192.0.2.53", "[2001:db8::53]:5353"], timeoutMs: 2000});
+    net.LookupOptions{dnsServers: ["192.0.2.53", "[2001:db8::53]:5353"], timeoutMs: 2000});
 io.printf("%v\n", $ips);
 ```
 

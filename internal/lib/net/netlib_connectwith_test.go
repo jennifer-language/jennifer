@@ -166,7 +166,7 @@ func TestDefaultDeadlineEndsWithHandshake(t *testing.T) {
 func TestConnectWithNegativeTimeoutThrows(t *testing.T) {
 	for _, body := range []string{
 		`def c as net.Conn init net.connectWith("127.0.0.1:1", net.ConnectOptions{timeoutMs: -1});`,
-		`def a as list of string init net.lookupWith("localhost", net.ConnectOptions{timeoutMs: -5});`,
+		`def a as list of string init net.lookupWith("localhost", net.LookupOptions{timeoutMs: -5});`,
 		`def c as net.Conn init net.connect("127.0.0.1:1", -1);`,
 	} {
 		if got := kindOf(t, body); got != "runtime" {
@@ -214,10 +214,10 @@ func TestLookupWith(t *testing.T) {
 	out, err := runProg(t, `
 		use io;
 		use net;
-		def o as net.ConnectOptions init net.ConnectOptions{timeoutMs: 5000};
+		def o as net.LookupOptions init net.LookupOptions{timeoutMs: 5000};
 		def a as list of string init net.lookupWith("localhost", $o);
 		io.printf("%d;", len($a));
-		def b as list of string init net.lookupWith("localhost", net.ConnectOptions{});
+		def b as list of string init net.lookupWith("localhost", net.LookupOptions{});
 		io.printf("%d", len($b));
 	`)
 	if err != nil {
@@ -226,7 +226,7 @@ func TestLookupWith(t *testing.T) {
 	if out == "" || strings.HasPrefix(out, "0;") || strings.HasSuffix(out, ";0") {
 		t.Fatalf("got %q, want two non-zero counts", out)
 	}
-	if got := kindOf(t, `def n as list of string init net.reverseLookupWith("127.0.0.1", net.ConnectOptions{timeoutMs: 5000});`); got != "ok" && got != "net" {
+	if got := kindOf(t, `def n as list of string init net.reverseLookupWith("127.0.0.1", net.LookupOptions{timeoutMs: 5000});`); got != "ok" && got != "net" {
 		t.Fatalf("reverseLookupWith kind = %q, want ok (or net without a PTR record)", got)
 	}
 }
@@ -237,7 +237,7 @@ func TestLookupTimesOut(t *testing.T) {
 	netlib.SetStalledResolverForTest(t)
 	netlib.SetDefaultTimeoutForTest(t, 200*time.Millisecond)
 	for _, body := range []string{
-		`def a as list of string init net.lookupWith("stalled.jennifer-lang.dev", net.ConnectOptions{timeoutMs: 200});`,
+		`def a as list of string init net.lookupWith("stalled.jennifer-lang.dev", net.LookupOptions{timeoutMs: 200});`,
 		`def a as list of string init net.lookup("stalled.jennifer-lang.dev");`,
 		`def a as list of string init net.reverseLookup("192.0.2.7");`,
 	} {

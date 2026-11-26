@@ -74,7 +74,7 @@ def server as task of int init spawn {
     return 0;
 };
 
-def got as list of string init net.lookupWith("example.test", net.ConnectOptions{dnsServers: [%q], timeoutMs: 5000});
+def got as list of string init net.lookupWith("example.test", net.LookupOptions{dnsServers: [%q], timeoutMs: 5000});
 task.wait($server);
 net.close($sock);
 io.printf("%%v\n", $got);
@@ -106,17 +106,17 @@ func TestLookupWithDNSServersErrors(t *testing.T) {
 use io;
 use net;
 try {
-    net.lookupWith("example.test", net.ConnectOptions{dnsServers: [%q], timeoutMs: 200});
+    net.lookupWith("example.test", net.LookupOptions{dnsServers: [%q], timeoutMs: 200});
 } catch (e) {
     io.printf("%%s\n", $e.kind);
 }
 try {
-    net.lookupWith("example.test", net.ConnectOptions{dnsServers: ["dns.example"]});
+    net.lookupWith("example.test", net.LookupOptions{dnsServers: ["dns.example"]});
 } catch (e) {
     io.printf("%%s: %%s\n", $e.kind, $e.message);
 }
 try {
-    net.lookupWith("example.test", net.ConnectOptions{dnsServers: [%q], timeoutMs: -1});
+    net.lookupWith("example.test", net.LookupOptions{dnsServers: [%q], timeoutMs: -1});
 } catch (e) {
     io.printf("%%s\n", $e.kind);
 }
@@ -125,18 +125,18 @@ for (def i in 0..17) {
     $many[] = "127.0.0.1";
 }
 try {
-    net.lookupWith("example.test", net.ConnectOptions{dnsServers: $many});
+    net.lookupWith("example.test", net.LookupOptions{dnsServers: $many});
 } catch (e) {
     io.printf("%%s: %%s\n", $e.kind, $e.message);
 }
-io.printf("%%v\n", net.lookupWith("192.0.2.1", net.ConnectOptions{dnsServers: ["127.0.0.1"]}));
+io.printf("%%v\n", net.lookupWith("192.0.2.1", net.LookupOptions{dnsServers: ["127.0.0.1"]}));
 io.printf("%%v\n", net.lookup("127.0.0.1"));
 `, silent.LocalAddr().String(), silent.LocalAddr().String()))
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
 	want := []string{"timeout", "runtime: net.lookupWith: a DNS server is an IP address", "runtime",
-		"runtime: net.lookupWith: net.ConnectOptions.dnsServers names 17 servers, at most 16", `["192.0.2.1"]`, `["127.0.0.1"]`}
+		"runtime: net.lookupWith: net.LookupOptions.dnsServers names 17 servers, at most 16", `["192.0.2.1"]`, `["127.0.0.1"]`}
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if len(lines) != len(want) {
 		t.Fatalf("output %q", out)
@@ -173,5 +173,17 @@ try {
 		if !strings.Contains(out, want) {
 			t.Errorf("output %q lacks %q", out, want)
 		}
+	}
+}
+
+// reverseLookupWith asks the configured resolver only, so a dnsServers list is
+// refused rather than ignored.
+func TestReverseLookupWithRefusesDNSServers(t *testing.T) {
+	_, err := runProg(t, `
+		use net;
+		def n as list of string init net.reverseLookupWith("127.0.0.1", net.LookupOptions{dnsServers: ["127.0.0.1"]});
+	`)
+	if err == nil || !strings.Contains(err.Error(), "dnsServers is not supported") {
+		t.Fatalf("got %v", err)
 	}
 }

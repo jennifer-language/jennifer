@@ -401,22 +401,22 @@ export func onServerError(app as App, handler as func) {
  * the other requests are unaffected. The count is cumulative (bytes allocated,
  * not live), see `task.setAllocBudget`. `math.MAX_INT` removes the budget.
  * @param app {App} the router to extend
- * @param limit {int} the budget per request in bytes, > 0 (`math.MAX_INT` for none)
+ * @param maxBytes {int} the budget per request in bytes, > 0 (`math.MAX_INT` for none)
  * @return {App} a new App with the budget set
- * @throws {WebError} kind "web", status 500, for 0 or a negative `limit`
+ * @throws {WebError} kind "web", status 500, for 0 or a negative `maxBytes`
  */
-export func allocBudget(app as App, limit as int) {
-    if ($limit <= 0) {
+export func allocBudget(app as App, maxBytes as int) {
+    if ($maxBytes <= 0) {
         throw WebError{
             kind: "web",
-            message: "web.allocBudget: limit must be > 0 (math.MAX_INT for no budget), got " +
-                convert.toString($limit),
+            message: "web.allocBudget: maxBytes must be > 0 (math.MAX_INT for no budget), got " +
+                convert.toString($maxBytes),
             status: 500
         };
     }
     def out as App init $app;
-    $out.allocBudget = $limit;
-    if ($limit == math.MAX_INT) {
+    $out.allocBudget = $maxBytes;
+    if ($maxBytes == math.MAX_INT) {
         $out.allocBudget = 0;
     }
     return $out;
@@ -426,7 +426,7 @@ export func allocBudget(app as App, limit as int) {
 # (web.allocBudget) has been passed, which tells a "limit" the budget raised
 # while a body parser ran from a request body past the parser's cap (413).
 func overBudget(app as App) {
-    return $app.allocBudget > 0 and task.allocated() > $app.allocBudget;
+    return $app.allocBudget > 0 and task.allocatedBytes() > $app.allocBudget;
 }
 
 # --- request / response helpers (on a Context) ------------------------------

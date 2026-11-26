@@ -397,10 +397,10 @@ type dialOptions struct {
 	tls        bool
 	skipVerify bool
 	caCert     []byte
-	dnsServers []string // host:port; only lookupWith asks them
+	dnsServers []string // host:port, from a LookupOptions
 }
 
-// maxDNSServers bounds ConnectOptions.dnsServers: each is tried in turn, so a
+// maxDNSServers bounds LookupOptions.dnsServers: each is tried in turn, so a
 // long list only multiplies the wait.
 const maxDNSServers = 16
 
@@ -432,6 +432,30 @@ func connectOptions(fnName string, v Value) (dialOptions, error) {
 				return o, err
 			}
 			o.skipVerify, o.caCert = skip, caCert
+		}
+	}
+	timeout, err := resolveTimeout(fnName, ms)
+	if err != nil {
+		return o, err
+	}
+	o.timeout = timeout
+	return o, nil
+}
+
+// lookupOptions reads a net.LookupOptions argument.
+func lookupOptions(fnName string, v Value) (dialOptions, error) {
+	var o dialOptions
+	if v.Kind != interpreter.KindStruct || v.StructNS() != LibraryName || v.StructName() != "LookupOptions" {
+		return o, fmt.Errorf("%s: options must be a net.LookupOptions, got %s", fnName, typeName(v))
+	}
+	ms := int64(0)
+	for _, f := range v.Fields() {
+		switch f.Name {
+		case "timeoutMs":
+			if f.Value.Kind != interpreter.KindInt {
+				return o, fmt.Errorf("%s: net.LookupOptions.timeoutMs must be int, got %s", fnName, f.Value.Kind)
+			}
+			ms = f.Value.Int()
 		case "dnsServers":
 			servers, err := dnsServers(fnName, f.Value)
 			if err != nil {
@@ -448,23 +472,23 @@ func connectOptions(fnName string, v Value) (dialOptions, error) {
 	return o, nil
 }
 
-// dnsServers reads ConnectOptions.dnsServers: each "ip" or "ip:port" (port 53
+// dnsServers reads LookupOptions.dnsServers: each "ip" or "ip:port" (port 53
 // by default) as host:port; a host name is an error.
 func dnsServers(fnName string, v Value) ([]string, error) {
 	if v.Kind == interpreter.KindNull {
 		return nil, nil
 	}
 	if v.Kind != interpreter.KindList {
-		return nil, fmt.Errorf("%s: net.ConnectOptions.dnsServers must be list of string, got %s", fnName, v.Kind)
+		return nil, fmt.Errorf("%s: net.LookupOptions.dnsServers must be list of string, got %s", fnName, v.Kind)
 	}
 	list := v.List()
 	if len(list) > maxDNSServers {
-		return nil, fmt.Errorf("%s: net.ConnectOptions.dnsServers names %d servers, at most %d", fnName, len(list), maxDNSServers)
+		return nil, fmt.Errorf("%s: net.LookupOptions.dnsServers names %d servers, at most %d", fnName, len(list), maxDNSServers)
 	}
 	var servers []string
 	for _, e := range list {
 		if e.Kind != interpreter.KindString {
-			return nil, fmt.Errorf("%s: net.ConnectOptions.dnsServers must be list of string, got an element of %s", fnName, e.Kind)
+			return nil, fmt.Errorf("%s: net.LookupOptions.dnsServers must be list of string, got an element of %s", fnName, e.Kind)
 		}
 		addr, err := dnsconf.ServerAddr(e.Str())
 		if err != nil {
@@ -1760,7 +1784,7 @@ func lookupWithin(ctx interpreter.BuiltinCtx, fnName, name string, timeout time.
 func lookupArgs(fnName, role string, args []Value, with bool) (string, dialOptions, error) {
 	want, shape := 1, "1 argument ("+role+")"
 	if with {
-		want, shape = 2, "2 arguments ("+role+", net.ConnectOptions)"
+		want, shape = 2, "2 arguments ("+role+", net.LookupOptions)"
 	}
 	if len(args) != want {
 		return "", dialOptions{}, fmt.Errorf("%s expects %s, got %d", fnName, shape, len(args))
@@ -1772,7 +1796,7 @@ func lookupArgs(fnName, role string, args []Value, with bool) (string, dialOptio
 	if !with {
 		return name, dialOptions{timeout: defaultTimeout}, nil
 	}
-	o, err := connectOptions(fnName, args[1])
+	o, err := lookupOptions(fnName, args[1])
 	if err != nil {
 		return "", dialOptions{}, err
 	}
@@ -1787,9 +1811,9 @@ func lookupFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return lookupDeadline(ctx, "net.lookup", host, o.timeout, resolver.LookupHost)
 }
 
-// lookupWithFn implements `net.lookupWith(host, net.ConnectOptions)`: lookup
+// lookupWithFn implements `net.lookupWith(host, net.LookupOptions)`: lookup
 // within the options' timeoutMs. With dnsServers it asks only those (no hosts
-// file, no search list, A then AAAA); tls and tlsOptions are ignored.
+// file, no search list, A then AAAA).
 func lookupWithFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	const fnName = "net.lookupWith"
 	host, o, err := lookupArgs(fnName, "host", args, true)
@@ -1813,12 +1837,16 @@ func reverseLookupFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 }
 
 // reverseLookupWithFn implements `net.reverseLookupWith(ip,
-// net.ConnectOptions)`: reverseLookup within the options' timeoutMs, through
-// the configured resolver (dnsServers is ignored, as are tls and tlsOptions).
+// net.LookupOptions)`: reverseLookup within the options' timeoutMs, through
+// the configured resolver. It asks no named server, so a dnsServers list is
+// refused rather than ignored.
 func reverseLookupWithFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	ip, o, err := lookupArgs("net.reverseLookupWith", "ip", args, true)
 	if err != nil {
 		return interpreter.Null(), err
+	}
+	if len(o.dnsServers) > 0 {
+		return interpreter.Null(), fmt.Errorf("net.reverseLookupWith: net.LookupOptions.dnsServers is not supported (a reverse lookup asks the configured resolver)")
 	}
 	return lookupDeadline(ctx, "net.reverseLookupWith", ip, o.timeout, resolver.LookupAddr)
 }

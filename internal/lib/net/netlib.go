@@ -73,13 +73,17 @@ func Install(in *interpreter.Interpreter) {
 	// Options of connectWith / startTLSWith / lookupWith / reverseLookupWith;
 	// the zero value is a plaintext connect within the default deadline.
 	// timeoutMs: 0 = DefaultTimeoutMs, the largest int = none, negative throws.
-	// dnsServers ("ip" or "ip:port", port 53 by default, at most 16): only
-	// lookupWith reads it, asking those servers alone (no hosts file, no
-	// search list); empty is the configured resolver.
 	in.RegisterNamespacedStruct(LibraryName, "ConnectOptions", []parser.StructField{
 		{Name: "timeoutMs", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "tls", Type: parser.PrimitiveType(parser.TypeBool)},
 		{Name: "tlsOptions", Type: parser.Type{Kind: parser.TypeStruct, StructNS: LibraryName, StructName: "TLSOptions"}},
+	})
+	// The options of lookupWith / reverseLookupWith. timeoutMs as in
+	// ConnectOptions. dnsServers ("ip" or "ip:port", port 53 by default, at
+	// most 16): lookupWith asks those servers alone (no hosts file, no search
+	// list); empty is the configured resolver. reverseLookupWith refuses it.
+	in.RegisterNamespacedStruct(LibraryName, "LookupOptions", []parser.StructField{
+		{Name: "timeoutMs", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "dnsServers", Type: parser.ListType(parser.PrimitiveType(parser.TypeString))},
 	})
 	// A transport failure (refused, reset, unreachable, DNS, TLS): kind "net",

@@ -1426,7 +1426,7 @@ func TestDeprecatedNetShapes(t *testing.T) {
 		{"readN", head + "def b as bytes init net.readN($c, 4);", 0, ""},
 		{"eof", head + "def e as bool init net.eof($c);", 1, "`net.eof` is deprecated and removed in 0.29.0; use an empty `net.readBytes`"},
 		{"setIdleTimeout", head + "net.setIdleTimeout($c, 500);", 0, ""},
-		{"lookupWith", "use net;\ndef a as list of string init net.lookupWith(\"localhost\", net.ConnectOptions{timeoutMs: 500});", 0, ""},
+		{"lookupWith", "use net;\ndef a as list of string init net.lookupWith(\"localhost\", net.LookupOptions{timeoutMs: 500});", 0, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

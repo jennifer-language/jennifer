@@ -225,7 +225,7 @@ threading it through:
 | `web.notFound($app, handler)` | A custom handler for unmatched requests (default: a plain 404). |
 | `web.onError($app, handler)` | An error handler for a throwing route / middleware (default: log to stderr). |
 | `web.onServerError($app, handler)` | The same, but not called for a client fault (an error answered 4xx). |
-| `web.allocBudget($app, limit)` | A per-request allocation budget in bytes (see [Memory per request](#memory-per-request)); `math.MAX_INT` removes it, 0 or negative throws a `WebError` (500). |
+| `web.allocBudget($app, maxBytes)` | A per-request allocation budget in bytes (see [Memory per request](#memory-per-request)); `math.MAX_INT` removes it, 0 or negative throws a `WebError` (500). |
 
 A `HEAD` request is served by the matching **`GET`** route automatically (HTTP
 requires it, and health checks / caches rely on it); the response body is
@@ -537,7 +537,7 @@ task.wait($worker);
 
 ### Memory per request
 
-`web.allocBudget($app, limit)` gives every request an allocation budget: the
+`web.allocBudget($app, maxBytes)` gives every request an allocation budget: the
 worker task that handles it calls `task.setAllocBudget(limit)` before routing,
 so the middleware, the handler, the module code they call and the tasks they
 spawn count the bytes they allocate against it (see
@@ -556,7 +556,7 @@ The answer is `500`, not the `413` of a parser cap: the request may be small,
 it is the server that declines to spend more on it, and retrying it trips again
 (a `503` would invite clients and proxies to retry). The count is cumulative
 (allocated, not live: building a string by `+` in a loop counts every
-intermediate string), so size the budget from `task.allocated()` logged by a
+intermediate string), so size the budget from `task.allocatedBytes()` logged by a
 representative request, with headroom.
 
 ### Slow handlers and the respond timeout

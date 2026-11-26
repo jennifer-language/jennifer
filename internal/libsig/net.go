@@ -34,9 +34,9 @@ recvFrom(net.UDPSocket, int) net.Datagram
 setBroadcast(net.UDPSocket, bool) null
 bindToDevice(net.UDPSocket, string) null
 lookup(string) list of string
-lookupWith(string, net.ConnectOptions) list of string
+lookupWith(string, net.LookupOptions) list of string
 reverseLookup(string) list of string
-reverseLookupWith(string, net.ConnectOptions) list of string
+reverseLookupWith(string, net.LookupOptions) list of string
 close(net.Conn|net.Listener|net.UDPSocket) null
 `)
 	// M29.46: a 20 ms guess named like the exact fs.eof.

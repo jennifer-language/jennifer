@@ -5,7 +5,7 @@
 // wait, poll, discard, waitAll, waitAny, cancel, cancelled and the bounded
 // waitTimeout / waitAnyTimeout / waitAllTimeout - the operations on
 // `task of T` values produced by `spawn { ... }` blocks - and the calling
-// task's allocation budget, setAllocBudget / allocated.
+// task's allocation budget, setAllocBudget / allocatedBytes.
 //
 // `task.wait` blocks on the underlying done channel and returns the
 // stored result (or re-raises the stored error so `try`/`catch` can
@@ -45,7 +45,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "waitAllTimeout", makeWaitAllTimeout(in))
 	// Per-task allocation budget.
 	in.RegisterNamespaced(LibraryName, "setAllocBudget", setAllocBudgetFn)
-	in.RegisterNamespaced(LibraryName, "allocated", allocatedFn)
+	in.RegisterNamespaced(LibraryName, "allocatedBytes", allocatedBytesFn)
 }
 
 // maxTimeoutMillis is the largest ms value that fits in a time.Duration (int64
@@ -462,11 +462,11 @@ func setAllocBudgetFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (int
 	return interpreter.Null(), nil
 }
 
-// allocatedFn returns the bytes counted so far by the calling task's allocation
+// allocatedBytesFn returns the bytes counted so far by the calling task's allocation
 // budget (shared with the tasks spawned under it), or 0 when it has none.
-func allocatedFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func allocatedBytesFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 0 {
-		return interpreter.Null(), fmt.Errorf("task.allocated expects 0 arguments, got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("task.allocatedBytes expects 0 arguments, got %d", len(args))
 	}
 	b := ctx.AllocBudget()
 	if b == nil {

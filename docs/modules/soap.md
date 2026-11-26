@@ -80,8 +80,8 @@ keeps the first; read those with `xml.findAll`.
 ## WSDL
 
 `parseWsdl` reads a WSDL 1.1 document; `parseWsdlWith` also takes the
-documents it imports, as a map from each `wsdl:import` `location` to the text
-(nothing is fetched). Only SOAP 1.1 and 1.2 bindings over HTTP and their
+documents it imports, in `WsdlOptions.imports`, a map from each `wsdl:import`
+`location` to the text (nothing is fetched). Only SOAP 1.1 and 1.2 bindings over HTTP and their
 ports are kept; HTTP GET / POST and MIME bindings, and SOAP over another
 transport (JMS, ...), are left out.
 
@@ -102,7 +102,7 @@ io.printf("%s\n", soap.values($result)["valid"]);
 | Function | Returns | Does |
 |---|---|---|
 | `soap.parseWsdl(text)` | `Wsdl` | a description that imports no other WSDL |
-| `soap.parseWsdlWith(text, imports)` | `Wsdl` | `imports`: `location` -> document text; an import of an import is looked up in the same map, each location and each document text read once (an import back to the importing document is no error), at most `MAX_WSDL_DOCUMENTS` (32) documents |
+| `soap.parseWsdlWith(text, o)` | `Wsdl` | `o` a `WsdlOptions{imports, maxDocuments}`. `imports`: `location` -> document text; an import of an import is looked up in the same map, each location and each document text read once (an import back to the importing document is no error). `maxDocuments`: 0 is `MAX_WSDL_DOCUMENTS` (32), a value may only lower it; past it is `"limit"` |
 | `soap.wsdlCall(w, name)` | `WsdlCall` | the operation at the first SOAP port that offers it |
 | `soap.wsdlCallAt(w, port, name)` | `WsdlCall` | the operation at the named port |
 | `soap.wsdlCallTo(w, address, name)` | `WsdlCall` | the operation from the first SOAP binding that has it, sent to `address`: for a description with no `service` (ONVIF's device WSDLs) or whose ports name another host |

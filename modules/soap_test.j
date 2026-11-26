@@ -1216,7 +1216,7 @@ def const IMPORTED_WSDL as string init '<w:definitions xmlns:w="http://schemas.x
 # does not.
 func wsdlFailure(text as string, imports as map of string to string) {
     try {
-        parseWsdlWith($text, $imports);
+        parseWsdlWith($text, WsdlOptions{imports: $imports, maxDocuments: 0});
     } catch (e) {
         return $e.kind + ": " + $e.message;
     }
@@ -1316,7 +1316,9 @@ func testParseWsdlWithImports() {
         "vboxweb.wsdl": IMPORTED_WSDL,
         "vboxwebService.wsdl": IMPORTING_WSDL
     };
-    def w as Wsdl init parseWsdlWith(IMPORTING_WSDL, $imports);
+    def w as Wsdl init parseWsdlWith(
+        IMPORTING_WSDL,
+        WsdlOptions{imports: $imports, maxDocuments: 0});
     testing.assertEqual($w.targetNamespace, "urn:vbox:service");
     def target as WsdlCall init wsdlCall($w, "IWebsessionManager_logon");
     testing.assertEqual($target.address, "http://localhost:18083/");
@@ -1416,6 +1418,22 @@ func testParseWsdlImportCap() {
     }
     def got as string init wsdlFailure($imports["d0"], $imports);
     testing.assertEqual(strings.split($got, ":")[0], "limit");
+    # maxDocuments lowers the cap; 0 keeps it, a value outside 0..32 is misuse.
+    def three as map of string to string init {
+        "d1": $imports["d1"],
+        "d2": $imports["d2"],
+        "d3": $imports["d3"]
+    };
+    def kinds as list of string init [];
+    for (def m in [2, -1, MAX_WSDL_DOCUMENTS + 1]) {
+        try {
+            parseWsdlWith($imports["d0"], WsdlOptions{imports: $three, maxDocuments: $m});
+            $kinds[] = "ok";
+        } catch (e) {
+            $kinds[] = $e.kind;
+        }
+    }
+    testing.assertEqual($kinds, ["limit", "soap", "soap"]);
 }
 
 func testWsdlEndToEnd() {
@@ -1753,7 +1771,9 @@ func testWsdlImportBackToRoot() {
         '<import namespace="urn:u" location="b.wsdl"/><message name="In">');
     def b as string init '<definitions xmlns="' + WSDL_NS + '" targetNamespace="urn:u">' +
         '<import namespace="urn:t" location="root.wsdl"/></definitions>';
-    def w as Wsdl init parseWsdlWith($root, {"b.wsdl": $b, "root.wsdl": $root});
+    def w as Wsdl init parseWsdlWith(
+        $root,
+        WsdlOptions{imports: {"b.wsdl": $b, "root.wsdl": $root}, maxDocuments: 0});
     testing.assertEqual(len($w.ports), 1);
     testing.assertEqual(len($w.bindings), 1);
 }
