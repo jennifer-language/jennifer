@@ -14,21 +14,22 @@
  * `fileStore` persists it to a file (survives across `jennifer run`
  * invocations; handy for development and CLI tools with no server). The
  * distributed backends, a `memcache` or `redis` connection shared across
- * processes, are built by the `kvremote` module, which needs the default binary
- * (`net`); it returns the same `Store`, so `session` and `ratelimit` take
- * either.
+ * processes, are built by the client modules, `memcache.kvStore(mc)` and
+ * `redis.kvStore(rc)`, which need the default binary (`net`); they return the
+ * same `Store`, so `session` and `ratelimit` take either.
  *
  * `Store` is a sum type (enum): a `Local` variant carries its `kv.Store`
- * handle, a `Remote` variant the `Backend` that `kvremote` fills in (the
- * connection and one function value per verb, which run in `kvremote`). This
- * module imports no network module, so it carries no `net` capability.
+ * handle, a `Remote` variant the `Backend` that `memcache` or `redis` fills in
+ * (the connection and one function value per verb, which run in that module).
+ * This module imports no network module: `use net;` names only the
+ * `net.Conn` type, so it loads on `jennifer-tiny` too.
  * @module kvstore
  */
 use kv;
 use net;
 
 /**
- * A remote backend, as `kvremote` builds it: the connection and the function
+ * A remote backend, as `memcache.kvStore` and `redis.kvStore` build it: the connection and the function
  * value that carries out each verb on it. Not built by hand; the function
  * values are called with the `Backend` itself first, then the verb's
  * arguments.
@@ -55,8 +56,8 @@ export def struct Backend {
 /**
  * A store bound to one backend. Value-semantic; the handle a variant wraps (a
  * `kv.Store` or a `net.Conn`) is shared across copies. Build with
- * `inProcessStore` / `fileStore`, or `kvremote.memcacheStore` /
- * `kvremote.redisStore`.
+ * `inProcessStore` / `fileStore`, or `memcache.kvStore` /
+ * `redis.kvStore`.
  */
 export def enum Store {
     Local{local as kv.Store},
@@ -87,8 +88,8 @@ export func fileStore(path as string) {
 }
 
 /**
- * A store over a remote backend. `kvremote.memcacheStore` and
- * `kvremote.redisStore` call this; other code has no need to.
+ * A store over a remote backend. `memcache.kvStore` and `redis.kvStore` call
+ * this; other code has no need to.
  * @param backend {Backend} the backend, with every verb set
  * @return {Store} a store dispatching to the backend
  */
@@ -177,7 +178,7 @@ export func touch(store as Store, key as string, ttlSec as int) {
  * Atomically increment the counter at `key` and return the new value, creating it
  * (at 1, with a `ttlSec`-second expiry) on the first hit. The atomic-counter-plus-TTL
  * primitive a fixed-window rate limiter is built from - portable across every
- * backend (kv `add` then `incr`; see `kvremote` for redis and memcache).
+ * backend (kv `add` then `incr`; see `memcache.kvStore` and `redis.kvStore`).
  * @param store {Store} the store
  * @param key {string} the counter key
  * @param ttlSec {int} the TTL to arm on the first hit (seconds)
