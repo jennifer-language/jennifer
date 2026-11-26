@@ -337,7 +337,7 @@ func mdFail(msg as string) {
 # mdLimit raises a reached budget (nesting depth, node count): kind "limit",
 # the generic kind for a cap, with the message as mdFail would write it.
 func mdLimit(msg as string) {
-    throw Error{kind: "limit", message: $msg};
+    throw Error{kind: "limit", message: "markdown: " + $msg};
 }
 
 # addNodes adds `k` nodes to a running node count and checks the budget.

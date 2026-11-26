@@ -1688,6 +1688,13 @@ func testNodeBudgetCountedWhileParsing() {
     testing.assertThrows("overBudgetInline", "limit");
 }
 
+# A paragraph a tight list unwraps is not counted: 34,000 items are 68,002
+# nodes, under the budget (counting their paragraphs made 102,000).
+func testATightListCountsItsFinalNodes() {
+    def doc as doctree.Node init parse(strings.replicate("- x\n", 34000));
+    testing.assertEqual(countNodes($doc), 68002);
+}
+
 func overSourceCap() {
     parse(strings.replicate("a", MAX_SOURCE + 1));
 }

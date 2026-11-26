@@ -452,6 +452,15 @@ func closeTop(st as BP) { # lint-disable: L205
         $nodes = finishBlock($st.open[$t]);
     }
     $st.nodes = addNodes($st.nodes, freshNodes($kind, $nodes));
+    if ($kind == "paragraph" and $t > 0 and
+        ($st.open[$t - 1].kind == "item" or $st.open[$t - 1].kind == "desc")) {
+        # A tight list or a definition may unwrap it: its paragraph node is
+        # counted when the list or definition keeps it (keptParagraphs).
+        $st.nodes = $st.nodes - len($nodes);
+    }
+    if ($kind == "list" or $kind == "desc") {
+        $st.nodes = addNodes($st.nodes, keptParagraphs($kind, $nodes));
+    }
     def p as int init $t - 1;
     if ($kind == "item" and $loose) {
         $st.open[$p].loose = true;
@@ -463,6 +472,27 @@ func closeTop(st as BP) { # lint-disable: L205
         $st.open[$p].blank = true;
     }
     return $st;
+}
+
+# keptParagraphs counts the item and definition paragraphs a closed list or
+# definition kept (a loose list keeps all, a tight one none, a definition all
+# but a lone one), which closeTop left uncounted.
+func keptParagraphs(kind as string, nodes as list of doctree.Node) {
+    def n as int init 0;
+    for (def node in $nodes) {
+        def holders as list of doctree.Node init [$node];
+        if ($kind == "list") {
+            $holders = $node.children;
+        }
+        for (def h in $holders) {
+            for (def c in $h.children) {
+                if ($c.kind == "paragraph") {
+                    $n = $n + 1;
+                }
+            }
+        }
+    }
+    return $n;
 }
 
 # freshNodes is how many nodes closing a block of `kind` made: a paragraph's
