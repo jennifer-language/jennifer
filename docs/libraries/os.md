@@ -454,7 +454,8 @@ follows the same pattern.
 | `"limit"` | too many live child processes from `os.spawn` / `spawnWith` |
 | `"timeout"` | `os.waitTimeout` / `waitBytesTimeout`: the process did not exit within `ms` (it keeps running) |
 | `"cancelled"` | `task.cancel` of a task blocked in `os.waitTimeout` / `waitBytesTimeout` |
-| `"runtime"` | a program that cannot be started, any other operating-system failure, and misuse: a wrong argument, an unknown option, signal or stream name, an unknown process handle, a `dir` that is missing or not a directory, a bad `env` name or value, `group` or a signal not available on the platform, `ms` negative or above 9,223,372,036,854 |
+| `"closed"` | a released process handle (or one never spawned) passed to `os.wait`, `waitTimeout`, `poll`, `kill` or `signal`; `os.release` of it returns `false` |
+| `"runtime"` | a program that cannot be started, any other operating-system failure, and misuse: a wrong argument, an unknown option, signal or stream name, a `dir` that is missing or not a directory, a bad `env` name or value, `group` or a signal not available on the platform, `ms` negative or above 9,223,372,036,854 |
 
 ## Constants
 

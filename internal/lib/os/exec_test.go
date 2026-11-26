@@ -416,6 +416,31 @@ func TestWaitOnUnknownHandleErrors(t *testing.T) {
 	}
 }
 
+// TestReleasedHandleIsClosed (M29.46): like every handle library's, a
+// released process handle is "closed" for each call that takes one, and a
+// second release does nothing.
+func TestReleasedHandleIsClosed(t *testing.T) {
+	out, err := runOS(t, nil, `
+use io; use os;
+def p as os.Process init os.spawn(["true"]);
+os.wait($p);
+os.release($p);
+os.release($p);
+try { os.wait($p); } catch (e) { io.printf("wait %s\n", $e.kind); }
+try { os.poll($p); } catch (e) { io.printf("poll %s\n", $e.kind); }
+try { os.kill($p); } catch (e) { io.printf("kill %s\n", $e.kind); }
+try { os.signal($p, "term"); } catch (e) { io.printf("signal %s\n", $e.kind); }
+try { os.waitTimeout($p, 10); } catch (e) { io.printf("waitTimeout %s\n", $e.kind); }
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "wait closed\npoll closed\nkill closed\nsignal closed\nwaitTimeout closed\n"
+	if out != want {
+		t.Errorf("got %q, want %q", out, want)
+	}
+}
+
 func TestRunRejectsNonStringArgv(t *testing.T) {
 	bad := interpreter.GenericListVal([]interpreter.Value{
 		interpreter.StringVal("/bin/echo"),

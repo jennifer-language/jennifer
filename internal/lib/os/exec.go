@@ -744,7 +744,7 @@ func waitProcess(ctx interpreter.BuiltinCtx, fnName string, args []interpreter.V
 	state, ok := handles[handle]
 	handlesMu.Unlock()
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("%s: unknown process handle (%d)", fnName, handle)
+		return interpreter.Null(), interpreter.KindedError("closed", fmt.Sprintf("%s: unknown process handle (%d): already released, or never spawned", fnName, handle))
 	}
 	if bounded {
 		if err := awaitExit(ctx, fnName, state, ms); err != nil {
@@ -846,7 +846,7 @@ func pollFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	state, ok := handles[handle]
 	handlesMu.Unlock()
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("os.poll: unknown process handle (%d)", handle)
+		return interpreter.Null(), interpreter.KindedError("closed", fmt.Sprintf("os.poll: unknown process handle (%d): already released, or never spawned", handle))
 	}
 	select {
 	case <-state.done:
@@ -872,7 +872,7 @@ func killFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	state, ok := handles[handle]
 	handlesMu.Unlock()
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("os.kill: unknown process handle (%d)", handle)
+		return interpreter.Null(), interpreter.KindedError("closed", fmt.Sprintf("os.kill: unknown process handle (%d): already released, or never spawned", handle))
 	}
 	if state.cmd.Process == nil {
 		return interpreter.Null(), fmt.Errorf("os.kill: process has no live OS handle")
@@ -926,7 +926,7 @@ func signalFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	state, ok := handles[handle]
 	handlesMu.Unlock()
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("%s: unknown process handle (%d)", fn, handle)
+		return interpreter.Null(), interpreter.KindedError("closed", fmt.Sprintf("%s: unknown process handle (%d): already released, or never spawned", fn, handle))
 	}
 	if state.group {
 		if err := signalGroup(state.pid, name); err != nil {
