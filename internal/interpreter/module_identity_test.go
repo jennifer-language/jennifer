@@ -105,25 +105,22 @@ io.printf("%v %v", $mine == g.make(1), $mine);`,
 	}
 }
 
-// A type written `json.Value` while a module with the file stem json, which
-// declares a Value, is imported beside `use json;` names two types: the load
-// refuses it, naming both, instead of taking the module's type (before, the
-// library value then failed to bind: "cannot initialize json.Value variable
-// ... with value of type object"). Without `use json` the stem names the
-// module's type, as before.
+// A type written `json.Value` beside `use json;` names the library's type even
+// when a module with the file stem json, which declares a Value, is imported:
+// the module's type keeps its alias (`jm.Value`), the library's has no other
+// spelling. Without `use json` the stem names the module's type, as before.
 func TestModuleStemClashesWithLibraryType(t *testing.T) {
 	mod := `export def struct Value { a as int };
 export func mk() { return Value{a: 1}; }`
 	out, err := runModuleMainAllErr(t, map[string]string{
 		"json.j": mod,
 		"main.j": `use io; use json; import "./json.j" as jm;
-io.printf("started ");
-def jv as json.Value init json.decode('{"a":1}');`,
+def jv as json.Value init json.decode('{"a":1}');
+def mv as jm.Value init jm.mk();
+io.printf("%d %d", json.asInt(json.get($jv, "/a")), $mv.a);`,
 	})
-	if err == nil || out != "" ||
-		!strings.Contains(err.Error(), "type json.Value is ambiguous: library json has a type Value, and so has module") ||
-		!strings.Contains(err.Error(), "(imported as jm)") {
-		t.Fatalf("got %q, %v", out, err)
+	if err != nil || out != "1 1" {
+		t.Fatalf("library type beside a same-stem module: %q, %v", out, err)
 	}
 	out, err = runModuleMainAllErr(t, map[string]string{
 		"json.j": mod,

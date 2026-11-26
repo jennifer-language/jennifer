@@ -229,14 +229,6 @@ type Interpreter struct {
 	// tables exist (checkStructLits). Cleared after the check.
 	structLits []*parser.StructLit
 
-	// declTypesLoading is set while resolveDeclaredTypesOnce stamps the
-	// program's declared types (single-threaded, before any statement runs);
-	// declTypeClash keeps the first type name it found ambiguous between a
-	// library and a module's file stem (stemTypeClash), which Run reports as a
-	// load error.
-	declTypesLoading bool
-	declTypeClash    error
-
 	// host is the entry-program interpreter for a module sub-interpreter, or
 	// nil on the entry program itself. meta.callMain / meta.definedMain resolve
 	// against it, so a module (e.g. `jsonrpc`, dispatching a wire method name)
@@ -1431,9 +1423,6 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 	// re-resolve in execDefine is a guarded no-op and a shared type node
 	// reached from concurrent goroutines never write-races.
 	i.resolveDeclaredTypesOnce(prog)
-	if i.declTypeClash != nil {
-		return i.declTypeClash
-	}
 	// Stamp each spawn with the globals it needs so the snapshot copies only
 	// those, not the whole global frame. Runs after resolveQualifiedRefs (the
 	// analysis consults module aliases + namespaces). Single-threaded here,
