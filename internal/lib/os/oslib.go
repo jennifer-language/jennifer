@@ -75,6 +75,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "waitBytesTimeout", waitBytesTimeoutFn)
 	in.RegisterNamespaced(LibraryName, "poll", pollFn)
 	in.RegisterNamespaced(LibraryName, "kill", killFn)
+	in.RegisterNamespaced(LibraryName, "signal", signalFn)
 	in.RegisterNamespaced(LibraryName, "release", releaseFn)
 	in.RegisterNamespaced(LibraryName, "isTerminal", isTerminalFn)
 	in.RegisterNamespaced(LibraryName, "cwd", cwdFn)
@@ -111,10 +112,18 @@ func Install(in *interpreter.Interpreter) {
 	})
 	// Options of spawnWith: where each child stream goes. "" (the zero
 	// value) or "capture" captures it for os.wait; "inherit", "discard", or
-	// a file path containing a separator.
+	// a file path containing a separator. dir is the child's working
+	// directory ("" the parent's); env is set on top of the inherited
+	// environment, or of an empty one with cleanEnv; group starts the child
+	// as the leader of a new process group (Unix), which os.signal then
+	// addresses as a whole. Every zero value keeps os.spawn's behaviour.
 	in.RegisterNamespacedStruct(LibraryName, "SpawnOptions", []parser.StructField{
 		{Name: "stdout", Type: str},
 		{Name: "stderr", Type: str},
+		{Name: "dir", Type: str},
+		{Name: "env", Type: parser.MapType(str, str)},
+		{Name: "cleanEnv", Type: parser.PrimitiveType(parser.TypeBool)},
+		{Name: "group", Type: parser.PrimitiveType(parser.TypeBool)},
 	})
 	in.RegisterNamespacedStruct(LibraryName, "Process", []parser.StructField{
 		{Name: "handle", Type: parser.PrimitiveType(parser.TypeInt)},

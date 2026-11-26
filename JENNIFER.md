@@ -681,20 +681,28 @@ replacement at each call.
   bitAnd`/`bitOr(data, key)`(key repeated), `bitNot(data)`; `readInt`/
   `readUint(order, b, offset, size)` (size 1/2/4/8, order `"le"`/`"be"`),
   `readFloat` (4/8; NaN/Inf throw), `readInts`/`readFloats(order, b, offset,
-  count, size[, stride])`. `concat` in a loop is O(n^2): append `$out[] = byte`
-  or `join` a `list of bytes`.
+  count, size[, stride])`. Writers: `fromInt`/`fromUint`/`fromFloat(order, n,
+  size)`, `fromInts`/`fromFloats(order, xs, size)` -> bytes; `setInt`/`setUint`/
+  `setFloat(order, b, offset, n, size)` return a copy (`$b = ...`). Out of the
+  size's range (`fromUint(.., 256, 1)`, beyond float32) throws, never
+  truncates; float32 rounds to nearest. `concat` in a loop is O(n^2): append
+  `$out[] = byte` or `join` a `list of bytes`.
 - **`maps`** - `keys values has delete merge`, `without(m, keys)` (one copy).
   `has` before reading a maybe-missing key.
 - **`os`** - `getEnv setEnv unsetEnv hasEnv` (true for `""`), `getEnvBytes`,
   `argsBytes()` (`getEnv ARGS` throw `"os"` on non-UTF-8; flags: `args` module),
   `isTerminal`, `cwd homeDir tempDir`. Blocking `run(argv[, stdin]) ->
   Result{exitCode, stdout, stderr}`; `spawn(argv)`/`spawnWith(argv,
-  SpawnOptions{stdout, stderr})` -> `Process{handle, pid}`, `wait`/
-  `waitTimeout(p, ms)` (`"timeout"`, child keeps running)/`poll kill release`;
-  `runBytes waitBytes waitBytesTimeout` -> `BytesResult{exitCode, stdout, stderr
-  as bytes, truncated}`; streams `""` (capture), `"inherit"`, `"discard"` or a
-  path with `/`. `catchSignal(name)`/`gotSignal(name)`: `"int" "term" "hup"
-  "usr2"` (`"usr1"` reserved). `PLATFORM ARCH NCPU EOL DIRSEP PATHSEP ARGS`.
+  SpawnOptions{stdout, stderr, dir, env, cleanEnv, group})` -> `Process{handle,
+  pid}`, `wait`/`waitTimeout(p, ms)` (`"timeout"`, child keeps running)/`poll
+  kill release`; `runBytes waitBytes waitBytesTimeout` -> `BytesResult{exitCode,
+  stdout, stderr as bytes, truncated}`; streams `""` (capture), `"inherit"`,
+  `"discard"` or a path with `/`. `env` adds to the inherited environment
+  (`cleanEnv: true`: only `env`); `group: true` (Unix) makes the child a process
+  group leader, and `signal(p, name)` (`"term" "kill" "int" "hup" "quit" "usr1"
+  "usr2"`) then reaches the whole group; `kill` = TERM to the child alone.
+  `catchSignal(name)`/`gotSignal(name)`: `"int" "term" "hup" "usr2"` (`"usr1"`
+  reserved). `PLATFORM ARCH NCPU EOL DIRSEP PATHSEP ARGS`.
 - **`path`** - path strings, no I/O: `base dir ext stem join clean isAbs`,
   `split(p) -> [dir, file]`, host separator. Not a filename sanitizer.
 - **`json`** - `encode encodePretty decode` into opaque `json.Value`, read by
@@ -798,10 +806,12 @@ replacement at each call.
   group/other bits, or not yours; read-only mount, e.g. `/run/secrets`: only
   group/other write bits; `"fs"`; >1 MiB `"limit"`), `exists isFile isDir stat
   realpath readlink symlink mkfifo chmod chown mkdir mkdirAll remove removeAll
-  rename` (atomic replace: write temp, rename), `list walk` (non-UTF-8 name:
+  rename` (atomic replace: write temp, `sync`, rename, then `syncDir(dir)`
+  makes the name durable; no-op on Windows), `list walk` (non-UTF-8 name:
   `"fs"`, also `readlink realpath`; `listBytes walkBytes` give `bytes` names),
   `makeTempFile makeTempDir`, `fs.File` handles (`open`, `readLine`, ...,
-  `sync`, `close`), polling `watch(path)`/`watchWith(path,
+  `sync`, `close`; `seek(f, offset)` from the start, not on append; `tell(f)`
+  = logical position), polling `watch(path)`/`watchWith(path,
   WatchOptions{intervalMs})` -> `Watcher` (`next hasEvent close`).
 - **`net`** `[full]` - TCP `connect(addr)`/`connectWith(addr,
   ConnectOptions{timeoutMs, tls, tlsOptions, dnsServers})`/`listen accept
@@ -904,8 +914,8 @@ copy), then `NAME.fn(...)` / `NAME.Struct`. Conventions for every entry:
   a `try` each call copies the whole value, so prefer bulk forms (`addAll`,
   `setMany`, ...).
 - **Errors** are `Error{kind: "<module>"}`, except protocol clients `acme amqp
-  graphql imap jsonrpc ldap mcp memcache mqtt ntp oauth pop redis rest s3 smtp
-  snmp soap webdav zmq`: each throws one struct of its own for every error of
+  graphql imap jsonrpc ldap mcp memcache mqtt ntp oauth pop redis rest s3
+  s3presign smtp snmp soap webdav zmq`: each throws one struct of its own for every error of
   its kind (`rest.HttpError`, `smtp.SmtpError`, ...; `kind` + `message` + the
   server's status/codes as fields). Read fields only after matching `kind`; a
   param typed `Error` does not accept them. Also `ical.IcalError`,
@@ -1077,9 +1087,9 @@ copy), then `NAME.fn(...)` / `NAME.Struct`. Conventions for every entry:
   `jwksKeys` (convert once), Policy forms `verifyWithKeysWith verifyJwksWith`.
   OIDC/CI tokens need a `Policy`: else `iss aud` are unchecked and a missing
   `exp` passes. Details: https://docs.jennifer-lang.dev/modules/jwt.html
-- **`kvstore`** `[full]` - one key/value API over backends, per-key TTL: `Store`
-  enum from `memcacheStore(mc)`/`redisStore(rc)`/`inProcessStore()`/
-  `fileStore(path)` (imports `memcache` and `redis`, hence `[full]`);
+- **`kvstore`** - one key/value API over backends, per-key TTL: `Store` enum
+  from `inProcessStore()`/`fileStore(path)`, or `memcache.kvStore(mc)`/
+  `redis.kvStore(rc)` `[full]` (via `remoteStore(Backend)`);
   `set(store, key, value, ttlSec)`/`get delete touch incrWindow`. `ttlSec <=
   0` = no expiry. Backs `session` and `ratelimit`.
 - **`label`** - label printing. `new(w, h)` in mm, then `text(label, x, y,
@@ -1124,7 +1134,7 @@ copy), then `NAME.fn(...)` / `NAME.Struct`. Conventions for every entry:
   `set(s, key, value, exptime)`/`add get` (`""` if absent)/`delete incr decr`
   (`-1` if absent)/`touch quit`; `setBytes getBytes`; `getMulti(s, keys)`; `gets
   -> Item{value, cas, found}` + `cas(..., casId)` -> `"stored" "exists"
-  "not_found"`.
+  "not_found"`; `kvStore(s) -> kvstore.Store`.
 - **`mime`** - MIME messages. Build `text(contentType, body)`/`attachment`/
   `attachmentBytes(filename, contentType, data)`/`multipart(subtype, boundary,
   parts)`/`withHeader`, `encode(part)`; `parse(text)`, `headerValue body`
@@ -1201,7 +1211,7 @@ copy), then `NAME.fn(...)` / `NAME.Struct`. Conventions for every entry:
   `retrieve(s, n)`/`deleteMessage`/`top(s, n, lines)`/`reset noop quit`,
   `uidl uidlOne` (stable ids), `fetchAll(opts)`. Auth per `Options.auth`:
   USER/PASS, APOP, XOAUTH2, CRAM-MD5, SCRAM-*, `"auto"`.
-- **`ratelimit`** `[full]` - `fixedWindow(store, limit, window)`/
+- **`ratelimit`** - `fixedWindow(store, limit, window)`/
   `slidingWindow` -> `Limiter` over a `kvstore.Store`; `check(l, key) ->
   Result{allowed, remaining, retryAfter, resetSeconds}` (records)/`peek` (does
   not).
@@ -1210,8 +1220,8 @@ copy), then `NAME.fn(...)` / `NAME.Struct`. Conventions for every entry:
   lrange llen lpop`, `sadd srem smembers sismember scard`; `command(s, args) ->
   Reply{kind, str, num, items}`; `subscribe psubscribe unsubscribe punsubscribe`
   (return once confirmed; messages meanwhile stay queued)/`publish
-  receiveMessage`; `pipeline`, `multi exec discard`; `scan` (not `keys`). `-ERR`
-  throws.
+  receiveMessage`; `pipeline`, `multi exec discard`; `scan` (not `keys`);
+  `kvStore(s) -> kvstore.Store`. `-ERR` throws.
 - **`resque`** `[full]` - Resque jobs on Redis: `enqueue(s, queue, class,
   args)`, `reserve(s, queues) -> Job{queue, class, args}` (empty `class` when
   drained)/`reserveBlocking(s, queues, timeoutSec)`, `queueLength queues size
@@ -1241,6 +1251,8 @@ copy), then `NAME.fn(...)` / `NAME.Struct`. Conventions for every entry:
   contentType, metadata)`; `createMultipartUpload uploadPart
   completeMultipartUpload abortMultipartUpload`; `errorOf(resp)` -> `S3Error`
   (`code`, `requestId`); `presign(client, method, bucket, key, expiresSeconds)`.
+- **`s3presign`** - `s3`'s `Client connect S3Error presign`, same names, no
+  network (presign-only code swaps the import).
 - **`sasl`** - mail auth: `plain(user, pass)`/`loginUser loginPass`/
   `bearer(user, token)` (XOAUTH2), `cram(user, pass, challenge)`,
   SCRAM-SHA-1/-256 `scramStart(algo, user)` -> `scramClientFirst` ->
@@ -1260,7 +1272,7 @@ copy), then `NAME.fn(...)` / `NAME.Struct`. Conventions for every entry:
   rsort`, `coerce clean`; ranges `satisfies(version, range)` (`^`, `~`,
   comparators, `||`, hyphen, x-ranges), `maxSatisfying minSatisfying`,
   `minVersion`, `validRange`, `intersects subset gtr ltr outside simplifyRange`.
-- **`session`** `[full]` - server-side sessions over a `kvstore.Store`
+- **`session`** - server-side sessions over a `kvstore.Store`
   (`json.Value` under `sess:ID`, sliding TTL): `create(store, ttlSec) -> id`,
   `load` (empty object if absent), `save(store, id, data, ttlSec) -> bool`
   (false once destroyed/rotated/expired; never adopts a client-sent id),
@@ -1368,11 +1380,11 @@ copy), then `NAME.fn(...)` / `NAME.Struct`. Conventions for every entry:
   overwrite)`/`copy`; Clark-name properties (`clark(ns, local)`) via
   `propfind(c, path, depth, props)`/`proppatch`; `parseMultistatus
   multistatus`.
-- **`webhook`** `[full]` - HMAC: `sign(payload, secret)` (`sha256=` hex, the
+- **`webhook`** - HMAC: `sign(payload, secret)` (`sha256=` hex, the
   GitHub header)/`verify(payload, signature, secret)`; `stripeSign
   stripeVerify`, `slackSign slackVerify`, `timestampedSign timestampedVerify`
-  (reject stale). Sign the raw body; empty secret throws. `send(url, payload,
-  secret)`.
+  (reject stale). Sign the raw body; empty secret throws. Deliver with
+  `http.post(url, ct, body, signedHeaders(body, secret))`.
 - **`websocket`** `[full]` - RFC 6455 client: `connect(url)`/`connectWith(url,
   timeoutMs)`/`connectOptions(url, Options{timeoutMs, headers, protocols,
   caCert, skipVerify})` -> `Conn` (`Conn.protocol`); `send(c, text)`/

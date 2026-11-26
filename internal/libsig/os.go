@@ -26,6 +26,7 @@ waitTimeout(os.Process, int) os.Result
 waitBytesTimeout(os.Process, int) os.BytesResult
 poll(os.Process) bool
 kill(os.Process) null
+signal(os.Process, string) null
 release(os.Process) bool
 isTerminal(string) bool
 cwd() string

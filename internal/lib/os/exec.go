@@ -121,6 +121,11 @@ type processState struct {
 	errRaw   string
 	outTrunc bool
 	errTrunc bool
+	// group is set when the child was started as the leader of a new process
+	// group (os.SpawnOptions.group); pid is its OS pid, which is then also the
+	// group id that os.signal addresses.
+	group bool
+	pid   int
 }
 
 var (
@@ -433,12 +438,26 @@ func spawnFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return spawnProcess("os.spawn", argv, outMode, errMode)
+	return spawnProcess("os.spawn", argv, spawnConfig{outMode: outMode, errMode: errMode})
+}
+
+// spawnConfig is what os.spawn / os.spawnWith hand spawnProcess: each stream's
+// mode (checked by checkSpawnMode) and, from os.SpawnOptions only, the working
+// directory, the environment and the process-group flag. The zero value is
+// os.spawn(argv): capture both streams, inherit the parent's directory and
+// environment, no new group.
+type spawnConfig struct {
+	outMode, errMode string
+	dir              string
+	env              []string // "KEY=value" pairs set on top of the base environment
+	cleanEnv         bool     // the base environment is empty instead of the parent's
+	group            bool     // the child leads a new process group (Unix)
 }
 
 // spawnWithFn implements `os.spawnWith(argv, os.SpawnOptions) -> os.Process`:
-// os.spawn with each stream's mode in an options struct. The zero value
-// captures both streams, so os.spawnWith(argv, os.SpawnOptions{}) is
+// os.spawn with each stream's mode, the working directory, the environment and
+// the process group in an options struct. The zero value captures both streams
+// and inherits the rest, so os.spawnWith(argv, os.SpawnOptions{}) is
 // os.spawn(argv).
 func spawnWithFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	const fn = "os.spawnWith"
@@ -456,32 +475,121 @@ func spawnWithFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if o.Kind != interpreter.KindStruct || o.StructNS() != LibraryName || o.StructName() != "SpawnOptions" {
 		return interpreter.Null(), fmt.Errorf("%s: options must be an os.SpawnOptions, got %s", fn, o.Kind)
 	}
-	var outMode, errMode string
-	for _, f := range o.Fields() {
-		if f.Name != "stdout" && f.Name != "stderr" {
-			continue
-		}
-		if f.Value.Kind != interpreter.KindString {
-			return interpreter.Null(), fmt.Errorf("%s: os.SpawnOptions.%s must be string, got %s", fn, f.Name, f.Value.Kind)
-		}
-		if err := checkSpawnMode(fn, f.Name, f.Value.Str()); err != nil {
-			return interpreter.Null(), err
-		}
-		if f.Name == "stdout" {
-			outMode = f.Value.Str()
-		} else {
-			errMode = f.Value.Str()
-		}
+	cfg, err := spawnConfigFrom(fn, o)
+	if err != nil {
+		return interpreter.Null(), err
 	}
-	return spawnProcess(fn, argv, outMode, errMode)
+	return spawnProcess(fn, argv, cfg)
 }
 
-// spawnProcess starts argv with its streams wired per outMode / errMode (each
-// checked by checkSpawnMode) and registers the handle.
-func spawnProcess(fn string, argv []string, outMode, errMode string) (interpreter.Value, error) {
+// spawnConfigFrom reads and validates an os.SpawnOptions value. A field left
+// out of the literal holds its zero value, which keeps os.spawn's behaviour.
+func spawnConfigFrom(fn string, o interpreter.Value) (spawnConfig, error) {
+	var cfg spawnConfig
+	for _, f := range o.Fields() {
+		switch f.Name {
+		case "stdout", "stderr", "dir":
+			if f.Value.Kind != interpreter.KindString {
+				return cfg, fmt.Errorf("%s: os.SpawnOptions.%s must be string, got %s", fn, f.Name, f.Value.Kind)
+			}
+			switch f.Name {
+			case "stdout":
+				cfg.outMode = f.Value.Str()
+			case "stderr":
+				cfg.errMode = f.Value.Str()
+			default:
+				cfg.dir = f.Value.Str()
+			}
+		case "cleanEnv", "group":
+			if f.Value.Kind != interpreter.KindBool {
+				return cfg, fmt.Errorf("%s: os.SpawnOptions.%s must be bool, got %s", fn, f.Name, f.Value.Kind)
+			}
+			if f.Name == "cleanEnv" {
+				cfg.cleanEnv = f.Value.Bool()
+			} else {
+				cfg.group = f.Value.Bool()
+			}
+		case "env":
+			env, err := spawnEnvPairs(fn, f.Value)
+			if err != nil {
+				return cfg, err
+			}
+			cfg.env = env
+		}
+	}
+	if err := checkSpawnMode(fn, "stdout", cfg.outMode); err != nil {
+		return cfg, err
+	}
+	if err := checkSpawnMode(fn, "stderr", cfg.errMode); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
+}
+
+// spawnEnvPairs turns os.SpawnOptions.env into "KEY=value" pairs. A key must be
+// non-empty and hold no '=' or NUL; a value holds no NUL. Either would be cut or
+// misread by the OS, so it is an error, not a silent truncation.
+func spawnEnvPairs(fn string, m interpreter.Value) ([]string, error) {
+	if m.Kind == interpreter.KindNull {
+		return nil, nil
+	}
+	if m.Kind != interpreter.KindMap {
+		return nil, fmt.Errorf("%s: os.SpawnOptions.env must be a map of string to string, got %s", fn, m.Kind)
+	}
+	entries := m.Map()
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.Key.Kind != interpreter.KindString || e.Value.Kind != interpreter.KindString {
+			return nil, fmt.Errorf("%s: os.SpawnOptions.env must be a map of string to string, got a %s key with a %s value", fn, e.Key.Kind, e.Value.Kind)
+		}
+		k, v := e.Key.Str(), e.Value.Str()
+		switch {
+		case k == "":
+			return nil, fmt.Errorf("%s: os.SpawnOptions.env: empty variable name", fn)
+		case strings.ContainsAny(k, "=\x00"):
+			return nil, fmt.Errorf("%s: os.SpawnOptions.env: variable name %q contains '=' or NUL", fn, k)
+		case strings.ContainsRune(v, 0):
+			return nil, fmt.Errorf("%s: os.SpawnOptions.env: the value of %q contains NUL", fn, k)
+		}
+		out = append(out, k+"="+v)
+	}
+	return out, nil
+}
+
+// spawnProcess starts argv as cfg says and registers the handle. Everything that
+// can be checked is checked before a redirect file is created, so a bad dir
+// leaves no empty log file behind.
+func spawnProcess(fn string, argv []string, cfg spawnConfig) (interpreter.Value, error) {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.WaitDelay = procWaitDelay
-	state := &processState{cmd: cmd, done: make(chan struct{})}
+	state := &processState{cmd: cmd, done: make(chan struct{}), group: cfg.group}
+	if cfg.dir != "" {
+		info, serr := stdos.Stat(cfg.dir)
+		switch {
+		case errors.Is(serr, stdos.ErrNotExist):
+			return interpreter.Null(), fmt.Errorf("%s: dir %q does not exist", fn, cfg.dir)
+		case serr != nil:
+			return interpreter.Null(), fmt.Errorf("%s: dir %q: %v", fn, cfg.dir, serr)
+		case !info.IsDir():
+			return interpreter.Null(), fmt.Errorf("%s: dir %q is not a directory", fn, cfg.dir)
+		}
+		cmd.Dir = cfg.dir
+	}
+	if cfg.cleanEnv || len(cfg.env) > 0 {
+		// A non-nil Env replaces the inherited one; exec keeps the last of
+		// duplicate keys, so the env pairs appended after the base win.
+		base := []string{}
+		if !cfg.cleanEnv {
+			base = stdos.Environ()
+		}
+		cmd.Env = append(base, cfg.env...)
+	}
+	if cfg.group {
+		if err := setProcessGroup(cmd); err != nil {
+			return interpreter.Null(), fmt.Errorf("%s: %v", fn, err)
+		}
+	}
+	outMode, errMode := cfg.outMode, cfg.errMode
 
 	// Resolve each stream's destination (default: capture). On a file-open error
 	// close any file already opened for the other stream, so no fd leaks.
@@ -526,6 +634,7 @@ func spawnProcess(fn string, argv []string, outMode, errMode string) (interprete
 	// The real OS pid, captured now (cmd.Process is set once Start succeeds). It is
 	// informational only; os.wait / poll / kill / release use the registry handle.
 	pid := int64(cmd.Process.Pid)
+	state.pid = cmd.Process.Pid
 	handlesMu.Lock()
 	nextID++
 	id := nextID
@@ -747,11 +856,10 @@ func pollFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	}
 }
 
-// killFn implements `os.kill(p)`. Sends SIGTERM to the child. A
-// subsequent `os.wait` returns whatever the OS reports for the
-// terminated process. Signal variants beyond SIGTERM are
-// deliberately out of scope - users who need them reach for a
-// future enhancement.
+// killFn implements `os.kill(p)`. Sends SIGTERM to the child only, even for a
+// child that leads a process group; it is os.signal(p, "term") for a child
+// spawned without group. A subsequent `os.wait` returns whatever the OS reports
+// for the terminated process.
 func killFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("os.kill expects 1 argument (process handle), got %d", len(args))
@@ -775,6 +883,64 @@ func killFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 		if err != stdos.ErrProcessDone {
 			return interpreter.Null(), fmt.Errorf("os.kill: %v", err)
 		}
+	}
+	return interpreter.Null(), nil
+}
+
+// sendSignalNames are the names os.signal accepts, in the lowercase,
+// SIG-less spelling of os.catchSignal. Which of them a platform can deliver is
+// up to signalChild / signalGroup (procgroup_*.go).
+var sendSignalNames = []string{"term", "kill", "int", "hup", "quit", "usr1", "usr2"}
+
+// signalFn implements `os.signal(p, name)`: send a signal to a spawned child.
+// For a child spawned with os.SpawnOptions{group: true} it goes to the whole
+// process group (kill(-pgid)), so a shell's background children receive it
+// too; otherwise to the child alone. A child that has exited is not signalled
+// and that is no error. A group is signalled even after its leader exited,
+// since other members keep the group alive; a group with no member left is no
+// error either.
+func signalFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	const fn = "os.signal"
+	if !execSupported() {
+		return interpreter.Null(), execUnsupportedErr(fn)
+	}
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("%s expects 2 arguments (os.Process, signal name), got %d", fn, len(args))
+	}
+	handle, err := extractHandle(fn, args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if args[1].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("%s: signal name must be string, got %s", fn, args[1].Kind)
+	}
+	name := args[1].Str()
+	known := false
+	for _, n := range sendSignalNames {
+		known = known || n == name
+	}
+	if !known {
+		return interpreter.Null(), fmt.Errorf("%s: unknown signal %q; known: \"%s\"", fn, name, strings.Join(sendSignalNames, `", "`))
+	}
+	handlesMu.Lock()
+	state, ok := handles[handle]
+	handlesMu.Unlock()
+	if !ok {
+		return interpreter.Null(), fmt.Errorf("%s: unknown process handle (%d)", fn, handle)
+	}
+	if state.group {
+		if err := signalGroup(state.pid, name); err != nil {
+			return interpreter.Null(), fmt.Errorf("%s: %v", fn, err)
+		}
+		return interpreter.Null(), nil
+	}
+	select {
+	case <-state.done:
+		return interpreter.Null(), nil
+	default:
+	}
+	if err := signalChild(state.cmd.Process, name); err != nil && !errors.Is(err, stdos.ErrProcessDone) {
+		return interpreter.Null(), fmt.Errorf("%s: %v", fn, err)
 	}
 	return interpreter.Null(), nil
 }

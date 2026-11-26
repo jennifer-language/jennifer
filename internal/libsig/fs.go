@@ -27,6 +27,7 @@ mkdirAll(string) null
 remove(string) null
 removeAll(string) null
 rename(string, string) null
+syncDir(string) null
 list(string) list of string
 walk(string) list of fs.Stat
 listBytes(string) list of bytes
@@ -44,6 +45,8 @@ writeString(string|fs.File, string) null
 writeBytes(string|fs.File, bytes) null
 sync(fs.File) null
 eof(fs.File) bool
+seek(fs.File, int) null
+tell(fs.File) int
 # The interval of watch is a deprecated shape (lint L301, removed in
 # 0.29.0); the signature keeps accepting it until then.
 watch(string, int?) fs.Watcher

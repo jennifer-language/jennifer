@@ -87,6 +87,8 @@ func installHandles(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "writeBytes", writeHandleBytesFn)
 	in.RegisterNamespaced(LibraryName, "sync", syncFn)
 	in.RegisterNamespaced(LibraryName, "eof", eofFn)
+	in.RegisterNamespaced(LibraryName, "seek", seekFn)
+	in.RegisterNamespaced(LibraryName, "tell", tellFn)
 }
 
 // makeFile builds the Jennifer-side `fs.File{id}` value.
@@ -499,4 +501,82 @@ func eofFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		}
 	}
 	return interpreter.BoolVal(false), nil
+}
+
+// -------- position --------
+
+// seekFn implements fs.seek(fs.File, offset): set the position to offset bytes
+// from the start. A read handle drops its read buffer and the sticky EOF flag,
+// so the next readLine / readChars / readBytes / eof sees the bytes at offset;
+// past the end the next read finds end of input. A write handle writes at
+// offset next (past the end, the gap reads as zero bytes). An append handle
+// always writes at the end, so seeking it is refused, as is a handle that
+// cannot seek (a FIFO or a terminal).
+func seekFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("fs.seek expects 2 arguments (fs.File, offset), got %d", len(args))
+	}
+	id, err := extractFileID("fs.seek", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if args[1].Kind != interpreter.KindInt {
+		return interpreter.Null(), fmt.Errorf("fs.seek: offset must be int, got %s", args[1].Kind)
+	}
+	off := args[1].Int()
+	if off < 0 {
+		return interpreter.Null(), fmt.Errorf("fs.seek: offset must be non-negative, got %d", off)
+	}
+	h, err := resolveHandle("fs.seek", id)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.mode == "append" {
+		return interpreter.Null(), fmt.Errorf(`fs.seek: fs.File %q was opened in mode "append", which always writes at the end; open with mode "write" to write at an offset`, h.path)
+	}
+	if _, serr := h.f.Seek(off, io.SeekStart); serr != nil {
+		return interpreter.Null(), fmt.Errorf("fs.seek: %s: %s", h.path, osErr(serr, h.path))
+	}
+	if h.reader != nil {
+		h.reader.Reset(h.f)
+	}
+	h.sticky = false
+	return interpreter.Null(), nil
+}
+
+// tellFn implements fs.tell(fs.File): the current position in bytes from the
+// start. For a read handle that is the position after the bytes already
+// returned (the OS offset minus what the read buffer holds); for an append
+// handle it is the end of the file, where the next write goes.
+func tellFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("fs.tell expects 1 argument (fs.File), got %d", len(args))
+	}
+	id, err := extractFileID("fs.tell", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	h, err := resolveHandle("fs.tell", id)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	whence := io.SeekCurrent
+	if h.mode == "append" {
+		// O_APPEND moves the offset to the end only on a write; the end is
+		// where the next write lands. Writes ignore the offset, so moving
+		// it there is harmless.
+		whence = io.SeekEnd
+	}
+	pos, serr := h.f.Seek(0, whence)
+	if serr != nil {
+		return interpreter.Null(), fmt.Errorf("fs.tell: %s: %s", h.path, osErr(serr, h.path))
+	}
+	if h.reader != nil {
+		pos -= int64(h.reader.Buffered())
+	}
+	return interpreter.IntVal(pos), nil
 }

@@ -33,13 +33,14 @@ function; see [rejected.md > `os.exit(n)`](../technical/rejected.md#osexitn).
 | `os.run(argv[, stdin])` | `os.Result` | **Blocking.** Run `argv` to completion; capture stdout/stderr (must be valid UTF-8, else a catchable error; see "External programs"). An optional `stdin` (`string` or `bytes`) is fed to the child then closed. A non-zero exit is a value in `exitCode`; a program that cannot be started (not found, not executable) **throws** a catchable `Error{kind: "runtime"}`. See "External programs" below. |
 | `os.runBytes(argv[, stdin])` | `os.BytesResult` | As `os.run`, with both streams returned as unchecked `bytes`. See "Binary output" below. |
 | `os.spawn(argv)` | `os.Process` | **Non-blocking.** Start `argv`, return a handle; both streams captured. |
-| `os.spawnWith(argv, os.SpawnOptions)` | `os.Process` | As `os.spawn`, with each stream routed by `SpawnOptions{stdout, stderr}`. See "Spawned child stdio" below. |
+| `os.spawnWith(argv, os.SpawnOptions)` | `os.Process` | As `os.spawn`, with each stream routed by `SpawnOptions{stdout, stderr}`, and the working directory, environment and process group set by `dir`, `env`, `cleanEnv`, `group`. See "Spawned child stdio" and "Directory, environment and process group" below. |
 | `os.wait(p)`       | `os.Result`  | Block until `$p` terminates; return captured streams + exit code. Idempotent. Non-UTF-8 output errors, like `os.run`. |
 | `os.waitBytes(p)`  | `os.BytesResult` | As `os.wait`, with both streams as `bytes`. |
 | `os.waitTimeout(p, ms)` | `os.Result` | As `os.wait`, waiting at most `ms` milliseconds; throws `"timeout"` and leaves `$p` running. `0` polls. |
 | `os.waitBytesTimeout(p, ms)` | `os.BytesResult` | As `os.waitBytes`, bounded like `os.waitTimeout`. |
 | `os.poll(p)`       | bool         | Non-blocking: true once `$p` has exited (a following `os.wait` returns immediately). |
-| `os.kill(p)`       | null         | Send SIGTERM to `$p`.                                                               |
+| `os.kill(p)`       | null         | Send SIGTERM to `$p` alone, also when it leads a group: `os.signal($p, "term")` for a child spawned without `group`. |
+| `os.signal(p, name)` | null       | Send signal `name` (`"term"`, `"kill"`, `"int"`, `"hup"`, `"quit"`, `"usr1"`, `"usr2"`) to `$p`, or to its whole process group when it was spawned with `group: true`. An exited child is not signalled (no error). See "Stopping a child and its children". |
 | `os.release(p)`    | bool         | Drop a **finished** handle from the registry (frees its captured output); errors if `$p` is still running. Returns whether the handle existed. |
 | `os.isTerminal(stream)` | bool    | Is `stream` (`"stdout"` / `"stderr"` / `"stdin"`) an interactive terminal? See "Terminal detection". |
 | `os.cwd()`         | string       | Absolute path of the current working directory. Errors only if it can't be determined. |
@@ -269,7 +270,8 @@ terminate cleanly (an I/O failure draining its streams, not a non-zero
 exit), `os.wait` raises a catchable error instead of reporting exit
 code 0. `os.kill($p)` sends SIGTERM (falling back to a hard kill on
 Windows, which has no SIGTERM); a subsequent `os.wait` returns whatever
-the OS reports for the terminated child.
+the OS reports for the terminated child. `os.signal` sends other signals, and
+to a whole process group (see "Stopping a child and its children").
 
 **Captured output is capped** at 16 MiB per stream for both `os.run`
 and `os.spawn`: a child that writes more has the excess dropped and a
@@ -322,6 +324,74 @@ def q as os.Process init os.spawnWith(["worker", "--job", $id],
     os.SpawnOptions{stderr: "/var/log/worker.err"});
 ```
 
+**Directory, environment and process group.** Four more `os.SpawnOptions`
+fields shape the child; each zero value keeps `os.spawn`'s behaviour, so a
+literal names only those it sets:
+
+```text
+def struct os.SpawnOptions {
+    stdout   as string,                  # see the table above
+    stderr   as string,
+    dir      as string,                  # working directory; "" = the parent's
+    env      as map of string to string, # set on top of the inherited environment
+    cleanEnv as bool,                    # true: start from an empty environment
+    group    as bool                     # true: lead a new process group (Unix)
+};
+```
+
+| Field | Effect |
+| --- | --- |
+| `dir` | The child's working directory. It must exist and be a directory, else `os.spawnWith` throws `"runtime"` before anything starts (no redirect file is created). A relative program path in `argv[0]` (`./tool`) is resolved against `dir`; a redirect file path against the parent's directory. |
+| `env` | Variables set for the child, replacing an inherited variable of the same name. A name must be non-empty with no `=` or NUL, a value no NUL (else `"runtime"`). |
+| `cleanEnv` | `true` drops the inherited environment: the child sees only `env`. Keeps the parent's secrets (tokens, keys in variables) out of a child. `PATH` is then unset in the child, but `argv[0]` is still looked up on the parent's `PATH`. |
+| `group` | `true` starts the child as the leader of a new process group (`setpgid`), whose id is `$p.pid`. `os.signal` then reaches every process in it, e.g. the jobs a shell started in the background. Unix only: on other platforms `group: true` throws `"runtime"`. |
+
+```jennifer
+def p as os.Process init os.spawnWith(
+    ["sh", "-c", $script],
+    os.SpawnOptions{
+        dir: $workdir,
+        cleanEnv: true,
+        env: {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
+        group: true
+    });
+```
+
+**Stopping a child and its children.** `os.signal($p, name)` sends `"term"`,
+`"kill"`, `"int"`, `"hup"`, `"quit"`, `"usr1"` or `"usr2"` (the lowercase,
+`SIG`-less names of `os.catchSignal`). For a child spawned with `group: true` it
+signals the whole group (`kill(-pgid)`), otherwise the child alone. A child that
+has exited is not signalled and that is no error. A group is signalled even
+after its leader exited, since the remaining members keep the group alive; once
+none is left the call does nothing. Caveat: when every member has gone, the OS
+may in time reuse the group id for an unrelated group, which a late
+`os.signal` would then reach; signal a group while it can still have members,
+not long after the run. A process that moved itself to another group (`setsid`,
+a daemon) is out of reach. The usual bounded run:
+
+```jennifer
+try {
+    def r as os.Result init os.waitTimeout($p, 5000);
+} catch (e) {
+    if ($e.kind != "timeout") {
+        throw $e;
+    }
+    os.signal($p, "term");                  # ask the whole group to stop
+    try {
+        os.waitTimeout($p, 1000);
+    } catch (e2) {
+        if ($e2.kind != "timeout") {
+            throw $e2;
+        }
+        os.signal($p, "kill");              # then force it
+    }
+    os.wait($p);
+}
+```
+
+On Windows only `"term"` and `"kill"` exist, both a hard stop of the child
+(as `os.kill` there); the other names throw `"runtime"`.
+
 **The handle vs the pid.** `os.wait` / `os.poll` / `os.kill` / `os.release` take
 the whole `os.Process` and use its `handle` (a monotonic registry id). `$p.pid`
 is the **real OS pid**, for logs, `ps`, `/proc`, or an out-of-band signal. The
@@ -370,7 +440,7 @@ func hasGit() {
 
 **TinyGo limitation.** `jennifer-tiny` does not support `os.run`,
 `os.runBytes`, `os.spawn`, `os.spawnWith`, `os.wait`, `os.waitBytes`, their
-timeout forms, `os.poll`, or `os.kill`:
+timeout forms, `os.poll`, `os.kill`, or `os.signal`:
 TinyGo's runtime does not implement the underlying `os/exec` syscalls. On
 `jennifer-tiny` these raise a runtime error pointing at the default `jennifer`
 binary (`make build` produces both, `make build-go` only the default). `net`
@@ -384,7 +454,7 @@ follows the same pattern.
 | `"limit"` | too many live child processes from `os.spawn` / `spawnWith` |
 | `"timeout"` | `os.waitTimeout` / `waitBytesTimeout`: the process did not exit within `ms` (it keeps running) |
 | `"cancelled"` | `task.cancel` of a task blocked in `os.waitTimeout` / `waitBytesTimeout` |
-| `"runtime"` | a program that cannot be started, any other operating-system failure, and misuse: a wrong argument, an unknown option, signal or stream name, an unknown process handle, `ms` negative or above 9,223,372,036,854 |
+| `"runtime"` | a program that cannot be started, any other operating-system failure, and misuse: a wrong argument, an unknown option, signal or stream name, an unknown process handle, a `dir` that is missing or not a directory, a bad `env` name or value, `group` or a signal not available on the platform, `ms` negative or above 9,223,372,036,854 |
 
 ## Constants
 

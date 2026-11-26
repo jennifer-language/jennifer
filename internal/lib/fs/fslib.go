@@ -115,6 +115,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "remove", removeFn)
 	in.RegisterNamespaced(LibraryName, "removeAll", removeAllFn)
 	in.RegisterNamespaced(LibraryName, "rename", renameFn)
+	in.RegisterNamespaced(LibraryName, "syncDir", syncDirFn)
 	in.RegisterNamespaced(LibraryName, "list", listFn)
 	in.RegisterNamespaced(LibraryName, "walk", walkFn)
 	in.RegisterNamespaced(LibraryName, "listBytes", listBytesFn)

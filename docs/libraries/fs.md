@@ -181,6 +181,7 @@ mode string would hide the recursive intent at the call site).
 | `fs.remove(path)`       | `null`            | Removes one file or one empty directory. Non-empty dir errors. |
 | `fs.removeAll(path)`    | `null`            | Recursive delete. Explicit second verb.                        |
 | `fs.rename(old, new)`   | `null`            | Same-filesystem rename; cross-fs is a boundary error. An existing **file** at `new` is replaced, atomically on Linux / macOS (POSIX `rename(2)`): the write-temp-then-rename way to save a config or certificate with no window where the file is missing. Replacing a directory errors. |
+| `fs.syncDir(path)`      | `null`            | Flush the directory's entries to the storage device (open read-only, `fsync`), so a file created, renamed or removed in it survives a crash. A path that is not a directory errors. A no-op on Windows (no directory flush). See [Durable replace](#durable-replace). |
 | `fs.list(path)`         | `list of string`  | Sorted entry names. Non-recursive. A name that is not valid UTF-8 throws kind `"fs"`. |
 | `fs.listBytes(path)`    | `list of bytes`   | `fs.list` with each name as `bytes`, whatever the filesystem holds. |
 | `fs.walk(path)`         | `list of fs.Stat` | Depth-first, sorted, includes `path` itself as the first entry. Skips symlinks below the root (a symlinked root is followed). An unreadable directory below the root is listed but not descended into; an unreadable root is an error. A path that is not valid UTF-8 throws kind `"fs"`. |
@@ -281,6 +282,8 @@ Unknown mode strings error with the known set listed.
 | `fs.writeBytes($f, b)`     | `null`     | Read-mode handle errors.                                                  |
 | `fs.sync($f)`              | `null`     | Flush written data to the storage device (fsync); handle stays open. Read-mode handle errors. |
 | `fs.eof($f)`               | `bool`     | Looks ahead: true iff the next read would error / return partial.        |
+| `fs.seek($f, offset)`      | `null`     | Move to `offset` bytes from the start. Negative `offset` errors. Read handle: the read buffer and EOF flag are dropped; past the end the next read is end of input. Write handle: the next write goes at `offset` (a gap past the end reads as zero bytes). Append handle errors (writes always go to the end). A handle that cannot seek (FIFO, terminal) errors. |
+| `fs.tell($f)`              | `int`      | Current position in bytes from the start: after a `readLine` the start of the next line, not the OS offset of the read buffer. Append handle: the end of the file. A handle that cannot seek errors. |
 
 The canonical read-loop:
 
@@ -322,6 +325,45 @@ fs.close($f);
 `fs.sync` requires a write- or append-mode handle (a read handle has nothing to
 flush). `fsync` covers the OS side; a removable device's own internal cache
 is the job of the OS eject / unmount.
+
+### Durable replace
+
+`fs.sync` makes a file's data durable, not its name: the name lives in the
+directory. A write-temp-then-rename save survives a crash once the temp file
+is synced before the rename and the directory after it:
+
+```jennifer
+use fs;
+
+def f as fs.File init fs.open("data/state.json.tmp", "write");
+fs.writeString($f, $json);
+fs.sync($f);                               # the data
+fs.close($f);
+fs.rename("data/state.json.tmp", "data/state.json");
+fs.syncDir("data");                        # the new name
+```
+
+On Linux and macOS `fs.syncDir` opens the directory read-only and `fsync`s it.
+On Windows, which has no flush for a directory, it only checks that `path` is
+a directory.
+
+### Reading at an offset
+
+`fs.seek` jumps to a byte offset without reading what comes before it, so a
+reader that resumes from a saved position costs the same at any offset:
+
+```jennifer
+use fs;
+
+def f as fs.File init fs.open("data.log", "read");
+fs.seek($f, 1048576);                  # 1 MiB in
+def chunk as bytes init fs.readBytes($f, 4096);
+def next as int init fs.tell($f);      # where to resume
+fs.close($f);
+```
+
+The offset counts bytes; seeking into the middle of a UTF-8 sequence makes the
+next `fs.readLine` / `fs.readChars` throw kind `"fs"`.
 
 ### Polymorphic verbs (path vs handle)
 
