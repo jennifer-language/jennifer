@@ -129,6 +129,33 @@ func checkUnusedImport(c *checkCtx) {
 	}
 }
 
+// bundledStems maps each prefix bound to a bundled module (an import by bare
+// name that resolved to the system module directory) to the module's stem.
+func bundledStems(c *checkCtx) map[string]string {
+	out := map[string]string{}
+	for _, mi := range c.prog.ModuleImports {
+		stem, ok := bareModuleStem(mi.Path)
+		if !ok {
+			continue
+		}
+		if prefix, ok := moduleImportPrefix(mi); ok && c.cfg.Bundled[prefix] {
+			out[prefix] = stem
+		}
+	}
+	return out
+}
+
+// bareModuleStem returns the file stem of an import by bare name
+// (`import "kvstore.j"`), the form that finds a bundled module; a path with
+// a directory, a relative path or a deck import is no bundled module.
+func bareModuleStem(path string) (string, bool) {
+	if strings.ContainsAny(path, "/\\") || strings.HasPrefix(path, "@") || !strings.HasSuffix(path, ".j") {
+		return "", false
+	}
+	stem := strings.TrimSuffix(path, ".j")
+	return stem, stem != ""
+}
+
 // moduleImportPrefix returns the namespace an `import` binds and whether the
 // linter can determine it safely. The aliased form is exact; the bare form's
 // prefix is the file stem; the vendored-deck form (`@scope/pkg/`) is left
@@ -1774,14 +1801,43 @@ func isStringLit(e parser.Expr) bool {
 }
 
 // checkRemoved (L302) reports a call to a removed builtin (the table in
-// internal/libsig) with what to use instead, and the call shapes removed in
-// 0.28.0 that only their arguments tell apart: `io.printf($v)` / `sprintf` /
-// `eprintf` with one value that is certainly not a string, the two-bound
-// `lists.range(a, b)`, and the radix form `convert.toString(n, radix)`.
+// internal/libsig) with what to use instead, an import of a module removed
+// from the bundle, a call to a removed function of a bundled module, and the
+// call shapes removed in 0.28.0 that only their arguments tell apart:
+// `io.printf($v)` / `sprintf` / `eprintf` with one value that is certainly
+// not a string, the two-bound `lists.range(a, b)`, and the radix form
+// `convert.toString(n, radix)`.
 func checkRemoved(c *checkCtx) {
+	// A bundled module removed from the bundle, imported by its bare name:
+	// reported only when the import resolves to nothing, so a file of the
+	// user's own under that name is never flagged. A removed function of a
+	// bundled module: reported only when the prefix is the bundled file.
+	for _, mi := range c.prog.ModuleImports {
+		stem, ok := bareModuleStem(mi.Path)
+		if !ok {
+			continue
+		}
+		prefix, ok := moduleImportPrefix(mi)
+		if !ok {
+			continue
+		}
+		if r, gone := libsig.RemovedModule(stem); gone && c.cfg.Modules[prefix] == nil {
+			c.report("L302", mi, fmt.Sprintf("module `%s` was removed from the bundle in %s; use %s", stem, r.Release, r.Instead))
+		}
+	}
+	bundledStem := bundledStems(c)
 	typedWalk(c, nil, func(t *typer, e parser.Expr, resolve func(string) *binding) {
 		qc, ok := e.(*parser.QualifiedCallExpr)
-		if !ok || c.cfg.Modules[qc.Prefix] != nil {
+		if !ok {
+			return
+		}
+		if stem, ok := bundledStem[qc.Prefix]; ok {
+			if r, gone := libsig.RemovedModuleFunc(stem, qc.Callee); gone {
+				c.report("L302", qc, fmt.Sprintf("`%s.%s` was removed in %s; use %s", qc.Prefix, qc.Callee, r.Release, r.Instead))
+			}
+			return
+		}
+		if c.cfg.Modules[qc.Prefix] != nil {
 			return
 		}
 		lib, ok := t.libCall(qc.Prefix)

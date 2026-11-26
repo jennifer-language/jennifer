@@ -452,6 +452,57 @@ func Removed(lib, name string) (Removal, bool) {
 	return r, ok
 }
 
+var (
+	moduleRemovals     = map[string]Removal{}
+	moduleFuncRemovals = map[string]Removal{}
+)
+
+// RemovedModule reports whether the bundled module `name` (the file stem of
+// `import "name.j"`) was removed from the bundle, and what replaces it.
+func RemovedModule(name string) (Removal, bool) {
+	r, ok := moduleRemovals[name]
+	return r, ok
+}
+
+// RemovedModuleFunc reports whether the bundled module `module` lost its
+// exported function `name`, and what replaces it.
+func RemovedModuleFunc(module, name string) (Removal, bool) {
+	r, ok := moduleFuncRemovals[module+"."+name]
+	return r, ok
+}
+
+// Removed from the bundle in 0.28.0: the nine single-vendor modules became
+// decks with the same surface (M29.33); names deprecated in 0.27.0 went
+// (M29.34); the network halves of kvstore and webhook moved (M29.17).
+func init() {
+	const release = "0.28.0"
+	for _, name := range []string{"gotify", "slack", "discord", "telegram", "prometheus", "statsd", "influxdb", "mikrotik", "mactelnet"} {
+		moduleRemovals[name] = Removal{
+			Instead: fmt.Sprintf("the `@deckyard/%s` deck: add it to deck.toml, `jvc install`, then `import \"@deckyard/%s/\" as %s;`", name, name, name),
+			Release: release,
+		}
+	}
+	funcs := []struct{ module, name, instead string }{
+		{"orm", "hasOne", "`orm.oneToOne`"},
+		{"orm", "hasMany", "`orm.oneToMany`"},
+		{"validate", "isInt", "`validate.integer` (its rule kind is \"integer\")"},
+		{"validate", "isFloat", "`validate.number` (its rule kind is \"number\")"},
+		{"validate", "isBool", "`validate.boolean` (its rule kind is \"boolean\")"},
+		{"rest", "insecure", "`rest.withSkipVerify`"},
+		{"graphql", "insecure", "`graphql.withSkipVerify`"},
+		{"soap", "withInsecure", "`soap.withSkipVerify`"},
+		{"webdav", "withInsecure", "`webdav.withSkipVerify`"},
+		{"soap", "withCaCert", "`soap.withCA`"},
+		{"webdav", "withCaCert", "`webdav.withCA`"},
+		{"kvstore", "redisStore", "`redis.kvStore(rc)`"},
+		{"kvstore", "memcacheStore", "`memcache.kvStore(mc)`"},
+		{"webhook", "send", "`http.post(url, \"application/json\", payload, webhook.signedHeaders(payload, secret))`"},
+	}
+	for _, f := range funcs {
+		moduleFuncRemovals[f.module+"."+f.name] = Removal{Instead: f.instead, Release: release}
+	}
+}
+
 // Removed in 0.28.0 (M29.35), after a release deprecated (L301). The
 // language's slices (`$s[a..b]`, `$xs[..n]`, M21.11) do the slicing jobs on
 // strings, lists and bytes, with the same rune indexing and strict bounds.

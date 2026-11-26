@@ -3,9 +3,9 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 /**
- * The conventions survey (roadmap M29.23): list every place where a built-in
- * library, a bundled module or a deck departs from a mechanically checkable
- * rule of docs/technical/conventions.md (stance 8).
+ * The conventions survey (roadmap M30.28, was M29.23): list every place where a
+ * built-in library, a bundled module or a deck departs from a mechanically
+ * checkable rule of docs/technical/conventions.md (stance 8).
  *
  * The built-in libraries are read from their signature tables in
  * internal/libsig (names and types, no parameter names); the modules and decks

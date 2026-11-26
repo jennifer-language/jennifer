@@ -1303,6 +1303,51 @@ g(f(3));
 	}
 }
 
+// TestRemovedModules: L302 reports an import of a module removed from the
+// bundle when it resolves to nothing (a file of that name on the search path
+// is the user's and is left alone), and a call to a removed function of a
+// bundled module, instead of L114; the same name in a non-bundled module, a
+// local path and a current function are left alone.
+func TestRemovedModules(t *testing.T) {
+	kv, err := parser.Parse(`export func inProcessStore() { return 1; }`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own, err := parser.Parse(`export func version() { return 1; }`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name    string
+		src     string
+		modules map[string]*parser.Program
+		bundled map[string]bool
+		want    int
+	}{
+		{"a removed module, unresolved", "import \"gotify.j\" as gotify;\ndef v as int init gotify.version();", nil, nil, 1},
+		{"a removed module by its stem", "import \"slack.j\";\ndef v as int init slack.version();", nil, nil, 1},
+		{"a file of the user's own on the search path", "import \"gotify.j\" as gotify;\ndef v as int init gotify.version();", map[string]*parser.Program{"gotify": own}, nil, 0},
+		{"a local path", "import \"./gotify.j\" as gotify;\ndef v as int init gotify.version();", nil, nil, 0},
+		{"a removed function of a bundled module", "import \"kvstore.j\" as kvstore;\ndef v as int init kvstore.redisStore(1);", map[string]*parser.Program{"kvstore": kv}, map[string]bool{"kvstore": true}, 1},
+		{"the same name in a module of the user's", "import \"kvstore.j\" as kvstore;\ndef v as int init kvstore.redisStore(1);", map[string]*parser.Program{"kvstore": kv}, nil, 0},
+		{"a current function", "import \"kvstore.j\" as kvstore;\ndef v as int init kvstore.inProcessStore();", map[string]*parser.Program{"kvstore": kv}, map[string]bool{"kvstore": true}, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := lint.DefaultConfig()
+			cfg.Modules = c.modules
+			cfg.Bundled = c.bundled
+			diags := lintSrcResolved(t, c.src, only("L302", "L114"), cfg)
+			if got := countID(diags, "L302"); got != c.want {
+				t.Errorf("L302 count = %d, want %d: %v", got, c.want, diags)
+			}
+			if c.want > 0 && countID(diags, "L114") != 0 {
+				t.Errorf("L114 also reported: %v", diags)
+			}
+		})
+	}
+}
+
 // TestRemovedBuiltins: L302 reports a builtin removed in 0.28.0 (through an
 // alias too) and the removed call shapes: one value to printf that is
 // certainly not a string, range with two bounds, toString with a radix. A

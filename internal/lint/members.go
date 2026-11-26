@@ -33,8 +33,15 @@ func checkUnknownMember(c *checkCtx) {
 	}
 
 	// call checks `prefix.name(...)`.
+	stems := bundledStems(c)
 	call := func(n *parser.QualifiedCallExpr) {
 		if mod := c.cfg.Modules[n.Prefix]; mod != nil {
+			// A removed function of a bundled module gets L302 instead.
+			if stem, ok := stems[n.Prefix]; ok {
+				if _, removed := libsig.RemovedModuleFunc(stem, n.Callee); removed {
+					return
+				}
+			}
 			if exportedMethod(mod, n.Callee) == nil {
 				report(n, moduleWhat(mod, n.Callee, "function"), n.Prefix, n.Callee, moduleMethods(mod))
 			}
