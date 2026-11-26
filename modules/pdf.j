@@ -266,8 +266,14 @@ def struct GlyphRun {
     uses as list of GlyphUse
 };
 
+# fail throws a "pdf" error, naming its source once: `pdf.fn: ...` when the
+# message starts with the function's name, `pdf: ...` otherwise.
 func fail(msg as string) {
-    throw Error{kind: "pdf", message: $msg};
+    def at as int init strings.indexOf($msg, ": ");
+    if ($at > 0 and not strings.contains($msg[..$at], " ")) {
+        throw Error{kind: "pdf", message: "pdf." + $msg};
+    }
+    throw Error{kind: "pdf", message: "pdf: " + $msg};
 }
 
 # checkWidth rejects a wrap / fold width that is not positive: no line fits a
@@ -861,7 +867,7 @@ export func addFonts(doc as Document, lfs as list of LoadedFont) {
 # code and must not silently truncate, so it is rejected.
 func hexGid(gid as int) {
     if ($gid < 0 or $gid > 0xFFFF) {
-        fail("textUnicode: glyph id {$gid}" +
+        fail("glyph id {$gid}" +
             " is outside the 2-byte Identity-H range (font has too many glyphs to embed this way)");
     }
     def b as bytes;

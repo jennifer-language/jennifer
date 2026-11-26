@@ -281,7 +281,7 @@ func runBlock(fn string, block cipher.Block, mode string, pkcs7, encrypt bool, d
 		// Unaligned plaintext is the program's to pad; unaligned ciphertext is
 		// bad input.
 		if !encrypt {
-			return nil, dataerr.New("crypto", "crypto.%s: input must be a multiple of %d bytes for a -nopad mode, got %d", fn, bs, len(in))
+			return nil, dataerr.New("crypto", "crypto.%s: ciphertext must be a multiple of %d bytes, got %d", fn, bs, len(in))
 		}
 		return nil, fmt.Errorf("crypto.%s: input must be a multiple of %d bytes for a -nopad mode, got %d", fn, bs, len(in))
 	}

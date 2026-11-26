@@ -150,6 +150,7 @@ func defaultCaps() doctree.DecodeCaps {
 
 // decodeState is one decode's element count and caps.
 type decodeState struct {
+	fn       string // the call, for the cap messages
 	nodes    int
 	maxDepth int
 	maxNodes int
@@ -158,7 +159,7 @@ type decodeState struct {
 // decodeTreeCaps is decodeTree under the given caps (asn1.decodeWith); fn
 // names the call in the trailing-bytes message.
 func decodeTreeCaps(fn string, data []byte, caps doctree.DecodeCaps) (*elem, error) {
-	st := &decodeState{maxDepth: caps.Depth, maxNodes: caps.Nodes}
+	st := &decodeState{fn: fn, maxDepth: caps.Depth, maxNodes: caps.Nodes}
 	elem, rest, err := decodeOne(data, 0, st)
 	if err != nil {
 		return nil, dataerr.Wrap("asn1", err)
@@ -173,11 +174,11 @@ func decodeTreeCaps(fn string, data []byte, caps doctree.DecodeCaps) (*elem, err
 // remainder. depth guards recursion; st counts materialised elements.
 func decodeOne(data []byte, depth int, st *decodeState) (*elem, []byte, error) {
 	if depth > st.maxDepth {
-		return nil, nil, limits.Capf("asn1.decode: nesting deeper than the %d-level limit", st.maxDepth)
+		return nil, nil, limits.Capf("%s: nesting deeper than the %d-level limit", st.fn, st.maxDepth)
 	}
 	st.nodes++
 	if st.nodes > st.maxNodes {
-		return nil, nil, limits.Capf("asn1.decode: more than %d elements (input rejected as a decode bomb)", st.maxNodes)
+		return nil, nil, limits.Capf("%s: more than %d elements (input rejected as a decode bomb)", st.fn, st.maxNodes)
 	}
 	if len(data) < 2 {
 		return nil, nil, fmt.Errorf("asn1.decode: truncated element (need at least an identifier and a length octet)")

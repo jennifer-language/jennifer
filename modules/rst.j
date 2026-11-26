@@ -216,7 +216,7 @@ func rstFail(msg as string) {
 # rstLimit raises a reached budget (source size, nesting depth, node or table
 # cell count): kind "limit", the generic kind for a cap.
 func rstLimit(msg as string) {
-    throw Error{kind: "limit", message: $msg};
+    throw Error{kind: "limit", message: "rst: " + $msg};
 }
 
 # addCount adds the nodes under `n` to a running count and checks the node

@@ -733,7 +733,7 @@ func blocks(src as string, base as int, opts as Options, depth as int) {
     if ($depth > MAX_DEPTH) {
         throw Error{
             kind: "limit",
-            message: "document nests too deep (over {MAX_DEPTH} directive levels)"
+            message: "myst: document nests too deep (over {MAX_DEPTH} directive levels)"
         };
     }
     def md as string init preprocess($src, $base, $opts);
@@ -936,7 +936,10 @@ func sortDiags(ds as list of Diagnostic) { # lint-disable: L205
 # its diagnostics.
 func run(src as string, opts as Options) {
     if (len($src) > MAX_SOURCE) {
-        throw Error{kind: "limit", message: "document too large (over {MAX_SOURCE} characters)"};
+        throw Error{
+            kind: "limit",
+            message: "myst: document too large (over {MAX_SOURCE} characters)"
+        };
     }
     def doc as doctree.Node init withChildren("document", blocks($src, 1, $opts, 0));
     if (hasContents($doc)) {
