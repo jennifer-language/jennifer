@@ -9,8 +9,8 @@ library should be able to guess the next one; a reader who finds two libraries
 doing the same thing differently has found a bug.
 
 Each rule says how it is checked. "Gate" means a check that fails CI today;
-"survey" means the conventions survey (roadmap M29.23), which lists every
-deviation and is turning the rest into checks. A deliberate exception is
+"survey" means the conventions survey (roadmap M30.28, was M29.23), which
+lists every deviation and is turning the rest into checks. A deliberate exception is
 recorded in [design-decisions.md](design-decisions.md) and named here.
 
 ## Names

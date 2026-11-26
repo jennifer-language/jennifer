@@ -589,10 +589,11 @@ special forms and hands the rest to `"utf-8"`.
 ## Kept as they are: the 2026-11-21 stance review
 
 A review of every built-in library against the stances found these
-apparent breaks. Each stays, for the reason given; what had no reason went to
-the roadmap instead (M29.35 to M29.52). Four were settled at once by changing
-them (0.27.0): one cap (256 MiB) for every result a call builds, strings
-included; `strings.join`'s separator optional like `binary.join`'s;
+apparent breaks. Each stays, for the reason given; what had no reason was
+changed in 0.28.0 instead ([M29.35 to M29.52](../milestones.md#m29---0280)).
+Four were settled at once by changing them (0.27.0): one cap (256 MiB) for
+every result a call builds, strings included; `strings.join`'s separator
+optional like `binary.join`'s;
 `testing.runArgs` / `assertThrowsArgs` for the argument-list forms; and
 `fs.readSecretBytes` beside `readSecretString`.
 

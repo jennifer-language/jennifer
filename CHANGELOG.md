@@ -8,375 +8,270 @@ tags (bare semver, no `v`). Each `(Mxx.n)` reference points at the entry in
 [docs/roadmap.md](docs/roadmap.md) (or [docs/milestones.md](docs/milestones.md)
 once the release is tagged) that explains the change in depth.
 
-## 0.27.0
 
-A release without a milestone: it ships what was done since 0.26.0. A second
-audit of the bundled modules makes parsers and protocol clients stricter
-(malformed input throws, the module's error struct or a generic kind),
-refuses credentials over plain `http://` and plaintext logins unless opted in,
-and fixes lost messages, races and quadratic paths. New are
-`fs.readSecretBytes` (M29.22), UTF-16 and UTF-32 in `encoding`,
-`intl.formatNumber` and `i2c.writeRead`; the first round of the conventions
-survey renames thirteen names and five fields (M29.23). From the
-next milestone come bounded request parsing in Go (M29.2), the remaining caps
-as kind `"limit"` (M29.1), new `strings`, `lists`, `json` and `decimal`
-functions, printf and `time.format` width modifiers, and `match` on an indexed
-subject (M29.7, .8, .19, .24-28).
+## 0.28.0 (unreleased)
+
+Milestone M29. The nine deprecated single-vendor modules leave the bundle for
+decks (M29.33), every `@jennifer` deck moves to `@deckyard` (M29.55), and the
+names and builtins deprecated in 0.27.0 are gone (M29.34, M29.35). The stance
+review's fixes make the libraries agree: their own error kind for bad input
+data (M29.21), verified TLS for `sql` (M29.36), default deadlines in `net`
+(M29.37), one shape for caps, timeouts and closed handles (M29.44-46), and
+validated UTF-8 from the OS (M29.50). A `Value` is 48 bytes instead of 272
+(M29.11), module calls retag nothing (M29.14), and string scans on non-ASCII
+text are linear (M29.13). New are `binary` writers (M29.54), bounded child
+processes (M29.57), a per-task allocation budget (M29.3), a build-time install
+prefix and resolver files (M29.4, M29.5), five more release targets (M29.6),
+TrueType fonts in `doctree` PDFs (M29.20), a WSDL reader in `soap`, and a
+profiler for servers (M29.30-32).
 
 ### Breaking changes
 
-- **Stance 8 renames, old name kept.** The old names still work, marked
-  `@deprecated`, and are removed in 0.28.0 (M29.23, M29.34):
-  - `orm.hasOne` / `hasMany` -> `oneToOne` / `oneToMany`;
-  - `validate.isInt` / `isFloat` / `isBool` -> `integer` / `number` /
-    `boolean`. **The rule kinds change with them**, also through the old
-    names: `Failure.rule`, `localize` keys and `webapi`'s 422 failures read
-    `"integer"` / `"number"` / `"boolean"`;
-  - `rest.insecure`, `graphql.insecure`, `mikrotik.insecure`,
-    `soap.withInsecure`, `webdav.withInsecure` -> `withSkipVerify`;
-  - `soap.withCaCert`, `webdav.withCaCert` -> `withCA`.
-- **Stance 8 renames, no old name.** Code that names these fields must change
-  (M29.23): `memcache.Session.timeout`, `redis.Session.timeout` and
-  `s3.Client.timeout` -> `timeoutMs`; `totp.Options.period` -> `periodSec`;
-  `oauth.DeviceAuth.interval` -> `intervalSec`. Renamed parameters
-  (positional, so calls are unaffected): `ttl` -> `ttlSec` in `kvstore` and
-  `session`, `timeout` -> `timeoutSec` in `telegram.getUpdates`.
-- **Credentials need TLS unless opted in.** Refused before anything is sent:
-  - an `Authorization` / `Proxy-Authorization` header (a `Cookie` too in
-    `webdav`) over `http://` to a host other than loopback in `graphql`,
-    `jsonrpc`, `mcp`, `soap` and `webdav` (reason / status `"insecure"` or 0),
-    every signed `s3` request, every `gotify` push, and every `acme` request
-    (RFC 8555); opt in with `allowInsecureHttp` on the client, `Config` or
-    `acme.connectWith(url, key, acme.Options{...})`;
-  - `imap` `LOGIN` / XOAUTH2, `pop` `USER` / `PASS` / XOAUTH2, an `ldap`
-    simple bind or `passwordModify` with a password, and a `mikrotik` login
-    over plain TCP; opt in with `allowInsecureAuth` (on `ldap.Conn`, on the
-    others' `Options`);
-  - `mactelnet` speaks EC-SRP only; MD5 (RouterOS < 6.43) needs
-    `connectWith` with `allowLegacyMd5`;
-  - `rest.paginate` throws on a `rel="next"` link to another origin
-    (`allowCrossOriginRedirect` follows it).
-- **Strict parsing.** Malformed input throws instead of being skipped,
-  defaulted or repaired:
-  - `ical.parse` and `vcard.parse` throw the new `ical.IcalError` /
-    `vcard.VcardError` (`kind`, `message`, `line`) for broken structure,
-    escapes, dates, durations, `RRULE`s, a missing `FN`, an unknown `VERSION`;
-  - `mime.parse` (header lines, boundaries, truncated multiparts, bad base64 /
-    QP, bytes invalid in the declared charset; nesting past 100 is `"limit"`);
-    `multipart.parse` (a part without `form-data` and `name`, a line starting
-    with the boundary, no close delimiter);
-  - `feed.parse` throws kind `"value"` for an unparseable date on any item, a
-    bad enclosure `length`, an `<rss>` without exactly one `<channel>` or a
-    `<feed>` outside the Atom namespace;
-  - `dotenv` (a line without `=`, an empty key, unknown escapes, text after a
-    closing quote); `jsonl` (Unicode whitespace that is not JSON's);
-    `semver.satisfies` / `maxSatisfying` / `minSatisfying` / `simplifyRange`
-    throw `"value"` for an invalid range; `cron` refuses a value past the
-    field's range; `dot.render` refuses control characters;
-  - `uri.parse` / `resolve` refuse a malformed port and text after an IP
-    literal's `]`; `validate.url` checks `%` escapes and IP literals; `idna`
-    refuses non-canonical `xn--` labels and invisible / control characters;
-  - replies: `http` (status line, header syntax, obs-fold, control characters,
-    `Transfer-Encoding` other than a lone `chunked`, conflicting
-    `Content-Length`), `jsonrpc` and `mcp` (not a JSON-RPC 2.0 response),
-    `graphql` (not a GraphQL response, also from `tryQuery`), `acme`, `imap`,
-    `pop` (kind `"pop3"`), `webdav.parseMultistatus`, `snmp` unsigned values
-    out of range, `s3` `<Error>` bodies under a 200;
-  - `kv.openFile` refuses a file that is not a kv store or is damaged.
-- **Options and arguments are checked, never clamped:** a negative TTL in `kv`
-  and `kvstore`; `totp` negative `periodSec` or counter, `digits` outside
-  6..8, and a secret `totp.uri` could not use; `password` `minLength` below 1 or a negative
-  minimum; `orm.limit` / `offset` below 0 and WHERE / HAVING connectors other
-  than `AND` / `OR`; `log.at` with an unknown level (`"log"`); `args`
-  duplicate or shadowing definitions and an option value that looks like an
-  option (`--name --quiet`; write `--name=--quiet`); `web` `sameSite` other
-  than `Lax` / `Strict` / `None` (`None` needs `secure`); `ansi` colour indexes
-  and channels outside 0..255 (`"value"`, were clamped); `barcode` sizes, QR
-  EC level, empty 1D data and GS1-128 element strings; `label` sizes,
-  rotations, quantities and barcode data; `plot` marks, shapes, `legendPos`,
-  `barMode` and geometry; `pdf` page sizes, colours, an empty document and a
-  bookmark to a missing page; `zmq.poll` with a negative timeout;
-  `doctree` selectors with other brackets.
-- **Error kinds.** `"limit"` for a reached cap in `flatdb.openWith` (was
-  `"flatdb"`), `ipnet` `hosts` / `hostCount` / `split` (was `"ipnet"`),
-  the `doctree` readers' caps (was `"markdown"` / `"rst"`), `pdf` image
-  pixel caps; `"closed"` for an `smtp` reply cut off or a `sendOn` on a closed
-  session (was `"smtp"` / code -1); `"pdf"` for text outside WinAnsi (was
-  `"runtime"`). `oauth.load`, `uri`, `font`, `pdf`, `rst` and `myst` pass the
-  generic kinds on. `validate.custom` passes a predicate's `"runtime"` and
-  generic kinds on instead of failing the field; a non-`bool` result is
-  `"value"`.
-- **Behaviour:**
-  - `gpio.j` maps a pin through the Raspberry Pi header chip's sysfs base
-    (512+ since Linux 6.2), found by label; another board throws.
-    `gpio.useChip(gpio.GLOBAL)` keeps the old global numbering;
-  - `serial.open` / `openWith` claim the port exclusively (`shared: true`
-    opts out) and reset every line setting a previous program left;
-  - `cron`: a `*/n` day field restricts, and with one day field starting `*`
-    a day must match both (Vixie cron);
-  - `session.save` returns `bool` and writes only a live session (never one
-    destroyed, rotated, expired or never created);
-  - `web` names the CSRF cookie `__Host-csrf` with Secure cookies;
-  - `acme.pollAuthorization` throws an `AcmeError` with the challenge's
-    problem unless the authorization is `valid`;
-  - `webapi`: `install` makes the guard every route's handler; rate limiting
-    runs before the 401 / 403 / 422 checks; bad `limit` / `offset` is a 400;
-    a handler throw is a 500 envelope, then rethrown to `web.onError`;
-  - `jsonrpc.notify` throws on a non-2xx answer;
-  - `barcode` EAN / UPC `text` carries the check digit; code39 / code93
-    encode lowercase as uppercase;
-  - `spi.transfer` over spidev's `bufsiz` throws `"limit"` instead of failing
-    in the kernel; it is never split.
-- **Caps throw `"limit"`, not `"runtime"`** (M29.1), messages unchanged: a
-  range materialised into a list past the element cap (`0..n`),
-  `channel.make` past its capacity cap, a `crypto.pbkdf2` / `argon2id` /
-  `scrypt` `keyLen` over 1 MiB, `pbkdf2` work over 1e8, the `argon2id` time,
-  threads and memory caps, the `scrypt` memory and `p` caps, and the same
-  caps and the bcrypt cost cap in `crypto.verifyPassword`, `serial.read` / `i2c.read` / `readReg`
-  over 256 MiB, `intl.tr` output over 1 MiB, an `io.printf` field value over
-  4096 (`pad`, `max`, `prec`, `group`, `depth`), and the handle caps of `net`
-  (connections, listeners, UDP sockets), `httpd` servers, `sql` connections,
-  rows, transactions and statements, and `term.makeRaw`.
-- **`time.format` / `time.parse` layouts:** a `|` right after a code starts a
-  modifier list; write `||` for a literal `|` there (M29.24).
-- **Request parsing caps** (M29.2), kind `"limit"`: more than 10,000 form or
-  query pairs (`web.form`, `uri.parseQuery`), a multipart part header over
-  16 KiB or a part name / filename over 1 KiB. A multipart part header that
-  is not UTF-8 throws `"multipart"` (was `"runtime"`).
-- **`web.form` / `formValue` are strict** (M29.2): a `%` without two hex
-  digits or a decoded value that is not UTF-8 throws kind `"encoding"`, and a
-  body that is not UTF-8 `"runtime"`; before, such bytes stayed literal or
-  were read as ISO-8859-1. Unhandled, the request is answered 500 until M29.29
-  answers it 400. Browsers send neither from a page served as UTF-8.
-- **One cap for every result a call builds:** a string built by
-  `strings.replicate` / `replace` / `join` or `regex.replace` now stops at
-  256 MiB (32 MiB on `jennifer-tiny`), as bytes did; it was 1 GiB (128 MiB).
-- **`web` routing:** runs of `/` in a request path count as one, and a path
-  of more than 128 segments matches no route (a 404), wildcards included.
-  `webapi` reads the first 64 ranges of an `Accept` header and the first 16
-  `;` pieces of each.
+- **Nine bundled modules removed** (M29.33): `gotify`, `slack`, `discord`,
+  `telegram`, `prometheus`, `statsd`, `influxdb`, `mikrotik` and `mactelnet`.
+  Each is a deck with the same surface: add `@deckyard/<name>` to
+  `deck.toml`, run `jvc install` and write `import "@deckyard/<name>/" as
+  <name>;`. What the modules used stays in the bundle: `multipart`,
+  `crypto.mtwei*`, `net.bindToDevice` and `http.requestRawBody` (the last
+  deprecated, see below).
+- **`@jennifer/*` decks are now `@deckyard/*`** (M29.55): discord, gotify,
+  influxdb, mactelnet, mikrotik, oauthext, prometheus, slack, statsd and
+  telegram. Imports read `@deckyard/<name>/`; the old versions are yanked and
+  `jvc add` / `install` / `update` refuse a moved deck, naming the new one.
+  `@jennifer` keeps no decks.
+- **Deprecated names removed** (M29.34): `orm.hasOne` / `hasMany` (use
+  `oneToOne` / `oneToMany`), `validate.isInt` / `isFloat` / `isBool`
+  (`integer` / `number` / `boolean`), `rest.insecure` / `graphql.insecure`,
+  `soap` / `webdav` `withInsecure` (`withSkipVerify`) and `withCaCert`
+  (`withCA`).
+- **Deprecated builtins removed** (M29.35); `jennifer lint` reports a
+  leftover call as `L302` with the replacement: `strings.substring`,
+  `lists.slice` / `head` / `tail` / `pop`, `binary.slice` (slices),
+  `strings.repeat` (`replicate`), `testing.runWith` / `assertThrowsWith`
+  (`runArgs` / `assertThrowsArgs`), `convert.bytesFromString` /
+  `stringFromBytes` (`encoding.encode` / `decode`), `crypto.hkdf` / `pbkdf2` /
+  `argon2id` / `scrypt` (`deriveKey`), `convert.toString(n, radix)`
+  (`"%d|base="`), the two-bound `lists.range(a, b)` (`a..b`), and `io.printf`
+  / `sprintf` / `eprintf` with one non-string value (`"%v"`).
+- **Network halves move** (M29.17): `kvstore.memcacheStore(mc)` /
+  `redisStore(rc)` are `memcache.kvStore(mc)` / `redis.kvStore(rc)`, and the
+  `Store.Memcache` / `Store.Redis` variants are gone. `webhook.send` is
+  removed: `http.post(url, "application/json", payload,
+  webhook.signedHeaders(payload, secret))`.
+- **Data errors carry the library's kind** (M29.21): bad input data read by a
+  built-in library throws `"json"`, `"xml"`, `"toml"`, `"yaml"`, `"asn1"`,
+  `"encoding"`, `"compress"`, `"archive"`, `"images"`, `"crypto"` (a failed
+  `decrypt` / `unwrap` included), `"time"`, `"uuid"`, `"convert"`, `"kv"`, and
+  `"fs"` / `"io"` / `"os"` for invalid UTF-8 read as text; it was
+  `"runtime"`. Misuse stays `"runtime"`; messages are unchanged.
+- **`web` answers a malformed body 400** (M29.29): `form`, `formValue`,
+  `bodyJson` and `multipartForm` throw `web.WebError{kind: "web", message,
+  status}` (was `"encoding"`, `"runtime"` or `"multipart"`); a body parser's
+  cap is a `WebError` of kind `"limit"`, status 413. An escaped `WebError` is
+  answered with its status. `webapi` reads a body only by its `Content-Type`
+  (JSON or urlencoded form).
+- **`sql`** (M29.36): `open` requires verified TLS (`sslmode=verify-full`,
+  MySQL `tls=true`, `verify-ca` only with `sslrootcert`) and refuses a weaker
+  mode or `allowFallbackToPlaintext` unless `openWith(driver, dsn,
+  sql.Options{allowInsecure})`; a Unix socket and loopback are exempt,
+  `localhost` is never looked up. Server errors are `sql.SqlError{kind:
+  "sql", message, code, sqlState}`, deadlines `"timeout"`, transport failures
+  `net.NetError`. `asFloat` refuses NaN and infinity, `asBool` takes only 0 /
+  1.
+- **`net`** (M29.37): a connect, TLS handshake or lookup without a timeout
+  gives up after 30 s (`"timeout"`); `connect(addr, 0)` no longer means no
+  deadline. Use `math.MAX_INT` for none.
+- **`kv.incr`** on an absent or expired key starts at 0 and stores the result
+  (was `-1`) (M29.38).
+- **`ml.Model` is a value** (M29.39): no `$m.id`, no `ml.Model{...}` literal,
+  `%v` prints `<ml.Model kind>`.
+- **Integers outside int64** (M29.40): `json` and `yaml` keep every digit;
+  `asInt` / `asInts` refuse them and `asFloat` / `asFloats` refuse any
+  integer a float does not hold exactly, naming `asDecimal`.
+- **Strict decoding:** `compress.unpack` zlib / deflate refuse any byte after
+  the stream (M29.41); quoted-printable refuses a malformed `=` escape
+  (M29.42); `yaml` refuses a float past float64's range and reads `!!float`
+  as a float; `archive` refuses a drive-letter member name, a tar without its
+  end marker and data after the end.
+- **Caps:** a negative cap throws: `archive.unpackWith` (was unlimited),
+  `http.Options` fields (`maxBytes: -1` was unlimited) and `webdav.get`
+  (M29.43, M29.44).
+- **Timeouts** (M29.45): `term.readByte` / `readByteTimeout` throw `"closed"`
+  at the end of input and `readByteTimeout` `"timeout"` (were `-1` / `-2`);
+  `time.sleep` with a negative Duration throws.
+- **Closed handles** (M29.46): any use of a closed or consumed handle (`fs`,
+  `kv`, `serial`, `i2c`, `spi`, `gpio`, `term`, `channel`, `crc`, `net`,
+  `httpd`, `sql`, `compress`, `hash`) throws `"closed"` (was `"runtime"` in
+  most); a second `close` / `shutdown` / `discard` / `rollback` does nothing
+  (threw in `fs`, `net`, `term`, `channel`); a repeated `finalize` or `commit`
+  throws `"closed"`.
+- **`toml.asDatetime`** refuses a local date, time or date-time; read it with
+  `asLocal` (M29.47).
+- **Hardware** (M29.49): a `serial` byte with a parity or framing error
+  throws `"serial"` (was `0x00`); `i2c` reads and writes over 8192 bytes throw
+  `"limit"` (were clamped); `serial.write` returns `null`.
+- **Outside text is UTF-8** (M29.50): `os.getEnv`, `os.ARGS`, `fs.list`,
+  `walk`, `readlink`, `realpath` and `sql.asString` throw for invalid bytes,
+  naming the offset; the bytes forms read them.
+- **`crypto.jwkToPem`** returns `bytes` (M29.51).
+- **Consistency fixes** (M29.52): `strings.replace` with an empty `old`
+  throws; `intl.setLocale` needs a loaded catalog and kind `"intl"` is gone
+  (misuse is `"runtime"`); `meta.hasCapability` throws on an unknown name; a
+  `kv.openFile` flush throws `"kv"` when another writer changed the file;
+  `httpd.serveDir` answers 404 for a symlink out of `root` unless
+  `Options.followSymlinks`; `%f|prec` rounds the shortest decimal half to
+  even (`1002.675` prints `1002.68`, `2.345` prints `2.34`).
+- **Scope** (M29.9): reading a global through a hoisted function before its
+  `def` ran throws (was `null`); writing to a `match` binder is a parse
+  error.
+- A module's own struct prints with its stem inside the module too
+  (`geo.Point{x: 1}`) (M29.14).
+- **Lower caps:** the lexer takes 1,048,576 tokens per file (was 4,194,304);
+  on `jennifer-tiny` split / chars / `readLines` parts 262,144 (was
+  1,048,576) and Argon2id / scrypt memory 128 MiB; scrypt `p` at most 4 (was
+  16); `regex.findAll` at most 838,860 matches for a group-less pattern (was
+  2,097,152); `html` nesting 256 (was 512); `markdown`, `rst` and `myst`
+  sources over 4,194,304 characters, `markdown` / `rst` over 100,000 nodes
+  (was 200,000); `barcode` `quiet` 0-16 (was 0-100).
 
 ### Deprecated
 
-Removed in 0.28.0 (M29.35); `jennifer lint` reports each use as `L301`
-(info, so a gate keeps passing while code migrates):
+Removed in 0.29.0 (M30.25); `jennifer lint` reports each use as `L301`:
 
-- `strings.substring`, `lists.slice` / `head` / `tail` / `pop` and
-  `binary.slice`: the language's slices do their job (`$s[a..b]`, `$xs[..n]`,
-  `$xs[len($xs) - n..]`, `$xs[..len($xs) - 1]`, `$b[a..b]`).
-- `io.printf` / `sprintf` / `eprintf` with one non-string value: write
-  `io.printf("%v", $v)`.
-- `strings.repeat`: renamed `strings.replicate`, because `repeat` is a
-  keyword.
-- `testing.runWith` / `assertThrowsWith`: renamed `runArgs` /
-  `assertThrowsArgs`, because `With` means an options struct everywhere
-  else.
-- `crypto.hkdf` / `pbkdf2` / `argon2id` / `scrypt`: use
-  `crypto.deriveKey(algo, secret, salt, length, crypto.KdfParams{...})`, one
-  function for every key derivation with the algorithm first, like the rest
-  of `crypto` (`"hkdf-sha256"`, `"pbkdf2-sha256"`, `"argon2id"`, `"scrypt"`).
-  It has no default costs: a parameter the algorithm needs must be set.
-- `lists.range(a, b)`: use `a..b`; one that counted down (`range(3, 0)`) is
-  `lists.range(3, 0, -1)`. The stepped `range(a, b, step)` stays.
-- `convert.toString(n, radix)`: use `io.sprintf("%d|base=16", n)`, the same
-  digits; rendering a number is presentation, which printf owns.
-- `convert.bytesFromString` / `stringFromBytes`: use `encoding.encode` /
-  `decode`, same arguments (`encoding.encode("utf-8", s)`), which now take
-  UTF-8, UTF-16 and UTF-32 as well as the single-byte codecs.
-
-The bundled modules, the examples and the docs already use slices,
-`replicate`, `"%v"` and `encoding.encode` / `decode`; the bundled modules
-that do now require `>=0.27.0`.
+| Deprecated | Use |
+|---|---|
+| `http.requestWith`, `requestTls`, `requestWithTls`, `requestRawBody`, `requestRawBodyTls`, `requestBytes`, `requestWithBytes` | `send` / `sendBytes` (M29.43) |
+| `http.Options.tls`, `http.TlsOptions` (docs only) | `Options.tlsOptions as net.TLSOptions` (M29.43) |
+| `net.connect` / `connectTLS` / `startTLS` trailing timeout | `connectWith` / `startTLSWith` (M29.37) |
+| `net.readAll` / `readN` trailing idle timeout | `net.setIdleTimeout` (M29.45) |
+| `net.eof` | an empty `readBytes` (M29.46) |
+| `sql` drivers `mariadb` / `postgresql`, `sql.setQueryTimeout` | `mysql` / `postgres`, `Options.queryTimeoutMs` (M29.36) |
+| positional caps of `compress.unpack` / `images.decode`, `archive` `"tgz"` | `unpackWith` / `decodeWith`, `"tar.gz"` (M29.44) |
+| `fs.watch` interval, `os.spawn` options map | `fs.watchWith`, `os.spawnWith` (M29.45) |
+| two-argument `xml.decode` | `xml.decodeWith` (M29.47) |
+| `ml.free` (a no-op), the trailing hyper-parameters | the `*With` trainers (M29.39) |
+| `stats.multipleRegression`, `convert.toInt(float)`, `os.hasFlag` / `flag`, `decimal.toString`, `images.rgba` | `ml.linearRegression`, `math.trunc` / `round` / `floor` / `ceil`, the `args` module, `convert.toString` / `%v`, `images.Color{...}` (M29.48) |
+| `httpd.listenTLS` / `listenTLSWith` / `serveFileEtag` / `serveDirEtag` | `Options.certPem` / `keyPem` / `etag` (M29.48) |
+| the `gpio` module | the `gpio` library's `Chip` (M29.48) |
+| `spi.configure`, `gpio.chip`, `JENNIFER_GPIO_CHIP`, pin-only `gpio` calls | `spi.openWith`, `gpio.open` (M29.49) |
+| `crypto` `"rsa-sha256"` / `384` / `512`, a `string` password | `"rsa-pkcs1-sha*"`, `bytes` (M29.51) |
+| `time.fromUnixMillis` / `unixMillis` | `fromUnixMilliseconds` / `unixMilliseconds` (M29.52) |
 
 ### Language and interpreter
 
-- `match` destructures an indexed subject: `match ($queue[$head])` over a
-  `list of Tree`, a `map of K to Tree` value, and chains such as
-  `$grid[$i][$j]` or `$byName["x"].tree`, with exhaustiveness checked when the
-  file loads, inside `spawn` too. A call result is still refused (M29.28).
+- `Value` is 48 bytes (was 272): a 921,600-element `list of float` peaks at
+  170-200 MB instead of about 1 GB, and the benchmark suite runs in half the
+  time (M29.11). The element caps rise to 16,777,216 (`MaxRangeElements`) and
+  4,194,304 (channel capacity, matrix elements). On `jennifer-tiny` the
+  latter two are 262,144 and its call depth cap is 400 (was 120); the default
+  binary's stays 10,000.
+- A module's struct has one identity on both sides of its boundary, so a call
+  rebuilds nothing: 200 lookups on a 6,400-node module tree went from 1.1 s
+  to 0 ms (M29.14).
+- `strings.indexOf(s, sub, from)` and slices of a non-ASCII string resume
+  from the last position: a forward scan is linear (M29.13).
+- A parameter may shadow a global (M29.9).
+- The interpreter sets Go's soft memory limit to 90% of the machine or cgroup
+  limit (`GOMEMLIMIT` wins) (M29.3).
+- `make PREFIX=<dir>` sets the module, docs and `etc` paths; `jennifer
+  version -v` prints them with their source (M29.4).
+- Name resolution reads `JENNIFER_RESOLV_CONF` / `JENNIFER_HOSTS`, then
+  `<PREFIX>/etc`, then `/etc`; with no configuration a failed lookup names the
+  files looked for (M29.5).
 
 ### Standard library
 
 Libraries (`use NAME;`):
 
-- **`strings`**: `replicate(s, n)`, the new name of `repeat`, which is spelled
-  like a keyword (the pair matches `lists.replicate`). `join(parts)` without a
-  separator joins with `""`, as `binary.join` does. `trimPrefix` /
-  `trimSuffix` remove one exact affix;
-  `trimSet` / `trimLeftSet` / `trimRightSet(s, cutset)` strip any rune of a
-  cutset. The whitespace `trim*` are unchanged (M29.7).
-- **`lists`**: `replicate(xs, n)`, `n` deep copies of `xs` concatenated (over the
-  `concat` cap is `"limit"`, checked before anything is built; M29.25);
-  `sortWith(xs, cmp)`, a stable sort by an `int` comparator for orders on
-  several keys (M29.27).
-- **`json`, `toml`, `yaml`**: `asFloats(v[, ptr])` / `asInts` / `asStrings`
-  read a whole list in one call, each element as `asFloat` / `asInt` /
-  `asString` reads it; about 10x faster than a per-element loop on a
-  3,072-number embedding (M29.8).
-- **`decimal`**: the digit cap rises from 100,000 to 1,000,000 on the default
-  build (100,000 on `jennifer-tiny`), so 5^4^3^2 fits; parsing a long decimal
-  string is no longer quadratic (1,000,000 digits: about 2 s to 0.2 s)
-  (M29.26).
-- **`crypto`**: `deriveKey(algo, secret, salt, length, KdfParams)` with
-  `"hkdf-*"`, `"pbkdf2-*"` (`sha1` / `sha256` / `sha512`), `"argon2id"` and
-  `"scrypt"`, the checks and caps of the functions it replaces.
-- **`encoding`**: `encode` / `decode` take `"utf-8"`, `"utf-16"` / `"utf-32"`
-  (a byte-order mark; big-endian without one) and their `le` / `be` forms
-  (fixed order, no mark). Decoding is strict: invalid UTF-8, a truncated
-  unit, an unpaired surrogate or a value outside Unicode is an error naming
-  the byte offset. `codecs()` lists them first.
-- **`encoding`**: `parseForm(text)`, `parseCookies(header)` and
-  `parseMultipart(contentType, body) -> list of FormPart` parse request text
-  in Go with bounded memory, on both binaries (M29.2). They are strict:
-  malformed input is kind `"encoding"`, a reached cap `"limit"`.
-- **`io`**: `%f` takes `fill=0` and `group` / `sep` on the integer part, as
-  `%d` does: `%f|prec=3|pad=10|fill=0|sign=always` prints `+00003.142`
-  (M29.19).
-- **`time`**: the numeric codes take printf's `pad` modifier: `%d|pad=0`
-  prints the day unpadded, `time.parse` reads the same layouts (M29.24).
-
-- **`fs`**: `readSecretBytes(path) -> bytes` / `readSecretString` read a key or
-  token file only when no group or other permission bit is set and the owner
-  is the effective user or root (on a read-only mount, such as a container
-  secret, only group / other write is refused); over 1 MiB is `"limit"`
-  (M29.22). OS errors name each path once (`fs.FUNC: PATH: CAUSE`).
-- **`intl`**: `formatNumber(locale, value, digits)` for `int`, `float` and
-  `decimal.Decimal` with CLDR separators and grouping, half-even rounding.
-- **`i2c`**: `writeRead(bus, data, n)`, a combined transfer with a repeated
-  start (`I2C_RDWR`); errors carry hints for the usual errno values, an
-  adapter timeout is `"timeout"`.
-- **`serial`**: `Options.flowControl` (`"none"`, `"rtscts"`, `"xonxoff"`) and
-  `shared`; full raw mode, rates up to 4,000,000, input parity checking with
-  parity on; a hangup is `"closed"`; errors name the path with a hint.
-- **`spi`**: calls on one device are serialised, `close` waits for a transfer
-  in flight. **`gpio`**: errno hints.
-- **`kv`**: errors documented as kind `"runtime"`. **`math`** / **`stats`** /
-  **`decimal`**: messages name the function (`math.sqrt: ...`).
+- **`binary`**: `fromInt` / `fromUint` / `fromFloat`, `fromInts` /
+  `fromFloats` and `setInt` / `setUint` / `setFloat` write fixed-width
+  numbers, mirroring the readers (M29.54).
+- **`os`**: `SpawnOptions` gains `dir`, `env`, `cleanEnv` and `group` (a new
+  process group); `signal(p, name)` signals a child or its group (M29.57).
+  `waitTimeout` / `waitBytesTimeout`, `spawnWith` (M29.45); `getEnvBytes`,
+  `argsBytes()` (M29.50).
+- **`fs`**: `syncDir(path)`; `seek(f, offset)` / `tell(f)` (M29.57).
+  `watchWith(path, WatchOptions)` (M29.45); `listBytes`, `walkBytes`
+  (M29.50).
+- **`net`**: `connectWith`, `startTLSWith`, `lookupWith`,
+  `reverseLookupWith` with `ConnectOptions{timeoutMs, tls, tlsOptions,
+  dnsServers}` (M29.37, M29.5); `setIdleTimeout(conn, ms)` (M29.45). A name in a
+  chosen hosts file wins over the search list; a `dnsServers` reply must
+  echo the query.
+- **`sql`**: `openWith(driver, dsn, Options{allowInsecure, queryTimeoutMs})`,
+  `SqlError` (M29.36).
+- **`task`**: `setAllocBudget(bytes)` / `allocated()`, a catchable `"limit"`
+  past it (M29.3); `waitAllTimeout`. **`channel`**: `selectTimeout` (M29.45).
+- **`json`, `toml`, `yaml`**: `asDecimal(v[, ptr])` (M29.40). **`toml`,
+  `yaml`, `xml`, `asn1`**: `decodeWith(s, DecodeOptions)`; `yaml.asBytes`,
+  `toml.asLocal` (M29.47).
+- **`compress`**: `unpackWith(..., UnpackOptions)`. **`images`**:
+  `decodeWith(..., DecodeOptions)`. **`math`**: `MAX_INT`, `MIN_INT` (M29.44).
+- **`encoding`**: `"macintosh"` (Mac OS Roman) (M29.56).
+- **`crypto`**: `"rsa-pkcs1-sha*"` and `"rsa-pss-sha*"` in `sign` /
+  `verify`; `deriveKey`'s HKDF / PBKDF2 take the SHA-2, SHA-3 and BLAKE2
+  names; weak algorithms are tagged `(weak)` in name lists (M29.51).
+- **`time`**: `fromUnixMilliseconds`, `unixMilliseconds` (M29.52).
+- **`httpd`**: `Options.certPem` / `keyPem` / `etag` (M29.48),
+  `followSymlinks` (M29.52).
+- **`spi`**: `openWith(path, Options)`. **`gpio`**: `open(path) -> Chip`,
+  chip-first calls, `close` (M29.49).
+- **`linalg`**: `matmul`, `determinant`, `inverse`, `solve` stop on
+  `task.cancel`; **`ml`**: `pca` too, at most 256 features.
 
 Modules (`import "NAME.j";`):
 
-- **`amqp`**: `qos(c, prefetchCount)`, `publishMandatory` (a returned message
-  makes `waitConfirm` throw scope `"return"`, code 312), bad credentials are
-  an `AmqpError` with `replyCode` 403; `close` discards unread confirms.
-- **`http`**: `isCleartextRemote(url)`; a reused keep-alive socket that the
-  server closed resends an idempotent request (or one with `Idempotency-Key`)
-  once on a new connection.
-- **`imap`**: `fetchBytes`, `fetchPartialBytes`; `fetch*` and `flags` read the
-  FETCH carrying the requested UID and throw when there is none. **`pop`**:
-  `retrieveBytes`, `topBytes`, `listSizes -> list of MessageSize` (a
-  `sizes` position is not the message number once one is deleted).
-- **`jsonrpc`**: `parseReply(body, status, id)`; the server answers a
-  malformed request `-32600`.
-- **`ldap`**: `connectWith(address, security, net.TLSOptions)` /
-  `startTlsWith` for a private CA; the server never returns or matches
-  `userPassword`, answers writes with code 53, serialises edits; search
-  replies are capped (16 MiB a message, 64 MiB a search, `"limit"`).
-- **`mcp`**: the HTTP client sends `MCP-Protocol-Version` and reads event
-  stream replies; the stdio client stops a server after `stdioTimeoutMs`
-  (default 60 s, `"timeout"`) and shuts it down with SIGTERM / SIGKILL; stdout
-  past 16 MiB is `"limit"`.
-- **`mqtt`**: a message arriving while `publishQos1` / `subscribe` wait for an
-  ack is queued on the `Client` and returned first by `receive` / `poll` (over
-  1000: `"limit"`).
-- **`redis`**: `subscribe` / `psubscribe` / `unsubscribe` / `punsubscribe`
-  return once the server confirmed; messages read meanwhile stay queued.
-- **`s3`**: replies other than object downloads capped at 16 MiB; the
-  endpoint must be a bare `scheme://host[:port]`.
-- **`sqlmigrate`**: `migrate` / `rollbackMigrations` hold a per-database
-  advisory lock (60 s wait, then `"timeout"`).
-- **`vcard`**: reads vCard 2.1 quoted-printable values in their `CHARSET` and
-  group prefixes (`item1.EMAIL`). **`ical`**: `DURATION`, several
-  `VCALENDAR`s, RFC 5545 recurrence; `occurrences` past 100,000 steps is
-  `"limit"`.
-- **`webapi`**: `deprecatedSince` (`Deprecation` header) beside `deprecate`
-  (`Sunset`), `identity`, `onError`.
-- **`label`**: ZPL writes `^CI28` (UTF-8) and `^PW` / `^LL` from the label size.
-- **`log`**: control characters in values and text-form messages are escaped;
-  a field named `time` / `level` / `msg` is renamed in every format.
-- **`screen`**: `waitKey` returns `"eof"` on every call after end of input.
-- **`tengine`**: `add` replaces a name already in the set.
-- **`web`, `uri`, `multipart`**: form bodies, query strings, Cookie headers
-  and multipart bodies are parsed in Go (M29.2). A 3 MB `&&&...` form body
-  peaks at 26 MiB instead of 3.2 GB, a 1 MiB part header at 27 MiB instead of
-  1.6 GB; results for well-formed input are unchanged.
-- **`web`, `webapi`**: route patterns are split once when registered, and the
-  guard matches against a precompiled table, so routing no longer re-splits
-  every pattern per request (the registry's `/` served about 40% more
-  requests a second).
+- **`kvstore`, `session`, `ratelimit`, `webhook`** load on `jennifer-tiny`;
+  new `s3presign` (presigning without `net`), `webhook.signedHeaders`
+  (M29.17).
+- **`http`**: `sendBytes`; `Options.tlsOptions` (M29.43).
+- **`web`**: `allocBudget($app, bytes)` per request (M29.3);
+  `onServerError($app, handler)`, called only for errors answered 5xx.
+- **`soap`**: a WSDL 1.1 reader: `parseWsdl`, `parseWsdlWith`, `wsdlCall`,
+  `wsdlCallAt`, `wsdlCallTo`, `wsdlConnect`, `wsdlRequest`. `parse` and the
+  server refuse a misplaced `Header`, a header block in no namespace and
+  text in the Envelope or Body.
+- **`doctree`**: TrueType faces per role with fallbacks; `layoutPdf` returns
+  the glyphs no face has (M29.20). Bookmarks, images, fonts and pages go to
+  `pdf` once per document: 8.4 GiB to 337 MiB of copies on 500 pages
+  (M29.18).
+- **`jwt`**: `PS256` / `PS384` / `PS512` (M29.51).
+- **`html`**: `parse` slices the source instead of a character list: about a
+  third faster, 40% less memory (M29.15).
+- **`flatdb`**, **`oauth.save`**: fsync the directory after the rename
+  (M29.57).
+- **`screen`**: C1 control characters are drawn as spaces too.
+- **`mqtt`**: messages queued during an ack wait are capped at 64 MiB.
+  **`amqp`**: a frame over the negotiated frame-max is `"limit"`.
 
 ### Tooling
 
-- **`lint`**: `L204` no longer flags `len(...)` in a string slot; `L205` no
-  longer flags an accumulator whose every call, recursive ones included,
-  updates in place (`$v = f(..., $v, ...)` on a function local outside a
-  `try`) or passes a constant literal such as `[]`.
-- **`args`**: help text in one aligned column across positionals, options
-  and subcommands.
-- **`scripts/conventions-survey.j`** lists every deviation from the
-  conventions catalogue; its findings are kept in
-  `docs/technical/conventions-findings.md` (M29.23).
+- **`profile`**: `--out FILE`; SIGINT / SIGTERM write the report, SIGUSR1 a
+  snapshot (M29.30). Rows name the function and source line, `--by=function`,
+  `--top N`, `--focus PATTERN` (M29.31). A wait column for blocking builtins;
+  the header gives wall time and task count (M29.32). `--allocs` counts copies
+  into literals (M29.53).
+- **`lint`**: `L117` checks literal `printf` formats (M29.10); `L302` reports
+  removed API (M29.35), an import of a removed bundled module with the deck
+  that replaced it (M29.33), and a removed module function (M29.17, M29.34); `L301` reads `@deprecated` from module docblocks
+  (M29.43). One module imported under two prefixes is one type.
+- **Releases** add `linux/arm` (armv7, armv6), `linux/386`, `linux/riscv64`
+  and an unsupported `android/arm64` build (M29.6).
+- **Editors**: a Pygments lexer (`editors/pygments/`).
 
 ### Docs
 
-- `docs/technical/conventions.md`, the stance 8 catalogue, and the recorded
-  exceptions in `design-decisions.md` (M29.23).
-- Module doc examples run as written: those of the audited modules, `html`,
-  `sasl`, and the mail examples (now with `transport.Security`).
-- Editors: Zed and Helix need a tree-sitter grammar; JetBrains IDEs take the
-  TextMate bundle. The interpreter notes say a `try` body has its own frame;
-  the profiler docs say rows sort by `CUM`, then `SELF`.
+- The API pages show signatures as code with a contents table, and each module
+  guide links to its API page.
+- `docs/trademarks.md`.
 
 ### Fixed
 
-- The zero `func` value (`def f as func;`) is null: `$f == null` was false,
-  so a program could not test whether a callback was set.
-- `io.printf` `%f` with `sign=always` printed `+-0.0` for `-0.0`.
-- `images.decode` / `info` on data that is no image say "not a PNG, JPEG or
-  GIF image" instead of `image: unknown format`; `compress.unpack` on a
-  truncated stream, or one followed by bytes that are no stream, says so
-  instead of `unexpected EOF`.
-- `crypto.hkdf` past RFC 5869's maximum (255 x the hash size) names the
-  maximum in its message instead of `hkdf: hkdf: requested key length too
-  large`.
-
-- `mqtt` and `redis` dropped messages that arrived during an ack or
-  subscribe wait; `redis` reads were quadratic in the reply size, and a
-  `timeoutMs` of 0 left an earlier read deadline armed.
-- `amqp.waitConfirm` counted a `multiple` ack as one confirm.
-- `flatdb.save` could lose an update between its check and the rename; it now
-  rechecks under a short save lock (`<path>.savelock`).
-- `ntp` reported a Kiss-o'-Death sent with leap indicator 3 as unsynchronised,
-  and failed on a stray datagram instead of waiting for the reply.
-- `snmp.walk` on v1 did not stop at `noSuchName`.
-- `zmq.poll(sock, 0)` blocked.
-- `webhook`: with an empty secret a verify call could return `false` before
-  throwing; it now throws first.
-- `ldap`: a filter with trailing text (`(uid=a)x`) or an unescaped `(` was
-  accepted.
-- `smtp`: an address could close its angle brackets and add ESMTP parameters
-  (`a@example.com> NOTIFY=NEVER`).
-- `imap`: bytes a server sent behind its STARTTLS `OK` were read after the
-  handshake; untagged lines during `AUTHENTICATE` broke the exchange.
-- `rest`: `Link` headers are parsed per RFC 8288 (commas inside `<...>`,
-  several `rel` types, relative targets).
-- `font`: a font with an out-of-range `unitsPerEm` or `numberOfHMetrics`, or
-  a cmap glyph id past `numGlyphs`, is refused as malformed.
-- `bloom.optimal` caps `k` at 255 (a tiny `fpr` gave a filter `new` refused);
-  a deserialized filter's size is checked.
-- `tengine` closes its render budget store.
-- Linear instead of quadratic: the `csv` streaming reader's quote check,
-  `dotenv` multi-line values, `mime` RFC 2231 parameters, `rst` unmatched
-  inline start-strings, `doctree` PDF quote fills, `plot` bars, `pdf`
-  outlines.
-- `doctree` PDF: deep quote / list nesting drew text past the page edge, and
-  wide tables overflowed; both are now `"limit"` or sized columns.
-- `markdown`: inline nesting past 32 levels dropped formatting silently; it is
-  now `"limit"`.
-- `rst`: a malformed `csv-table` header is reported, a limit message is no
-  longer doubled, an escape after a start-string is content. `myst`: a
-  backtick in an info string, an indented fence line, fences in nested list
-  items and fences over 1000 characters.
-- `mactelnet`: `send` and `recv` keep their deadlines while other hosts send
-  datagrams; console output is capped at 1 Mi characters (`"limit"`).
-  `mikrotik`: replies are capped (`"limit"`).
-- `oauth.load` turned a generic kind from reading the file into `"oauth"`.
+- 32-bit targets: `profile --trace` panicked on unaligned atomics; counts were
+  narrowed to `int` before their range checks (M29.6).
+- The borrow analysis missed that `testing.runArgs` / `assertThrowsArgs` run
+  `.j` code (M29.35).
+- `kv`: a writer whose lock was broken as stale could still write; it now
+  throws `"kv"`.
+- `crypto.jwkToPem` checks that an EC point is on the curve.
+- `yaml`: a timestamp written in flow style round-trips as a `datetime`.

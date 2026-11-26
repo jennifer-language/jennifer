@@ -14,7 +14,7 @@ release is tagged and the section moves to [milestones](milestones.md).
 
 | Milestone | Release | What |
 |---|---|---|
-| [M29](#m29---0280) | 0.28.0 | open: the deck releases (M29.55); the rest is in [milestones](milestones.md#m29---0280) |
+| [M29](#m29---0280) | 0.28.0 | done; M29.55 moves to [milestones](milestones.md#m29---0280) with the tag |
 | [M30](#m30---0290) | 0.29.0 | copy elision and in-place updates, streaming and binary formats, function signatures, grapheme clusters, the conventions survey |
 | [M32](#m32---project-governance-licensing-and-contribution-policy) | before the first outside contribution | governance, licensing, CLA vs. DCO, contribution policy |
 | [1.0.0](#requirements-for-100-stable) | 1.0.0 | the requirements for a stable release |
@@ -25,12 +25,14 @@ release is tagged and the section moves to [milestones](milestones.md).
 ## M29 - 0.28.0
 
 The rest of M29 is done and summarised in
-[milestones](milestones.md#m29---0280); M29.55 stays open until 0.28.0 is
+[milestones](milestones.md#m29---0280); M29.55 stays here until 0.28.0 is
 tagged, and the rest of the conventions survey moved to M30.28.
 
 #### M29.55 - release every deck before 0.28.0
 
-**Planned.** M29.35 removes builtins that the decks' latest releases still
+**Done** (2026-11-26): the registry serves the "Next" release or a later one
+for all 57 decks; all ten `@jennifer` names carry a "moved" record to
+`@deckyard`. M29.35 removes builtins that the decks' latest releases still
 call, and a consumer installs a release, not `main`: a program using one of
 them stops working the day 0.28.0 is released. `main` of every deck was
 migrated (no removed call left, floor `>=0.27.0`); the releases
