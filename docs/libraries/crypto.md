@@ -525,7 +525,7 @@ The caps are kind `"limit"`:
 | PBKDF2 work (output blocks x iterations) | 10^8 |
 | Argon2id | time 16, threads 64, memory 1,048,576 KiB (1 GiB; 128 MiB on `jennifer-tiny`) |
 | scrypt | memory (128 x r x n) 1 GiB (128 MiB on `jennifer-tiny`), `p` 4 |
-| `verifyPassword` | a stored hash's parameters pass the same caps; bcrypt cost 18 |
+| `verifyPassword` | a stored hash's parameters pass the same caps, but scrypt `p` up to 16 (the cap before 0.28.0, so older hashes verify); bcrypt cost 18 |
 | RSA modulus (any RSA key, `jwkToPem`) | 16384 bits |
 
 The functions that draw randomness (`randBytes`, `randInt`, `keypair`, `sign`

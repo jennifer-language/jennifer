@@ -5,9 +5,11 @@ package cryptolib
 
 import (
 	"errors"
+	"fmt"
 	"math/bits"
 	"testing"
 
+	"golang.org/x/crypto/scrypt"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
@@ -32,10 +34,31 @@ func TestScryptParallelismCap(t *testing.T) {
 // bounds check, one step of r past it does not.
 func TestScryptMemoryCapBoundary(t *testing.T) {
 	ln := int64(bits.TrailingZeros64(maxScryptMemory / 128))
-	if err := scryptBounds(ln, 1, 1); err != nil {
+	if err := scryptBounds(ln, 1, 1, maxScryptP); err != nil {
 		t.Fatalf("at the cap (ln=%d, r=1): %v", ln, err)
 	}
-	if err := scryptBounds(ln, 2, 1); err == nil {
+	if err := scryptBounds(ln, 2, 1, maxScryptP); err == nil {
 		t.Fatalf("past the cap (ln=%d, r=2) passed", ln)
+	}
+}
+
+// A stored scrypt hash verifies up to p 16, the cap before 0.28.0, so hashes
+// written then still check; p 17 is "limit". New derivations stay at p 4.
+func TestScryptVerifyAcceptsOlderParallelism(t *testing.T) {
+	salt := []byte("saltsalt")
+	stored := func(p int) string {
+		key, err := scrypt.Key([]byte("pw"), salt, 16, 1, p, 16)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fmt.Sprintf("$scrypt$ln=4,r=1,p=%d$%s$%s", p, b64.EncodeToString(salt), b64.EncodeToString(key))
+	}
+	ok, err := verifyScrypt([]byte("pw"), stored(16))
+	if err != nil || !ok {
+		t.Fatalf("p=16: %v, %v", ok, err)
+	}
+	var ce *limits.CapError
+	if _, err := verifyScrypt([]byte("pw"), stored(17)); !errors.As(err, &ce) {
+		t.Fatalf("p=17: %T %v, want a limits.CapError", err, err)
 	}
 }

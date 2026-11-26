@@ -160,16 +160,19 @@ const (
 // The most work a hash or a raw KDF call may ask for, so a hostile stored
 // hash or a typo cannot pin a core or exhaust memory: Argon2id 16 passes, 64
 // lanes; scrypt p 4 (ln=20, r=8, p=16 took 48 s; p 4 keeps the worst verify
-// near Argon2id's 13 s and bcrypt's 16 s); bcrypt cost 18 (about 16 s). The
+// near Argon2id's 13 s and bcrypt's 16 s), except that verifyPassword takes a
+// stored hash up to p 16, the cap before 0.28.0, so a hash written then still
+// verifies; bcrypt cost 18 (about 16 s). The
 // memory caps, maxArgonMemory and maxScryptMemory, are per build
 // (cryptolib_kdfcap_std.go / _tiny.go).
 const (
-	maxArgonTime    = 16
-	maxArgonThreads = 64
-	maxScryptP      = 4
-	maxBcryptCost   = 18
-	minSaltLen      = 8
-	maxSaltLen      = 1024
+	maxArgonTime     = 16
+	maxArgonThreads  = 64
+	maxScryptP       = 4
+	maxScryptVerifyP = 16
+	maxBcryptCost    = 18
+	minSaltLen       = 8
+	maxSaltLen       = 1024
 )
 
 // hashPassword's defaults must stay under the memory caps on both builds: a
@@ -367,7 +370,7 @@ func verifyScrypt(pw []byte, stored string) (bool, error) {
 		return fail(err)
 	}
 	ln, r, par := p[0], p[1], p[2]
-	if err := scryptBounds(ln, r, par); err != nil {
+	if err := scryptBounds(ln, r, par, maxScryptVerifyP); err != nil {
 		return false, dataerr.Wrap("crypto", fmt.Errorf("crypto.verifyPassword: %w", err))
 	}
 	salt, err := phcBytes(f[3], "salt", minSaltLen, maxSaltLen)
@@ -386,14 +389,14 @@ func verifyScrypt(pw []byte, stored string) (bool, error) {
 }
 
 // scryptBounds refuses scrypt parameters that are not valid (kind "runtime")
-// or over the memory and parallelism caps (kind "limit").
-func scryptBounds(ln, r, p int64) error {
+// or over the memory cap or the parallelism cap maxP (kind "limit").
+func scryptBounds(ln, r, p, maxP int64) error {
 	if ln < 1 || r < 1 || p < 1 {
 		return fmt.Errorf("scrypt ln=%d,r=%d,p=%d: ln, r and p must be at least 1", ln, r, p)
 	}
-	if ln > 30 || p > maxScryptP || r > maxScryptMemory/(128<<ln) {
+	if ln > 30 || p > maxP || r > maxScryptMemory/(128<<ln) {
 		return limits.Capf("scrypt ln=%d,r=%d,p=%d is over the limits (128 * r * 2^ln up to %d bytes, p to %d)",
-			ln, r, p, maxScryptMemory, maxScryptP)
+			ln, r, p, maxScryptMemory, maxP)
 	}
 	return nil
 }
@@ -459,7 +462,7 @@ func scryptCore(fn string, args []interpreter.Value) (interpreter.Value, error) 
 	for 1<<ln < n {
 		ln++
 	}
-	if err := scryptBounds(ln, r, p); err != nil {
+	if err := scryptBounds(ln, r, p, maxScryptP); err != nil {
 		return interpreter.Null(), fmt.Errorf("%s: %w", fn, err)
 	}
 	key, err := scrypt.Key(args[0].Bytes(), args[1].Bytes(), int(n), int(r), int(p), int(v[3]))
