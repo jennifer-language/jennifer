@@ -302,8 +302,8 @@ if (oauth.isExpired($tok)) {
 `oauth.save` / `oauth.load` persist a token to disk (JSON via `fs`) so a
 long-running or restarted program keeps its refresh token. An access / refresh
 token is a bearer credential, so `save` writes it to a new owner-only `0600`
-file beside `path`, flushes it to the disk, and renames it over `path`, the
-file-permission model `gh` / `aws` use for their token stores. A crash or a
+file beside `path`, flushes it to the disk, renames it over `path` and flushes
+the directory, the file-permission model `gh` / `aws` use for their token stores. A crash or a
 power loss mid-write leaves the old file or the new one, and a symbolic link at
 `path` is replaced, not followed.
 

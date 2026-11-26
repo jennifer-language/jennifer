@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 
 /**
  * A generic OAuth2 client: the get-a-token half of OAuth2 (the use-a-token half
@@ -44,6 +44,7 @@
 use time;
 use json;
 use fs;
+use path as paths;
 use convert;
 use crypto;
 use encoding;
@@ -1587,7 +1588,8 @@ func codeParams(config as Config, code as string, verifier as string, redirectUr
  * Write a token to a file as JSON (its own field shape, round-trips with load;
  * absolute `expiresAt` is preserved). The token goes to a new owner-only
  * (`0600`) file beside `path`, flushed to the disk, which then replaces
- * `path`: a crash or a power loss leaves the old file or the new one, and a
+ * `path`, and the directory is flushed after the rename: a crash or a power
+ * loss leaves the old file or the new one, and a
  * symbolic link at `path` is replaced, not followed. An
  * OAuth token is a bearer credential - the file-permission model `gh` / `aws`
  * use for their token stores.
@@ -1603,6 +1605,7 @@ export func save(path as string, token as Token) {
         fs.chmod($tmp, 0o600);
         writeSynced($tmp, json.encode($token));
         fs.rename($tmp, $path);
+        fs.syncDir(paths.dir($path));
     } catch (e) {
         if (fs.exists($tmp)) {
             fs.remove($tmp);

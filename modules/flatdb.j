@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 
 /**
  * A file-backed JSON document store. Load a JSON file once into a
@@ -8,10 +8,11 @@
  * write it back with a crash-atomic whole-file replace (temp file + rename). It
  * is deliberately NOT a database engine: crash-atomic snapshotting of small
  * data. Atomicity is whole-file (temp + rename); the data is fsynced before the
- * rename, the directory entry is not. For a real database, use a client over `net`
- * (e.g. `redis`), not this. It is a thin file-lifecycle + ergonomics layer over
- * the `json` write surface, not a re-implementation of it. Runs on both binaries
- * (pure `json` + `fs`, no network).
+ * rename and the directory after it, so a completed save survives a crash. For a
+ * real database, use a client over `net` (e.g. `redis`), not this. It is a thin
+ * file-lifecycle + ergonomics layer over the `json` write surface, not a
+ * re-implementation of it. Runs on both binaries (`json`, `fs` and `path`, no
+ * network).
  *
  * CONCURRENT WRITERS: crash-atomic is not the same as write-safe. Two writers
  * that each `open`, edit different parts, and `save` would otherwise silently
@@ -38,6 +39,7 @@ use time;
 use convert;
 use hash;
 use encoding;
+use path;
 
 # Advisory-lock tuning for `lock` / `update`: how long to wait for a contended
 # lock, how often to retry while waiting, and when a lock left by a crashed
@@ -333,11 +335,13 @@ func encodeFor(data as json.Value, opts as SaveOptions) {
 # writeAtomic writes `text` and replaces `path` crash-atomically: it stages a
 # sibling temp file (stageAtomic) and renames it over the target, so a reader ever
 # sees the whole old file or the whole new one, never a torn write; an interrupted
-# write leaves any existing target intact.
+# write leaves any existing target intact. Syncing the directory afterwards
+# makes the rename itself durable.
 func writeAtomic(path as string, text as string, mode as int) {
     def tmp as string init stageAtomic($path, $text, $mode);
     errdefer removeQuietly($tmp);
     fs.rename($tmp, $path);
+    fs.syncDir(path.dir($path));
     return null;
 }
 
@@ -458,6 +462,8 @@ export func saveWith(db as DB, opts as SaveOptions) {
         fs.rename($bak, $db.path + ".bak");
     }
     fs.rename($tmp, $db.path);
+    # The renames are durable once the directory holding the names is synced.
+    fs.syncDir(path.dir($db.path));
     return DB{path: $db.path, data: $db.data, version: tokenOf($text)};
 }
 
