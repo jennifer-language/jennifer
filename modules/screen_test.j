@@ -83,6 +83,12 @@ func testControlRunesNeutralized() {
     def edges as string init "\u0000\u001f ~\u007fé♥";
     def wide as Buffer init text(newScreen(1, 7), 0, 0, $edges);
     testing.assertEqual($wide.cells, [" ", " ", " ", "~", " ", "é", "♥"]);
+    # C1 controls go too: U+009B is a CSI on its own in an xterm, U+0080 and
+    # U+009F are the range's ends; U+00A0 (no-break space) is printable and stays.
+    def c1 as string init "\u0080\u009b2J\u009f\u00a0";
+    def high as Buffer init text(newScreen(1, 6), 0, 0, $c1);
+    testing.assertEqual($high.cells, [" ", " ", "2", "J", " ", "\u00a0"]);
+    testing.assertTrue(not strings.contains(render($high), "\u009b"));
 }
 
 func testTextClipsAtRowEnd() {

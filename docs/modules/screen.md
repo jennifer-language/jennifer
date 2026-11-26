@@ -69,9 +69,9 @@ on screen, and an East-Asian-ambiguous one (such as `♥`) takes two on some
 CJK-locale terminals, shifting the rest of its row out of step with the buffer
 and `diff`; keep cell text to single-width characters.
 
-Every drawing call writes a C0 control character or DEL as a space, so text or
-a glyph from untrusted input cannot smuggle an escape sequence (cursor moves,
-OSC 52 clipboard writes) through `render`. Rectangles (`fill`, `hline`,
+Every drawing call writes a C0 or C1 control character or DEL as a space, so
+text or a glyph from untrusted input cannot smuggle an escape sequence (cursor
+moves, OSC 52 clipboard writes, a one-character C1 CSI) through `render`. Rectangles (`fill`, `hline`,
 `vline`, `box`) are clipped to the buffer before drawing, so their cost is
 bounded by the buffer size.
 

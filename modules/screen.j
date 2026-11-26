@@ -326,10 +326,11 @@ export func textColor(buf as Buffer, x as int, y as int, s as string, color as s
     return $buf;
 }
 
-# CONTROL_CHARS matches a C0 control (codepoint < 32) or DEL (127).
-def const CONTROL_CHARS as string init '[\x00-\x1f\x7f]';
+# CONTROL_CHARS matches a C0 control (codepoint < 32), DEL (127) or a C1 control
+# (U+0080 to U+009F: U+009B is a one-character CSI in terminals that honour C1).
+def const CONTROL_CHARS as string init '[\x00-\x1f\x7f-\x{9f}]';
 
-# controlsToSpaces replaces every C0 control or DEL in s with a space, so
+# controlsToSpaces replaces every C0 or C1 control or DEL in s with a space, so
 # untrusted text written into a cell cannot smuggle a terminal escape (a CSI /
 # OSC sequence - window title, cursor move, OSC 52 clipboard write) through
 # render. One regex pass per span, not a check per glyph; multi-byte runes are
