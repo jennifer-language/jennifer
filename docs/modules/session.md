@@ -3,10 +3,11 @@
 Import with `import "session.j" as session;`. Server-side sessions over a
 **selectable** key/value backend: a session is a [`json.Value`](../libraries/json.md)
 held under a `sess:ID` key with a sliding TTL, so it expires on its own when
-idle. The store is a [`kvstore.Store`](kvstore.md) - back it with `memcache` or
-`redis` (distributed, shared across processes) or the in-process
-[`kv`](../libraries/kv.md) library (single process, no server), all behind one
-API. A session can hold structured data (nested objects, arrays, numbers), not
+idle. The store is a [`kvstore.Store`](kvstore.md) - back it with the in-process
+[`kv`](../libraries/kv.md) library (`kvstore.inProcessStore` / `fileStore`:
+single process, no server, both binaries) or `memcache` / `redis`
+(`memcache.kvStore` / `redis.kvStore`: distributed, shared across processes,
+default binary), all behind one API. A session can hold structured data (nested objects, arrays, numbers), not
 only flat strings.
 
 ```jennifer
@@ -14,7 +15,7 @@ import "session.j" as session;
 import "kvstore.j" as kvstore;
 use json;
 
-def store as kvstore.Store init kvstore.inProcessStore();  # or redisStore / memcacheStore / fileStore
+def store as kvstore.Store init kvstore.inProcessStore();  # or fileStore / redis.kvStore / memcache.kvStore
 def id as string init session.create($store, 1800);        # a 30-minute session
 def data as json.Value init session.load($store, $id);
 $data = json.set($data, "/user", "ada");
@@ -69,7 +70,7 @@ logout), so an ID known before the change is worthless after it.
   memcache / in-process backend evicts, so treat expiry as expected (re-auth, do
   not lose money on a dropped session).
 - **Pick the backend for your topology.** More than one process (a web fleet)
-  must see the same session -> use `redis` / `memcache`. A single-process app can
+  must see the same session -> use `redis.kvStore` / `memcache.kvStore`. A single-process app can
   use `inProcessStore` (in memory) or `fileStore` (persisted across runs).
 
 ## See also

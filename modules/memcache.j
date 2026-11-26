@@ -15,7 +15,9 @@
  * "memcache") with the `reply` and the server's `text`. The value
  * block is framed over bytes by the server's byte count, so a value whose byte
  * length differs from its rune length (any non-ASCII UTF-8 text) round-trips
- * byte-exact. Needs the default `jennifer` binary (uses `net`).
+ * byte-exact. `kvStore` wraps a session as a `kvstore.Store`, the backend
+ * `session` and `ratelimit` take. Needs the default `jennifer` binary (uses
+ * `net`).
  * @module memcache
  * @example
  * def mc as memcache.Session init memcache.connect(memcache.Options{host: "127.0.0.1", port: 11211});
@@ -28,6 +30,7 @@ use net;
 use binary;
 use strings;
 use convert;
+import "./kvstore.j" as kvstore;
 
 /**
  * Connection settings (plaintext; memcached's text protocol has no auth / TLS).
@@ -590,4 +593,62 @@ export func quit(session as Session) {
     # not leak the fd).
     defer net.close($session.conn);
     writeCmd($session, "quit\r\n");
+}
+
+# --- kvstore backend ----------------------------------------------------------
+
+/**
+ * A `kvstore.Store` over this session (a distributed backend for `kvstore`,
+ * `session` and `ratelimit`): `kvstore.set` / `get` / `delete` / `touch` /
+ * `incrWindow` then run on the server.
+ * @param session {Session} the open session
+ * @return {kvstore.Store} a memcache-backed store
+ */
+export func kvStore(session as Session) {
+    return kvstore.remoteStore(kvstore.Backend{
+        name: "memcache",
+        conn: $session.conn,
+        timeoutMs: $session.timeoutMs,
+        set: kvSet,
+        get: kvGet,
+        delete: kvDelete,
+        touch: kvTouch,
+        incrWindow: kvIncrWindow
+    });
+}
+
+# kvSession is the session a kvstore.Backend was built from.
+func kvSession(b as kvstore.Backend) {
+    return Session{conn: $b.conn, timeoutMs: $b.timeoutMs};
+}
+
+func kvSet(b as kvstore.Backend, key as string, value as string, ttlSec as int) {
+    set(kvSession($b), $key, $value, $ttlSec);
+    return null;
+}
+
+func kvGet(b as kvstore.Backend, key as string) {
+    return get(kvSession($b), $key);
+}
+
+func kvDelete(b as kvstore.Backend, key as string) {
+    return delete(kvSession($b), $key);
+}
+
+func kvTouch(b as kvstore.Backend, key as string, ttlSec as int) {
+    return touch(kvSession($b), $key, $ttlSec);
+}
+
+# kvIncrWindow: incr does not create a key, so incr-else-add arms the window
+# TTL; a lost add race means another client created it, so incr again.
+func kvIncrWindow(b as kvstore.Backend, key as string, ttlSec as int) {
+    def session as Session init kvSession($b);
+    def n as int init incr($session, $key, 1);
+    if ($n == -1) {
+        if (add($session, $key, "1", $ttlSec)) {
+            return 1;
+        }
+        return incr($session, $key, 1);
+    }
+    return $n;
 }

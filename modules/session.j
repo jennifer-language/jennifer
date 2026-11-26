@@ -5,9 +5,11 @@
 /**
  * Server-side sessions over a selectable key/value backend. A session is a
  * `json.Value` held under a `sess:ID` key with a sliding TTL, so it expires on
- * its own when idle. The store is a `kvstore.Store` - back it with `memcache` or
- * `redis` (distributed, shared across processes) or the in-process `kv` library
- * (single process, no server), all behind one API. Session values are a
+ * its own when idle. The store is a `kvstore.Store` - back it with the
+ * in-process `kv` library (`kvstore.inProcessStore` / `fileStore`: single
+ * process, no server, both binaries) or a `memcache` / `redis` connection
+ * (`memcache.kvStore` / `redis.kvStore`: distributed, shared across processes,
+ * default binary), all behind one API. Session values are a
  * `json.Value`, so a session holds structured data (nested objects, arrays,
  * numbers), not just flat strings. The JSON is stored base64-wrapped, so any
  * value is binary-safe. Session IDs are UUID v4 from the `crypto` library's
@@ -20,7 +22,7 @@
  * import "session.j" as session;
  * import "kvstore.j" as kvstore;
  *
- * def store as kvstore.Store init kvstore.inProcessStore();  # or redisStore / memcacheStore
+ * def store as kvstore.Store init kvstore.inProcessStore();  # or redis.kvStore($rc)
  * def id as string init session.create($store, 1800);        # 30-minute session
  * def data as json.Value init session.load($store, $id);
  * $data = json.set($data, "/user", "ada");

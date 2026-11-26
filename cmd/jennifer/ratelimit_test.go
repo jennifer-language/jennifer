@@ -45,7 +45,7 @@ import %q as ratelimit;
 import %q as kvstore;
 import %q as memcache;
 def mc as memcache.Session init memcache.connect(memcache.Options{host: "127.0.0.1", port: %d});
-def st as kvstore.Store init kvstore.memcacheStore($mc);
+def st as kvstore.Store init memcache.kvStore($mc);
 def lim as ratelimit.Limiter init ratelimit.fixedWindow($st, 3, 3600);
 def r1 as ratelimit.Result init ratelimit.check($lim, "ip:a");
 testing.assertTrue($r1.allowed);

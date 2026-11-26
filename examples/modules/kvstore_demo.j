@@ -4,9 +4,10 @@
 
 /**
  * One key/value surface over a selectable backend with kvstore. This demo uses
- * the in-process backend (kvstore.inProcessStore), so it runs with no server;
- * swap in kvstore.redisStore($rc) / memcacheStore($mc) for a store shared across
- * processes, or kvstore.fileStore(path) to keep it across runs. The calls below
+ * the in-process backend (kvstore.inProcessStore), so it runs with no server
+ * and on jennifer-tiny; swap in redis.kvStore($rc) / memcache.kvStore($mc) for a
+ * store shared across processes, or kvstore.fileStore(path) to keep it across
+ * runs. The calls below
  * stay the same whichever backend you pick.
  * @module kvstore_demo
  */

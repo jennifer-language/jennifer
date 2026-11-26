@@ -3,61 +3,65 @@
 # pragma-jennifer-version: >=0.25.0
 
 /**
- * A backend selector for a key/value store with per-key TTL: one `Store` value
- * is one of three backends - a `memcache` connection, a `redis` connection, or
- * the in-process `kv` library - and dispatches a uniform set / get / delete /
- * touch / incrWindow surface to whichever was chosen. This is the shared backend
- * layer under the `session` and `ratelimit` modules, so each works over any of
- * the three without duplicating the dispatch. The verb set mirrors `memcache`,
- * so a fixed-window counter (atomic incr + TTL) works identically on all three.
+ * A key/value store with per-key TTL behind one `Store` value and one verb set
+ * (set / get / delete / touch / incrWindow), so code written against it runs
+ * over any backend. This is the shared backend layer under the `session` and
+ * `ratelimit` modules. The verb set mirrors `memcache`, so a fixed-window
+ * counter (atomic incr + TTL) works identically on every backend.
  *
- * `Store` is a sum type (enum), not a tagged struct: each variant carries only
- * its own backend handle, and the dispatch is a `match` the compiler checks for
- * exhaustiveness - there is no invalid "kind says memcache but the handle is
- * empty" state, and a new backend cannot be silently forgotten in one verb.
+ * This module holds the **local** backends, over the `kv` library, and runs on
+ * both binaries: `inProcessStore` keeps state in memory (reset each run),
+ * `fileStore` persists it to a file (survives across `jennifer run`
+ * invocations; handy for development and CLI tools with no server). The
+ * distributed backends, a `memcache` or `redis` connection shared across
+ * processes, are built by the `kvremote` module, which needs the default binary
+ * (`net`); it returns the same `Store`, so `session` and `ratelimit` take
+ * either.
  *
- * The `memcache` / `redis` backends are distributed (state lives on the server,
- * shared across processes); the **local** backend (the `kv` library) keeps state
- * in this process - either in memory (`inProcessStore`, reset each run) or
- * persisted to a file (`fileStore`, survives across `jennifer run` invocations -
- * handy for development and CLI tools with no server). Pick a distributed backend
- * when more than one process must see the same state.
+ * `Store` is a sum type (enum): a `Local` variant carries its `kv.Store`
+ * handle, a `Remote` variant the `Backend` that `kvremote` fills in (the
+ * connection and one function value per verb, which run in `kvremote`). This
+ * module imports no network module, so it carries no `net` capability.
  * @module kvstore
  */
 use kv;
-use convert;
-import "./memcache.j" as memcache;
-import "./redis.j" as redis;
+use net;
 
 /**
- * A store bound to one backend (a sum type over the three). Value-semantic; the
- * live connection / handle a variant wraps is shared across copies (a `net.Conn`
- * or a `kv.Store` handle). Build with `memcacheStore` / `redisStore` /
- * `inProcessStore` / `fileStore`.
+ * A remote backend, as `kvremote` builds it: the connection and the function
+ * value that carries out each verb on it. Not built by hand; the function
+ * values are called with the `Backend` itself first, then the verb's
+ * arguments.
+ * @field name {string} the backend: "memcache" or "redis"
+ * @field conn {net.Conn} the open connection
+ * @field timeoutMs {int} the connection's per-reply timeout in milliseconds
+ * @field set {func} `(Backend, key, value, ttlSec)`
+ * @field get {func} `(Backend, key) -> string`
+ * @field delete {func} `(Backend, key) -> bool`
+ * @field touch {func} `(Backend, key, ttlSec) -> bool`
+ * @field incrWindow {func} `(Backend, key, ttlSec) -> int`
  */
-export def enum Store {
-    Memcache{mc as memcache.Session},
-    Redis{rc as redis.Session},
-    Local{local as kv.Store}
+export def struct Backend {
+    name as string,
+    conn as net.Conn,
+    timeoutMs as int,
+    set as func,
+    get as func,
+    delete as func,
+    touch as func,
+    incrWindow as func
 };
 
 /**
- * A store backed by a memcache connection (distributed).
- * @param mc {memcache.Session} the memcache connection
- * @return {Store} a memcache-backed store
+ * A store bound to one backend. Value-semantic; the handle a variant wraps (a
+ * `kv.Store` or a `net.Conn`) is shared across copies. Build with
+ * `inProcessStore` / `fileStore`, or `kvremote.memcacheStore` /
+ * `kvremote.redisStore`.
  */
-export func memcacheStore(mc as memcache.Session) {
-    return Store.Memcache{mc: $mc};
-}
-
-/**
- * A store backed by a redis connection (distributed).
- * @param rc {redis.Session} the redis connection
- * @return {Store} a redis-backed store
- */
-export func redisStore(rc as redis.Session) {
-    return Store.Redis{rc: $rc};
-}
+export def enum Store {
+    Local{local as kv.Store},
+    Remote{backend as Backend}
+};
 
 /**
  * A store backed by the in-process `kv` library (this process only, no server).
@@ -80,6 +84,16 @@ export func inProcessStore() {
  */
 export func fileStore(path as string) {
     return Store.Local{local: kv.openFile($path)};
+}
+
+/**
+ * A store over a remote backend. `kvremote.memcacheStore` and
+ * `kvremote.redisStore` call this; other code has no need to.
+ * @param backend {Backend} the backend, with every verb set
+ * @return {Store} a store dispatching to the backend
+ */
+export func remoteStore(backend as Backend) {
+    return Store.Remote{backend: $backend};
 }
 
 # --- uniform key/value ops (exported) ------------------------------
@@ -108,15 +122,8 @@ func checkTtl(fnName as string, ttlSec as int) {
 export func set(store as Store, key as string, value as string, ttlSec as int) {
     checkTtl("set", $ttlSec);
     match ($store) {
-        when Memcache(m) { memcache.set($m.mc, $key, $value, $ttlSec); }
         when Local(p) { kv.set($p.local, $key, $value, $ttlSec); }
-        when Redis(r) {
-            if ($ttlSec > 0) {
-                redis.command($r.rc, ["SET", $key, $value, "EX", convert.toString($ttlSec)]);
-            } else {
-                redis.command($r.rc, ["SET", $key, $value]);
-            }
-        }
+        when Remote(r) { $r.backend.set($r.backend, $key, $value, $ttlSec); }
     }
     return;
 }
@@ -129,9 +136,8 @@ export func set(store as Store, key as string, value as string, ttlSec as int) {
  */
 export func get(store as Store, key as string) {
     match ($store) {
-        when Memcache(m) { return memcache.get($m.mc, $key); }
         when Local(p) { return kv.get($p.local, $key); }
-        when Redis(r) { return redis.get($r.rc, $key); }
+        when Remote(r) { return $r.backend.get($r.backend, $key); }
     }
     return "";
 }
@@ -144,9 +150,8 @@ export func get(store as Store, key as string) {
  */
 export func delete(store as Store, key as string) {
     match ($store) {
-        when Memcache(m) { return memcache.delete($m.mc, $key); }
         when Local(p) { return kv.delete($p.local, $key); }
-        when Redis(r) { return redis.del($r.rc, $key) > 0; }
+        when Remote(r) { return $r.backend.delete($r.backend, $key); }
     }
     return false;
 }
@@ -162,22 +167,8 @@ export func delete(store as Store, key as string) {
 export func touch(store as Store, key as string, ttlSec as int) {
     checkTtl("touch", $ttlSec);
     match ($store) {
-        when Memcache(m) { return memcache.touch($m.mc, $key, $ttlSec); }
         when Local(p) { return kv.touch($p.local, $key, $ttlSec); }
-        when Redis(r) {
-            if ($ttlSec > 0) {
-                return redis.command($r.rc, ["EXPIRE", $key, convert.toString($ttlSec)]).num > 0;
-            }
-            # ttlSec 0 means "no expiry" (uniform with memcache / kv). Use PERSIST,
-            # not EXPIRE: redis treats a non-positive EXPIRE as an immediate
-            # delete, which would diverge from the other backends. Report whether
-            # the key existed, as the other backends do.
-            def present as bool init redis.command($r.rc, ["EXISTS", $key]).num > 0;
-            if ($present) {
-                redis.command($r.rc, ["PERSIST", $key]);
-            }
-            return $present;
-        }
+        when Remote(r) { return $r.backend.touch($r.backend, $key, $ttlSec); }
     }
     return false;
 }
@@ -185,9 +176,8 @@ export func touch(store as Store, key as string, ttlSec as int) {
 /**
  * Atomically increment the counter at `key` and return the new value, creating it
  * (at 1, with a `ttlSec`-second expiry) on the first hit. The atomic-counter-plus-TTL
- * primitive a fixed-window rate limiter is built from - portable across all three
- * backends (redis `SET NX EX` then `INCR`, so the key never exists without its
- * TTL; memcache `incr` else `add`; kv `add` then `incr`).
+ * primitive a fixed-window rate limiter is built from - portable across every
+ * backend (kv `add` then `incr`; see `kvremote` for redis and memcache).
  * @param store {Store} the store
  * @param key {string} the counter key
  * @param ttlSec {int} the TTL to arm on the first hit (seconds)
@@ -197,27 +187,6 @@ export func touch(store as Store, key as string, ttlSec as int) {
 export func incrWindow(store as Store, key as string, ttlSec as int) {
     checkTtl("incrWindow", $ttlSec);
     match ($store) {
-        when Redis(r) {
-            # Create the counter at 0 *with* its TTL (SET NX EX) before INCR, which
-            # keeps the TTL: an INCR-then-EXPIRE pair leaves the key without an
-            # expiry if the process dies (or EXPIRE fails) in between, and the
-            # window would then never reset.
-            if ($ttlSec > 0) {
-                redis.command($r.rc, ["SET", $key, "0", "EX", convert.toString($ttlSec), "NX"]);
-            }
-            return redis.command($r.rc, ["INCR", $key]).num;
-        }
-        when Memcache(m) {
-            # memcache incr does not create; incr-else-add arms the window TTL.
-            def n as int init memcache.incr($m.mc, $key, 1);
-            if ($n == -1) {
-                if (memcache.add($m.mc, $key, "1", $ttlSec)) {
-                    return 1;
-                }
-                return memcache.incr($m.mc, $key, 1);
-            }
-            return $n;
-        }
         when Local(p) {
             # kv.incr creates an absent key at 0 but without a TTL, so arm the
             # window first: add is a no-op when the counter exists, and incr
@@ -230,6 +199,7 @@ export func incrWindow(store as Store, key as string, ttlSec as int) {
             }
             return $n;
         }
+        when Remote(r) { return $r.backend.incrWindow($r.backend, $key, $ttlSec); }
     }
     return 0;
 }

@@ -124,6 +124,7 @@
 - [`ringbuffer`](modules/ringbuffer.md)
 - [`rst`](modules/rst.md)
 - [`s3`](modules/s3.md)
+- [`s3presign`](modules/s3presign.md)
 - [`sasl`](modules/sasl.md)
 - [`screen`](modules/screen.md)
 - [`semver`](modules/semver.md)

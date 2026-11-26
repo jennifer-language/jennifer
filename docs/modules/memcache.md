@@ -50,6 +50,7 @@ an `exptime` in **seconds** (`0` = never expire, until evicted).
 | `memcache.decr(session, key, delta)`         | Atomically subtract `delta` (not below 0); `-1` if absent.         |
 | `memcache.touch(session, key, exptime)`      | Re-arm the key's expiry; returns whether it existed.               |
 | `memcache.quit(session)`                     | End the session and close.                                         |
+| `memcache.kvStore(session)`                  | The session as a [`kvstore.Store`](kvstore.md), the distributed backend for `session` and `ratelimit`. |
 
 ## `add`, `incr`, and the primitives caches are built from
 
@@ -69,7 +70,7 @@ if ($n == -1) {                                  # first hit this window
 
 The [`ratelimit`](ratelimit.md) module builds on this `incr`-then-`add` shape,
 and the [`session`](session.md) module mints a session with `add` + a TTL; both
-sit on top of this client.
+sit on top of this client through `memcache.kvStore`.
 
 ## Errors
 
@@ -127,6 +128,7 @@ $s.timeoutMs = 5000;   # fail a read that stalls for 5 s
 ## See also
 
 - [net.md](../libraries/net.md) - the transport `memcache` builds on.
+- [kvstore.md](kvstore.md) - the backend selector `kvStore` plugs into.
 - [modules/index.md](index.md) - the module catalog and import rules.
 
 ## Academy talks

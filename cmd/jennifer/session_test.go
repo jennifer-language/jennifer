@@ -45,7 +45,7 @@ import %q as session;
 import %q as kvstore;
 import %q as memcache;
 def mc as memcache.Session init memcache.connect(memcache.Options{host: "127.0.0.1", port: %d});
-def st as kvstore.Store init kvstore.memcacheStore($mc);
+def st as kvstore.Store init memcache.kvStore($mc);
 def id as string init session.create($st, 60);
 testing.assertEqual(json.length(session.load($st, $id), ""), 0);
 def d as json.Value init json.map();

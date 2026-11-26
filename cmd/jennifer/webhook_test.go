@@ -16,7 +16,7 @@ import (
 	"testing"
 )
 
-// TestWebhookSend drives the webhook module's networked send against an
+// TestWebhookSend posts a body with webhook.signedHeaders through http.post to an
 // in-process receiver that re-signs the body it got and rejects a wrong
 // signature. So a 200 back proves the module signed the exact payload with the
 // right HMAC-SHA256 in the X-Hub-Signature-256 header, over the real HTTP path.
@@ -62,7 +62,7 @@ func TestWebhookSend(t *testing.T) {
 	prog := fmt.Sprintf(`use testing;
 import %q as webhook;
 import %q as http;
-def r as http.Response init webhook.send(%q, %q, %q);
+def r as http.Response init http.post(%q, "application/json", %q, webhook.signedHeaders(%[4]q, %[5]q));
 testing.assertEqual($r.status, 200);
 testing.assertContains($r.body, "received");`,
 		webhookMod, httpMod, srv.URL+"/hook", payload, secret)

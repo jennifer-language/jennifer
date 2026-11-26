@@ -13,7 +13,9 @@
  * is the reply's first word (`ERR`, `WRONGTYPE`, `NOAUTH`, `MOVED`, ...). The reply parser
  * frames over bytes and counts bulk-string lengths in bytes, so a value whose
  * byte length differs from its rune length (any non-ASCII UTF-8 text) is read
- * byte-exact. Needs the default `jennifer` binary (uses `net`).
+ * byte-exact. `kvStore` wraps a session as a `kvstore.Store`, the backend
+ * `session` and `ratelimit` take. Needs the default `jennifer` binary (uses
+ * `net`).
  * @module redis
  * @example
  * import "transport.j" as transport;
@@ -31,6 +33,7 @@ use lists;
 use strings;
 use convert;
 import "./transport.j" as transport;
+import "./kvstore.j" as kvstore;
 
 /**
  * Connection settings.
@@ -1331,4 +1334,77 @@ export func scan(session as Session, cursor as int, pattern as string, count as 
         $args[] = convert.toString($count);
     }
     return scanResultFromReply(command($session, $args));
+}
+
+# --- kvstore backend ----------------------------------------------------------
+
+/**
+ * A `kvstore.Store` over this session (a distributed backend for `kvstore`,
+ * `session` and `ratelimit`): `kvstore.set` / `get` / `delete` / `touch` /
+ * `incrWindow` then run on the server. The session must not be subscribed.
+ * @param session {Session} the open session
+ * @return {kvstore.Store} a redis-backed store
+ */
+export func kvStore(session as Session) {
+    return kvstore.remoteStore(kvstore.Backend{
+        name: "redis",
+        conn: $session.conn,
+        timeoutMs: $session.timeoutMs,
+        set: kvSet,
+        get: kvGet,
+        delete: kvDelete,
+        touch: kvTouch,
+        incrWindow: kvIncrWindow
+    });
+}
+
+# kvSession is a command-mode session over a kvstore.Backend's connection. Its
+# pub/sub read state is fresh and unused: a store's connection never
+# subscribes, and a command reads its reply straight off the connection.
+func kvSession(b as kvstore.Backend) {
+    return newSession($b.conn, $b.timeoutMs);
+}
+
+func kvSet(b as kvstore.Backend, key as string, value as string, ttlSec as int) {
+    if ($ttlSec > 0) {
+        command(kvSession($b), ["SET", $key, $value, "EX", convert.toString($ttlSec)]);
+    } else {
+        command(kvSession($b), ["SET", $key, $value]);
+    }
+    return null;
+}
+
+func kvGet(b as kvstore.Backend, key as string) {
+    return get(kvSession($b), $key);
+}
+
+func kvDelete(b as kvstore.Backend, key as string) {
+    return del(kvSession($b), $key) > 0;
+}
+
+# kvTouch: ttlSec 0 means "no expiry" (uniform with memcache / kv). It uses
+# PERSIST, not EXPIRE: redis treats a non-positive EXPIRE as an immediate
+# delete. It reports whether the key existed, as the other backends do.
+func kvTouch(b as kvstore.Backend, key as string, ttlSec as int) {
+    def session as Session init kvSession($b);
+    if ($ttlSec > 0) {
+        return command($session, ["EXPIRE", $key, convert.toString($ttlSec)]).num > 0;
+    }
+    def present as bool init command($session, ["EXISTS", $key]).num > 0;
+    if ($present) {
+        command($session, ["PERSIST", $key]);
+    }
+    return $present;
+}
+
+# kvIncrWindow creates the counter at 0 *with* its TTL (SET NX EX) before INCR,
+# which keeps the TTL: an INCR-then-EXPIRE pair leaves the key without an
+# expiry if the process dies (or EXPIRE fails) in between, and the window
+# would then never reset.
+func kvIncrWindow(b as kvstore.Backend, key as string, ttlSec as int) {
+    def session as Session init kvSession($b);
+    if ($ttlSec > 0) {
+        command($session, ["SET", $key, "0", "EX", convert.toString($ttlSec), "NX"]);
+    }
+    return command($session, ["INCR", $key]).num;
 }

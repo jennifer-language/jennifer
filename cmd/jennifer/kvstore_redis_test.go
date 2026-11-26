@@ -137,7 +137,7 @@ import %q as kvstore;
 import %q as redis;
 import %q as transport;
 def rc as redis.Session init redis.connect(redis.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "", password: "", db: 0});
-def st as kvstore.Store init kvstore.redisStore($rc);
+def st as kvstore.Store init redis.kvStore($rc);
 
 # session over redis
 def id as string init session.create($st, 60);

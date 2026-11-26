@@ -5,7 +5,7 @@
 /**
  * Throttle requests with the ratelimit module (fixed or sliding window). This
  * demo uses the in-process backend (kvstore.inProcessStore), so it runs with no
- * server; swap in kvstore.redisStore($rc) / memcacheStore($mc) for a distributed
+ * server; swap in redis.kvStore($rc) / memcache.kvStore($mc) for a distributed
  * limiter shared across processes.
  * @module ratelimit_demo
  */

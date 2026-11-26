@@ -253,7 +253,8 @@ one moves up into an M27 section whenever it earns a slot.
   shared `~/.aws/credentials` file (a small INI reader in the deck), session
   tokens, STS `AssumeRole`, and EC2 IMDSv2; IAM Identity Center (SSO) stays out
   of v1. **Requires a core change first:** SigV4 signing is private to
-  `modules/s3.j` (and pinned to the `s3` service), so `s3` exports it: an
+  `modules/s3_sigv4.inc.j`, which `s3` and `s3presign` splice in (M29.17), and
+  pinned to the `s3` service, so `s3` exports it: an
   `s3.sign` that takes the service as a parameter beside the existing
   `s3.presign`, returning the `Authorization` / `x-amz-date` headers. Too few
   names for a module of its own, and `s3` is already the core home of SigV4 for

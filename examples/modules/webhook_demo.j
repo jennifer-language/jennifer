@@ -27,5 +27,6 @@ io.printf("wrong secret:        %t\n", webhook.verify($payload, $sig, "guessed")
 
 # To actually deliver it (needs the default `jennifer` binary, over `http`):
 #   import "../../modules/http.j" as http;
-#   def r as http.Response init webhook.send("https://example.com/hook", $payload, $secret);
+#   def r as http.Response init http.post("https://example.com/hook", "application/json",
+#       $payload, webhook.signedHeaders($payload, $secret));
 #   io.printf("delivered: %d\n", $r.status);

@@ -3,9 +3,9 @@
 # pragma-jennifer-version: >=0.25.0
 
 /**
- * A rate limiter over a selectable key/value backend (`kvstore.Store` -
- * `memcache`, `redis`, or the in-process `kv`). Each key (an IP, a user, an API
- * token) is counted against a limit per time window; a `check` records a hit and
+ * A rate limiter over a selectable key/value backend (`kvstore.Store` - the
+ * in-process `kv`, or `memcache` / `redis` through their `kvStore`). Each key
+ * (an IP, a user, an API token) is counted against a limit per time window; a `check` records a hit and
  * returns a `Result` with the decision plus the metadata for a compliant `429`
  * (remaining budget, reset time, and Retry-After). Two algorithms, both driven by
  * the wall clock and window-aligned keys (so they work identically on every
@@ -16,7 +16,7 @@
  *   counts, which smooths that boundary burst.
  * @module ratelimit
  * @example
- * def store as kvstore.Store init kvstore.redisStore($rc);
+ * def store as kvstore.Store init redis.kvStore($rc);
  * def lim as ratelimit.Limiter init ratelimit.slidingWindow($store, 100, 60);
  * def r as ratelimit.Result init ratelimit.check($lim, "ip:203.0.113.7");
  * if (not $r.allowed) {

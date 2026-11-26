@@ -54,6 +54,7 @@ A session is stateful: `connect`, issue commands, `quit`.
 | `redis.scan(session, cursor, pattern, count)` | `SCAN` - one `ScanResult` page (the production-safe walk).    |
 | `redis.ping(session)`                | `PING` - the server's `"PONG"`.                                       |
 | `redis.quit(session)`                | `QUIT` and close.                                                     |
+| `redis.kvStore(session)`             | the session as a [`kvstore.Store`](kvstore.md) (`SET EX` / `GET` / `DEL` / `EXPIRE` or `PERSIST` / `SET NX EX` + `INCR`), the distributed backend for `session` and `ratelimit`; not on a subscribed session. |
 | `redis.subscribe(session, channels)` | `SUBSCRIBE` to a `list of string` of channels; returns once the server confirmed it. |
 | `redis.psubscribe(session, patterns)`| `PSUBSCRIBE` to a `list of string` of glob patterns; returns once confirmed. |
 | `redis.unsubscribe(session, channels)` | `UNSUBSCRIBE` (`[]` leaves all channels); returns once confirmed.   |
@@ -311,6 +312,7 @@ $s.timeoutMs = 5000;   # fail a read that stalls for 5 s
 
 - [json.md](../libraries/json.md) - the same accessor-walked-reply shape.
 - [net.md](../libraries/net.md) - the transport `redis` builds on.
+- [kvstore.md](kvstore.md) - the backend selector `kvStore` plugs into.
 - [modules/index.md](index.md) - the module catalog and import rules.
 
 ## Academy talks

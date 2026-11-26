@@ -6,8 +6,9 @@ computes `sha256=<hex>`, the hex HMAC-SHA256 of the exact request body keyed by 
 shared secret, and puts it in a header; the receiver recomputes it over the body
 it got and compares, confirming the delivery is authentic and untampered.
 
-`sign` / `verify` are pure and run on **both** binaries; `send` POSTs a signed
-payload and needs the default **`jennifer`** binary (`net` via `http`).
+Every function is pure and the module imports no network module, so it runs on
+**both** binaries. A sender POSTs the body with `signedHeaders` through
+[`http`](http.md), which needs the default **`jennifer`** binary.
 
 ```jennifer
 import "webhook.j" as webhook;
@@ -26,7 +27,7 @@ Runnable: [`examples/modules/webhook_demo.j`](https://github.com/jennifer-langua
 | ---- | ------- | ----- |
 | `webhook.sign(payload, secret)` | `string` | `sha256=` + hex HMAC-SHA256 of `payload` keyed by `secret`. |
 | `webhook.verify(payload, signature, secret)` | `bool` | True if `signature` matches (constant-time compare). |
-| `webhook.send(url, payload, secret)` | `http.Response` | POST `payload` to `url` with the signature header set. Needs the default binary. |
+| `webhook.signedHeaders(payload, secret)` | `map of string to string` | `{"X-Hub-Signature-256": sign(payload, secret)}`, the headers to send with `payload`. |
 
 The signature covers the **raw body bytes** - sign and verify the exact string
 you send / receive, before any parsing. A receiver that re-serializes the body
@@ -94,18 +95,18 @@ still rejected.
 
 ## Sending
 
-`webhook.send` posts the payload as `application/json` with the
-`X-Hub-Signature-256` header, and returns the receiver's `http.Response`
-(status / headers / body). Reading the result needs `import "http.j"` for the
-type:
+`http.post` sends the payload (commonly as `application/json`) with the
+`signedHeaders` map and returns the receiver's `http.Response` (status /
+headers / body). The request needs the default binary:
 
 ```jennifer
 import "webhook.j" as webhook;
 import "http.j" as http;
 use io;
 
-def r as http.Response init webhook.send("https://example.com/hook",
-    '{"event":"push"}', "topsecret");
+def body as string init '{"event":"push"}';
+def r as http.Response init http.post("https://example.com/hook", "application/json",
+    $body, webhook.signedHeaders($body, "topsecret"));
 io.printf("delivered: %d\n", $r.status);
 ```
 
@@ -123,13 +124,11 @@ positioned `http` / `net` error (wrap in `try` / `catch`).
   of `""` (an unset environment variable, usually) would let anyone sign.
 - **Timestamps are range-checked.** A timestamp outside 0..2^40 is stale, so an
   extreme value from a request header gives `false`, not an overflow error.
-- **Content type is `application/json`** for `send`. For a different body type,
-  `sign` the payload yourself and post it with your own headers via `http`.
 
 ## See also
 
 - [hash.md](../libraries/hash.md) - the `hmac` primitive the signature is built on.
-- [http.md](http.md) - the client `send` posts through.
+- [http.md](http.md) - the client a delivery posts through.
 - [totp.md](totp.md) - the other `hash.hmac`-based module (2FA codes).
 - [modules/index.md](index.md) - the module catalog and import rules.
 

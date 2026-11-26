@@ -109,7 +109,7 @@ netdev driver - or a net-capable target such as one exposing a host
 socket layer - and drop the `tinygo` build tag on `net` so the real
 implementation compiles in. With a network stack present, `net` and
 **every net-backed module** (`smtp`, `pop`, `imap`, `redis`, `resque`,
-`memcache`, `session`, `ratelimit`, ...) run on `jennifer-tiny` too. So
+`memcache`, `s3`, ...) run on `jennifer-tiny` too. So
 read "needs the default `jennifer` binary" as "needs a build that
 includes a network stack" - the stock `jennifer` has one, the stock
 `jennifer-tiny` does not. (UDP is the one thinner spot:

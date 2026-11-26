@@ -1,8 +1,9 @@
 # `ratelimit` - rate limiter (fixed or sliding window)
 
 Import with `import "ratelimit.j" as ratelimit;`. A rate limiter over a
-**selectable** key/value backend ([`kvstore.Store`](kvstore.md) - `memcache`,
-`redis`, a file, or the in-process [`kv`](../libraries/kv.md)). Each key (an IP, a user,
+**selectable** key/value backend ([`kvstore.Store`](kvstore.md) - the in-process
+[`kv`](../libraries/kv.md) or a file, on both binaries, or `memcache` / `redis`
+through their `kvStore`). Each key (an IP, a user,
 an API token) is counted against a limit per time window; a `check` records a hit
 and returns a `Result` with the decision **plus the metadata for a compliant
 `429`** - remaining budget, reset time, and Retry-After.
@@ -11,7 +12,7 @@ and returns a `Result` with the decision **plus the metadata for a compliant
 import "ratelimit.j" as ratelimit;
 import "kvstore.j" as kvstore;
 
-# kvstore.redisStore($rc) or kvstore.memcacheStore($mc) to share the counts
+# redis.kvStore($rc) or memcache.kvStore($mc) to share the counts
 def lim as ratelimit.Limiter init ratelimit.slidingWindow(kvstore.inProcessStore(), 100, 60);
 def r as ratelimit.Result init ratelimit.check($lim, "ip:203.0.113.7");
 if (not $r.allowed) {

@@ -7,8 +7,8 @@
 #
 # The overlay splices webhook.j in front, so these tests reach its private
 # helpers (hexMac, equalConstantTime) and the exported sign / verify by bare
-# identifier. The networked `send` (the signed POST) is verified against an
-# in-process HTTP server in the Go suite (TestWebhookSend). webhook.j already
+# identifier. A signed POST (`signedHeaders` through `http.post`) is verified
+# against an in-process HTTP server in the Go suite (TestWebhookSend). webhook.j already
 # `use`s hash / encoding / convert, so the overlay only adds testing / strings.
 use testing;
 use strings;
@@ -168,4 +168,19 @@ func testExtremeTimestampIsStale() {
     def sig as string init timestampedSign("sha256", "hex", "k", "b", $ts);
     testing.assertFalse(timestampedVerify("sha256", "hex", "k", "b", $ts, $sig, 300, 1700000000));
     testing.assertFalse(stripeVerify("k", "b", "t=-9223372036854775808,v1=00", 300, 1700000000));
+}
+
+# signedHeaders carries sign()'s value under the GitHub header name, alone.
+func testSignedHeaders() {
+    def h as map of string to string init signedHeaders(PAYLOAD, SECRET);
+    testing.assertEqual(len($h), 1);
+    testing.assertEqual($h["X-Hub-Signature-256"], SIG);
+}
+
+func emptySecretHeaders() {
+    signedHeaders(PAYLOAD, "");
+}
+
+func testSignedHeadersRefusesEmptySecret() {
+    testing.assertThrows("emptySecretHeaders", "webhook");
 }

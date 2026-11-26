@@ -5,8 +5,8 @@
 /**
  * Server-side sessions over a selectable backend with the session module. This
  * demo uses the in-process backend (kvstore.inProcessStore), so it runs with no
- * server; swap in kvstore.redisStore($rc) / memcacheStore($mc) / fileStore(path)
- * for a distributed or persistent store.
+ * server; swap in redis.kvStore($rc) / memcache.kvStore($mc) /
+ * kvstore.fileStore(path) for a distributed or persistent store.
  * @module session_demo
  */
 use io;
