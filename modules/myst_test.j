@@ -506,11 +506,11 @@ func testSourceCapThrows() {
     testing.assertThrows("overSourceCap", "limit");
 }
 
-# 990 rows of 100 empty cells: about 100,200 nodes, over markdown's budget,
+# 1990 rows of 100 empty cells: about 201,100 nodes, over markdown's budget,
 # which myst inherits through markdown.parse.
 func overNodeBudget() {
     return parse(strings.replicate("|h", 100) + "|\n" + strings.replicate("|-", 100) + "|\n" +
-        strings.replicate(strings.replicate("|", 101) + "\n", 990));
+        strings.replicate(strings.replicate("|", 101) + "\n", 1990));
 }
 
 func testNodeBudgetIsALimitError() {

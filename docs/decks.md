@@ -186,7 +186,7 @@ deck; core gaps, if any, are M entries in the [roadmap](roadmap.md).
   - drift detection: the plan of a device already in sync is empty.
   - Restoring a backup over the API is out of scope (it reboots the router);
     the deck documents that.
-  Lands after the move to `@deckyard/mikrotik` (before 0.28.0). No core gap.
+  Builds on `@deckyard/mikrotik`. No core gap.
 
 ## Scopes
 

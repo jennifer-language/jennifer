@@ -9,7 +9,7 @@ tags (bare semver, no `v`). Each `(Mxx.n)` reference points at the entry in
 once the release is tagged) that explains the change in depth.
 
 
-## 0.28.0 (unreleased)
+## 0.28.0
 
 Milestone M29. The nine deprecated single-vendor modules leave the bundle for
 decks (M29.33), every `@jennifer` deck moves to `@deckyard` (M29.55), and the
@@ -37,8 +37,9 @@ profiler for servers (M29.30-32).
 - **`@jennifer/*` decks are now `@deckyard/*`** (M29.55): discord, gotify,
   influxdb, mactelnet, mikrotik, oauthext, prometheus, slack, statsd and
   telegram. Imports read `@deckyard/<name>/`; the old versions are yanked and
-  `jvc add` / `install` / `update` refuse a moved deck, naming the new one.
-  `@jennifer` keeps no decks.
+  `jvc add` / `install` / `update` refuse a moved deck, naming the new one
+  (jvc 0.3.0, which the container images now bundle). `@jennifer` keeps no
+  decks.
 - **Deprecated names removed** (M29.34): `orm.hasOne` / `hasMany` (use
   `oneToOne` / `oneToMany`), `validate.isInt` / `isFloat` / `isBool`
   (`integer` / `number` / `boolean`), `rest.insecure` / `graphql.insecure`,
@@ -94,15 +95,16 @@ profiler for servers (M29.30-32).
   as a float; `archive` refuses a drive-letter member name, a tar without its
   end marker and data after the end.
 - **Caps:** a negative cap throws: `archive.unpackWith` (was unlimited),
-  `http.Options` fields (`maxBytes: -1` was unlimited) and `webdav.get`
-  (M29.43, M29.44).
+  `http.Options` fields (`maxBytes: -1` was unlimited; also through the
+  deprecated `requestWith` family, where a negative `timeoutMs` was none) and
+  `webdav.get` (M29.43, M29.44).
 - **Timeouts** (M29.45): `term.readByte` / `readByteTimeout` throw `"closed"`
   at the end of input and `readByteTimeout` `"timeout"` (were `-1` / `-2`);
   `time.sleep` with a negative Duration throws.
 - **Closed handles** (M29.46): any use of a closed or consumed handle (`fs`,
   `kv`, `serial`, `i2c`, `spi`, `gpio`, `term`, `channel`, `crc`, `net`,
-  `httpd`, `sql`, `compress`, `hash`) throws `"closed"` (was `"runtime"` in
-  most); a second `close` / `shutdown` / `discard` / `rollback` does nothing
+  `httpd`, `sql`, `compress`, `hash`, and an `os.Process` after `os.release`)
+  throws `"closed"` (was `"runtime"` in most); a second `close` / `shutdown` / `discard` / `rollback` does nothing
   (threw in `fs`, `net`, `term`, `channel`); a repeated `finalize` or `commit`
   throws `"closed"`.
 - **`toml.asDatetime`** refuses a local date, time or date-time; read it with
@@ -129,10 +131,10 @@ profiler for servers (M29.30-32).
 - **Lower caps:** the lexer takes 1,048,576 tokens per file (was 4,194,304);
   on `jennifer-tiny` split / chars / `readLines` parts 262,144 (was
   1,048,576) and Argon2id / scrypt memory 128 MiB; scrypt `p` at most 4 (was
-  16); `regex.findAll` at most 838,860 matches for a group-less pattern (was
+  16; `verifyPassword` still takes a stored hash up to 16); `regex.findAll` at most 838,860 matches for a group-less pattern (was
   2,097,152); `html` nesting 256 (was 512); `markdown`, `rst` and `myst`
-  sources over 4,194,304 characters, `markdown` / `rst` over 100,000 nodes
-  (was 200,000); `barcode` `quiet` 0-16 (was 0-100).
+  sources over 4,194,304 characters, `rst` over 100,000 nodes (was
+  200,000); `barcode` `quiet` 0-16 (was 0-100).
 
 ### Deprecated
 
@@ -193,14 +195,14 @@ Libraries (`use NAME;`):
 - **`fs`**: `syncDir(path)`; `seek(f, offset)` / `tell(f)` (M29.57).
   `watchWith(path, WatchOptions)` (M29.45); `listBytes`, `walkBytes`
   (M29.50).
-- **`net`**: `connectWith`, `startTLSWith`, `lookupWith`,
-  `reverseLookupWith` with `ConnectOptions{timeoutMs, tls, tlsOptions,
-  dnsServers}` (M29.37, M29.5); `setIdleTimeout(conn, ms)` (M29.45). A name in a
+- **`net`**: `connectWith`, `startTLSWith` with `ConnectOptions{timeoutMs,
+  tls, tlsOptions}`, `lookupWith`, `reverseLookupWith` with
+  `LookupOptions{timeoutMs, dnsServers}` (M29.37, M29.5); `setIdleTimeout(conn, ms)` (M29.45). A name in a
   chosen hosts file wins over the search list; a `dnsServers` reply must
   echo the query.
 - **`sql`**: `openWith(driver, dsn, Options{allowInsecure, queryTimeoutMs})`,
   `SqlError` (M29.36).
-- **`task`**: `setAllocBudget(bytes)` / `allocated()`, a catchable `"limit"`
+- **`task`**: `setAllocBudget(bytes)` / `allocatedBytes()`, a catchable `"limit"`
   past it (M29.3); `waitAllTimeout`. **`channel`**: `selectTimeout` (M29.45).
 - **`json`, `toml`, `yaml`**: `asDecimal(v[, ptr])` (M29.40). **`toml`,
   `yaml`, `xml`, `asn1`**: `decodeWith(s, DecodeOptions)`; `yaml.asBytes`,

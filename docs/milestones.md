@@ -1090,8 +1090,7 @@ into M30.6 (was M28.26).
 
 **Done.** The 0.28.0 release. Eleven entries were done early and shipped in
 0.27.0, a release without a milestone (marked "0.27.0"). M29.12 moved to
-M30.24; retired: M29.16, merged into M30.21. M29.55 is done and
-stays in the [roadmap](roadmap.md#m29---0280) until the tag. The rest of M29.23 moved to M30.28.
+M30.24; retired: M29.16, merged into M30.21. The rest of M29.23 moved to M30.28.
 
 | M# | Topic | Summary |
 | ----- | ----- | ------- |
@@ -1130,7 +1129,7 @@ stays in the [roadmap](roadmap.md#m29---0280) until the tag. The rest of M29.23 
 | M29.34 | remove the stance-8 deprecated names | **Breaking.** The thirteen names renamed in 0.27.0 (`orm.hasOne`, `validate.isInt`, `insecure`, `withInsecure`, `withCaCert`, ...) are gone. |
 | M29.35 | remove the slice duplicates and the one-value printf | **Breaking.** Fifteen builtins, `convert.toString`'s radix, the two-bound `lists.range` and the one-value `printf` are gone; lint `L302` names the replacement. The borrow table learned `runArgs` / `assertThrowsArgs`. |
 | M29.36 | `sql`: verified TLS by default, testable errors | **Breaking.** `open` requires verified TLS except over a socket or loopback (`openWith` with `allowInsecure` opts out); `SqlError{code, sqlState}`, `"timeout"`, `net.NetError`; `Options.queryTimeoutMs`. |
-| M29.37 | `net`: a default deadline | Connects, handshakes and lookups default to 30 s; `connectWith` / `startTLSWith` / `lookupWith` take `ConnectOptions`; `math.MAX_INT` means none. **Breaking:** `connect(addr, 0)` has a deadline. |
+| M29.37 | `net`: a default deadline | Connects, handshakes and lookups default to 30 s; `connectWith` / `startTLSWith` take `ConnectOptions`, `lookupWith` / `reverseLookupWith` `LookupOptions`; `math.MAX_INT` means none. **Breaking:** `connect(addr, 0)` has a deadline. |
 | M29.38 | `kv.incr` on an absent key | **Breaking.** An absent key starts at 0, as Redis's INCR; `-1` is an ordinary count. |
 | M29.39 | `ml` models as values | **Breaking.** `ml.Model` is a GC-owned value (no `id`, no literal); `ml.free` is a no-op; hyper-parameters move to `*With` options structs. |
 | M29.40 | integers outside int64 in `json`, `toml`, `yaml` | `json` and `yaml` keep every digit, `asDecimal` reads it, `asInt` / `asFloat` refuse what they cannot hold exactly; `toml` refuses it naming the fix. |

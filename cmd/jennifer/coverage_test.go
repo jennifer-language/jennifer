@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -161,7 +162,16 @@ func testAdd() { testing.assertEqual(add(2, 3), 5); }`), 0o644); err != nil {
 	if !strings.Contains(errOut, "Jennifer statement profile") || !strings.Contains(errOut, "p_test.j:2:") {
 		t.Errorf("stderr lacks the profile table for the tested file:\n%s", errOut)
 	}
-	if plain := captureStdout(t, func() { runTest([]string{path}) }); out != plain {
+	plain := captureStdout(t, func() { runTest([]string{path}) })
+	if untimed(out) != untimed(plain) {
 		t.Errorf("--profile changed stdout:\n%q\nwant\n%q", out, plain)
 	}
+}
+
+// testDuration matches the per-test time in a report line, "(0 ms)".
+var testDuration = regexp.MustCompile(`\(\d+ ms\)`)
+
+// untimed drops the per-test times, which differ between two runs.
+func untimed(report string) string {
+	return testDuration.ReplaceAllString(report, "(ms)")
 }

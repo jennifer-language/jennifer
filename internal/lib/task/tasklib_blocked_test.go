@@ -125,7 +125,10 @@ func TestCancelInterruptsBlockedBuiltins(t *testing.T) {
 }
 
 // TestCancelBeforeBlockingCall: a task cancelled before it reaches a blocking
-// call raises at that call instead of blocking.
+// call raises at that call instead of blocking. The start gate is itself a
+// blocking call: a body still waiting there when the cancel lands is woken by
+// it, so the gate's own "task cancelled" is caught and the next call must
+// raise again.
 func TestCancelBeforeBlockingCall(t *testing.T) {
 	out := runBounded(t, `
 		use io;
@@ -134,7 +137,7 @@ func TestCancelBeforeBlockingCall(t *testing.T) {
 		def ch as channel of int init channel.make(0);
 		def start as channel of int init channel.make(1);
 		def t as task of string init spawn {
-			def g as int init channel.recv($start);
+			try { def g as int init channel.recv($start); } catch (e) { }
 			try {
 				def v as int init channel.recv($ch);
 				return "returned";

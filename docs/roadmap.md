@@ -14,130 +14,12 @@ release is tagged and the section moves to [milestones](milestones.md).
 
 | Milestone | Release | What |
 |---|---|---|
-| [M29](#m29---0280) | 0.28.0 | done; M29.55 moves to [milestones](milestones.md#m29---0280) with the tag |
-| [M30](#m30---0290) | 0.29.0 | copy elision and in-place updates, streaming and binary formats, function signatures, grapheme clusters, the conventions survey |
+| [M30](#m30---0290) | 0.29.0 | copy elision and in-place updates, streaming and binary formats, function signatures, grapheme clusters, the conventions survey, hosts-file, UTC-offset and PDF fixes |
 | [M32](#m32---project-governance-licensing-and-contribution-policy) | before the first outside contribution | governance, licensing, CLA vs. DCO, contribution policy |
 | [1.0.0](#requirements-for-100-stable) | 1.0.0 | the requirements for a stable release |
 | [M31](#m31---multiplatform-promote-macos--windows-to-supported) | after 1.0.0 | macOS and Windows promoted to supported platforms |
 
 ---
-
-## M29 - 0.28.0
-
-The rest of M29 is done and summarised in
-[milestones](milestones.md#m29---0280); M29.55 stays here until 0.28.0 is
-tagged, and the rest of the conventions survey moved to M30.28.
-
-#### M29.55 - release every deck before 0.28.0
-
-**Done** (2026-11-26): the registry serves the "Next" release or a later one
-for all 57 decks; all ten `@jennifer` names carry a "moved" record to
-`@deckyard`. M29.35 removes builtins that the decks' latest releases still
-call, and a consumer installs a release, not `main`: a program using one of
-them stops working the day 0.28.0 is released. `main` of every deck was
-migrated (no removed call left, floor `>=0.27.0`); the releases
-were not. 57 decks (10 `@jennifer`, 2 `@mplx`, 45 `@deckyard`) have a removed call
-in code, not only in comments, in their newest `N.N.N` tag.
-
-| Deck | Release | Next |
-|---|---|---|
-| `@jennifer/discord` | 0.1.0 | 0.2.0 |
-| `@jennifer/gotify` | 0.3.0 | 0.4.0 |
-| `@jennifer/influxdb` | 0.2.0 | 0.3.0 |
-| `@jennifer/mactelnet` | 0.1.0 | 0.2.0 |
-| `@jennifer/mikrotik` | 0.2.0 | 0.3.0 |
-| `@jennifer/oauthext` | 0.2.0 | 0.3.0 |
-| `@jennifer/prometheus` | 0.3.0 | 0.4.0 |
-| `@jennifer/slack` | 0.1.0 | 0.2.0 |
-| `@jennifer/statsd` | 0.3.0 | 0.4.0 |
-| `@jennifer/telegram` | 0.3.0 | 0.4.0 |
-| `@mplx/texttransform` | 0.3.0 | 0.4.0 |
-| `@mplx/clispinner` | 0.2.0 | 0.3.0 |
-| `@deckyard/abif` | 0.2.0 | 0.3.0 |
-| `@deckyard/anthropic` | 0.1.0 | 0.2.0 |
-| `@deckyard/astm` | 0.2.0 | 0.3.0 |
-| `@deckyard/bioinformatics` | 0.4.0 | 0.5.0 |
-| `@deckyard/codehost` | 0.3.0 | 0.4.0 |
-| `@deckyard/d64` | 0.2.0 | 0.3.0 |
-| `@deckyard/docker` | 0.2.0 | 0.3.0 |
-| `@deckyard/epub` | 0.2.0 | 0.3.0 |
-| `@deckyard/escl` | 0.3.1 | 0.4.0 |
-| `@deckyard/fhir` | 0.3.0 | 0.4.0 |
-| `@deckyard/forensicgenetics` | 0.6.0 | 0.7.0 |
-| `@deckyard/forgejo` | 0.4.0 | 0.5.0 |
-| `@deckyard/frigate` | 0.4.0 | 0.5.0 |
-| `@deckyard/fsm` | 0.2.0 | 0.3.0 |
-| `@deckyard/gemini` | 0.1.0 | 0.2.0 |
-| `@deckyard/geo` | 0.2.0 | 0.3.0 |
-| `@deckyard/git` | 0.2.0 | 0.3.0 |
-| `@deckyard/github` | 0.4.0 | 0.5.0 |
-| `@deckyard/gitlab` | 0.5.0 | 0.6.0 |
-| `@deckyard/hl7` | 0.2.0 | 0.3.0 |
-| `@deckyard/jellyfin` | 0.2.0 | 0.3.0 |
-| `@deckyard/jsonpath` | 0.2.0 | 0.3.0 |
-| `@deckyard/jsonschema` | 0.2.0 | 0.3.0 |
-| `@deckyard/koofr` | 0.4.0 | 0.5.0 |
-| `@deckyard/magick` | 0.2.0 | 0.3.0 |
-| `@deckyard/mitoleaf` | 0.3.0 | 0.4.0 |
-| `@deckyard/money` | 0.2.0 | 0.3.0 |
-| `@deckyard/mp3` | 0.2.0 | 0.3.0 |
-| `@deckyard/ngs` | 0.3.0 | 0.4.0 |
-| `@deckyard/onvif` | 0.3.0 | 0.4.0 |
-| `@deckyard/openai` | 0.1.0 | 0.2.0 |
-| `@deckyard/proxmox` | 0.2.0 | 0.3.0 |
-| `@deckyard/routeros` | 0.5.0 | 0.6.0 |
-| `@deckyard/seafile` | 0.2.0 | 0.3.0 |
-| `@deckyard/sealbox` | 0.1.0 | 0.2.0 |
-| `@deckyard/statfiles` | 0.2.0 | 0.3.0 |
-| `@deckyard/steam` | 0.2.0 | 0.3.0 |
-| `@deckyard/synology` | 0.2.0 | 0.3.0 |
-| `@deckyard/tmdb` | 0.2.0 | 0.3.0 |
-| `@deckyard/unraid` | 0.3.0 | 0.4.0 |
-| `@deckyard/vies` | 0.3.0 | 0.4.0 |
-| `@deckyard/virtualbox` | 0.1.0 | 0.2.0 |
-| `@deckyard/virtualboxws` | 0.3.0 | 0.4.0 |
-| `@deckyard/vmware` | 0.3.0 | 0.4.0 |
-| `@deckyard/zmachine` | 0.2.0 | 0.3.0 |
-
-- "Next" is the version on `main`: a minor release (the floor moved to
-  `>=0.27.0`, so not a patch). The bump is prepared in each deck's
-  `commit.txt` and passes its gate; discord, slack and d64 were already
-  bumped and only need the tag.
-- Each release goes through the usual tag, push to both remotes and
-  `jvc publish`.
-- The check before 0.28.0 is tagged: no deck's newest tag calls a removed
-  builtin outside a comment, and the registry serves those tags.
-- The `@jennifer` decks that replaced bundled modules (M29.33) are on the
-  list too; their next release is also the first one users need once the
-  modules are gone.
-
-**Every `@jennifer` deck moves to `@deckyard`.** The project ships the
-language and its standard library; decks live in Deckyard, where others can
-co-maintain them. The ten: discord, gotify, influxdb, mactelnet, mikrotik,
-oauthext, prometheus, slack, statsd and telegram. `@jennifer` keeps no decks
-(the scope table is in `decks.md`); the bundled `oauth` module points to
-`@deckyard/oauthext` for provider presets. Each moving deck's first release
-under the new name continues its version series (the next minor after its
-last `@jennifer` release):
-
-- Each repository moves to the `deckyard` organisation on GitHub and Forgejo;
-  the manifest name, the imports (`@deckyard/<name>/`), the docs and the
-  README install line change.
-- Every version of a moved `@jennifer/*` deck is yanked: a lockfile that
-  pins one still fetches it, a new resolution does not.
-- **A moved deck.** The registry gets a per-deck `movedTo` record
-  (`deckadmin move @jennifer/slack @deckyard/slack`), shown in the API and on
-  the deck page; `jvc add` / `install` / `update` refuse a moved deck with a
-  message naming the new one. No transparent alias: every import must change
-  anyway, and two names would stay forever.
-- `@deckyard/routeros` depends on `@deckyard/mikrotik`, not
-  `@jennifer/mikrotik`.
-- The 0.28.0 CHANGELOG, `docs/decks.md`, the deckyard profile README and
-  every pointer to `@jennifer/<name>` in docs, academy talks and the website
-  name the `@deckyard` deck. Released interpreters (0.26.0, 0.27.0) keep
-  pointing at `@jennifer/<name>`, which the moved record answers.
-
-**Requires:** M29.35.
 
 ## M30 - 0.29.0
 
@@ -1032,9 +914,8 @@ academy talks.
   defaults, documentation. Each rule says how it is checked.
 - **A survey tool** that lists every deviation, mechanically where it can:
   the built-in signatures in `internal/libsig` (44 libraries), the exports of
-  the bundled modules (80) and of the `@jennifer` decks (10), read from their
-  docblocks and cheatsheets. Decks of other scopes, `@deckyard` included, are
-  outside the project and the survey. Per rule: name
+  the bundled modules, read from their docblocks. Decks are outside the
+  project and the survey (the `@jennifer` decks moved to `@deckyard`, M29.55). Per rule: name
   patterns, parameter names and order, the kinds each function throws (from
   the per-library kind tests of M29.21 and the docs), caps without `"limit"`.
   The output is a findings list, one line per deviation, kept in the
@@ -1079,8 +960,27 @@ academy talks.
   - academy talks pinned to 0.26.0 still use the old names (`crypto`'s
     `$o.period`, `key-value`'s `$db.timeout`); they move with the talks.
 - Not yet tested mechanically: argument order, the kind of each data error
-  (M29.21's tests), caps without `"limit"`, struct-name casing (`http.TlsOptions`
-  beside `net.TLSOptions`), and the documentation rules.
+  in modules (M29.21 tests the built-ins'), caps without `"limit"`, struct-name
+  casing (`http.TlsOptions` beside `net.TLSOptions`), an `xWith` that takes
+  something other than one options struct, and the documentation rules.
+- Found by the 0.28.0 review (2026-11-26), each a rename or kind change with a
+  deprecation cycle:
+  - `xWith` without an options struct: `csv.parseWith` / `formatWith` /
+    `formatSafeWith` / `readerWith` / `writerWith` (a delimiter),
+    `dot.nodeWith` / `edgeWith`, `ical.calendarWith`, `imap.appendWith`,
+    `jsonrpc.clientWith`, `mcp.connectWith`, `multipart.buildWith`,
+    `ntp.queryWith`, `websocket.connectWith`, `snmp.clientWith`,
+    `oauth.authorizeWith` / `exchangeCodeWith`, `s3.putWith` / `putBytesWith`,
+    `soap.handleWith`, `webapi.failWith`, `jwt.verifyWithKeysWith`;
+  - positional caps: `flatdb.openWith(path, maxBytes)`,
+    `webdav.get(c, path, maxBytes)`, `flatdb.lockWith` / `updateWith(waitMs)`;
+  - fixed caps the caller cannot lower: markdown, myst and rst source and node
+    budgets, html depth, barcode `MAX_PIXELS`, mqtt pending, snmp
+    `MAX_WALK`, soap `MAX_WSDL_DOCUMENTS` (an option, or a rule allowing a
+    documented fixed cap);
+  - `s3` throws `"http"` for a reply that is not UTF-8 (`"s3"` is its own);
+  - `http.Options.allowCrossOriginRedirect` weakens security without the
+    `allowInsecure...` prefix.
 
 #### M30.29 - in-place update for `$x = f($x, ...)`
 
@@ -1129,6 +1029,73 @@ removes only the second copy, at the binding site.
 
 **Requires:** M30.6 (the binding-site copy), the note-24 borrow/escape
 machinery.
+
+#### M30.30 - a hosts-file name does not hide its search variants
+
+**Planned.** Found by the 0.28.0 review (2026-11-26). With a chosen hosts file
+(`JENNIFER_HOSTS`, or one under the build prefix), the resolver stub answers
+NXDOMAIN for a listed name with a search domain appended, so Go falls back to
+the name as written and the file wins over the search list (M29.5). The stub
+cannot tell that query from an explicit lookup of the same name: with `db` in
+the file and `corp.example` in the search list, `net.lookup("db.corp.example")`,
+a connect or an `sql` connection to it fails although the DNS has the record.
+glibc and Go use a hosts entry only for the name as written.
+
+- Answer a search variant from the DNS like any other name, and apply the hosts
+  table before the lookup instead, for the name as written, at every entry
+  point: the `net` library, and the dialers that resolve through
+  `net.DefaultResolver` (`sql`'s drivers).
+- **Tests:** `db` listed and `db.corp.example` in a fake DNS: `lookup("db")` is
+  the file's address, `lookup("db.corp.example")` the DNS's.
+
+**Requires:** none.
+
+#### M30.31 - one UTC offset range in `time`
+
+**Planned.** Found by the 0.28.0 review. `%z` parsing and zones accept offsets
+up to +-26 hours, the RFC 3339 parser stops at 24, and `toml` refuses `+24:00`,
+so `time.fromIso(time.iso(time.parse("+2500", "%z")))` throws "time zone
+offset hour out of range". One range everywhere, at most 23:59 (what RFC 3339
+and ISO 8601 allow); a wider offset throws `"time"` where it is read.
+
+**Requires:** none. A narrower `%z` is a change of what parses: named in the
+CHANGELOG.
+
+#### M30.32 - `doctree.layoutPdf` reports dropped characters by their font
+
+**Planned.** Found by the 0.28.0 review. With `unencodable: ""`, a word whose
+characters all drop out waits as a bare string and is checked later under the
+next word's font and role (or the body's), so a character the body font has
+but the bold, italic or code font lacks is never listed in `missing`:
+`"a **->** b"` with the body on an embedded face and bold on Helvetica-Bold
+gives `missing == []`, where `unencodable: "?"` gives `bold:->`.
+
+- Keep the font key and role with each pending word.
+- **Tests:** that document under both settings lists the same `missing`.
+
+**Requires:** none.
+
+#### M30.33 - grimoire parses the PDF book chapter by chapter
+
+**Planned.** Found by the 0.28.0 release. The release workflow builds the PDF
+manual with grimoire, whose `pdfbook.render` hands the whole assembled book to
+one `markdown.parse`: 121,353 nodes from 2.4 million characters at 0.28.0, so
+the manual's size is bounded by markdown's document caps (200,000 nodes,
+4,194,304 characters). 0.28.0 lowered the node cap to 100,000 and the release
+failed on the manual; the cap went back to 200,000.
+
+- `combine` yields the cover, part headings and chapters as separate pieces;
+  each is parsed on its own and their top-level blocks are joined under one
+  document root for the single `doctree.renderPdfDoc` layout. The caps then
+  bound one chapter, not the book.
+- Footnotes and link reference definitions resolve within the chapter that
+  holds them, as they do on the site.
+- The work is in `apps/grimoire` (`src/pdfbook.j`); nothing changes in the
+  stdlib.
+- **Tests:** a book whose chapters together exceed markdown's node cap renders;
+  the manual's PDF has the same pages and outline as the one-parse build.
+
+**Requires:** none.
 
 ## M32 - project governance, licensing, and contribution policy
 

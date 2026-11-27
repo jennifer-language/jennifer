@@ -327,7 +327,7 @@ func alertMarker(line as string) {
 # node budget is counted while the tree grows (`addNodes`), so a document over
 # it fails before the rest of it is built.
 def const MAX_DOC_DEPTH as int init 100;
-def const MAX_DOC_NODES as int init 100000;
+def const MAX_DOC_NODES as int init 200000;
 def const MAX_SOURCE as int init 4194304;
 
 func mdFail(msg as string) {
@@ -917,7 +917,7 @@ func countNodes(n as doctree.Node) {
  * rewrite links, convert to another format) before `render`ing it. The returned node
  * is the document root (its `typeOf` is `"document"`); its children are the top-level
  * blocks. A source over 4194304 characters, a document whose blocks or inline
- * markup nest too deep, or one that holds over 100000 nodes (counted while it
+ * markup nest too deep, or one that holds over 200000 nodes (counted while it
  * is parsed) is a catchable `"limit"` error.
  * @param md {string} the Markdown source
  * @return {doctree.Node} the document root node

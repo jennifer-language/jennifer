@@ -563,17 +563,26 @@ func testBadGeometryThrows() {
 }
 
 # bars appended each category with lists.concat on the growing output, which is
-# quadratic: 6000 categories took about 12 s. Linear, it takes well under 1 s.
+# quadratic: 6000 categories took about 12 s. The check compares 1500 with 6000
+# categories rather than a wall-clock bound, which an emulated CI arch misses:
+# linear, four times the bars take about four times as long; quadratic, sixteen.
 func testBarLinearInCategories() {
+    def small as int init barMillis(1500);
+    def big as int init barMillis(6000);
+    testing.assertTrue($big < 8 * $small + 200);
+}
+
+# barMillis draws n one-unit bars, checks the rect count and returns the time taken.
+func barMillis(n as int) {
     def labels as list of string init [];
     def ys as list of float init [];
-    for (def i in 0..6000) {
+    for (def i in 0..$n) {
         $labels[] = "c";
         $ys[] = 1.0;
     }
     def t0 as int init time.unixMilliseconds(time.now());
     def svg as string init bar($labels, $ys, defaults());
     def ms as int init time.unixMilliseconds(time.now()) - $t0;
-    testing.assertEqual(occurrences($svg, "<rect "), 6002);
-    testing.assertTrue($ms < 5000);
+    testing.assertEqual(occurrences($svg, "<rect "), $n + 2);
+    return $ms;
 }

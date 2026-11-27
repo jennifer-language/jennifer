@@ -101,7 +101,7 @@ RUN set -eux; \
 # 0.x pre-releases, so the tag is named). release.yml reads this line and runs
 # jvc's suite at the same tag against the release candidate, so move the pin
 # only to a jvc release that suite is green on.
-ARG JVC_REF=0.2.0
+ARG JVC_REF=0.3.0
 ADD https://github.com/jennifer-language/jvc/archive/${JVC_REF}.tar.gz /tmp/jvc.tar.gz
 RUN set -eux; \
     mkdir -p /tmp/jvc /out/jvc/usr/share/jvc/src /out/jvc/usr/share/jvc/bin /out/jvc/usr/bin; \

@@ -1671,28 +1671,30 @@ func wideTable(rows as int) {
 }
 
 func overBudgetBlocks() {
-    blockParse(wideTable(990));
+    blockParse(wideTable(1990));
 }
 
 # One more paragraph whose inline markup pushes the document over the budget.
 func overBudgetInline() {
-    parse(wideTable(970) + "\n" + strings.replicate("*a* ", 1000) + "\n");
+    parse(wideTable(1960) + "\n" + strings.replicate("*a* ", 1000) + "\n");
 }
 
 # The node budget is counted while the tree is built: the block pass stops at
 # it, before any inline markup is parsed, and the inline pass counts the nodes
 # it adds.
 func testNodeBudgetCountedWhileParsing() {
-    testing.assertEqual(MAX_DOC_NODES, 100000);
+    testing.assertEqual(MAX_DOC_NODES, 200000);
     testing.assertThrows("overBudgetBlocks", "limit");
     testing.assertThrows("overBudgetInline", "limit");
 }
 
-# A paragraph a tight list unwraps is not counted: 34,000 items are 68,002
-# nodes, under the budget (counting their paragraphs made 102,000).
+# A paragraph a tight list unwraps is not counted: 3,400 items are 6,802 nodes,
+# and the block pass's budget count is the same without the document node
+# (counting their paragraphs made it 10,201).
 func testATightListCountsItsFinalNodes() {
-    def doc as doctree.Node init parse(strings.replicate("- x\n", 34000));
-    testing.assertEqual(countNodes($doc), 68002);
+    def src as string init strings.replicate("- x\n", 3400);
+    testing.assertEqual(countNodes(parse($src)), 6802);
+    testing.assertEqual(blockParse($src).nodes, 6801);
 }
 
 func overSourceCap() {
