@@ -36,7 +36,7 @@ and the [task](libraries/task.md) library. Niche needs are covered too -
 messaging, [ACME](modules/acme.md) certificate issuance, [TOTP](modules/totp.md)
 two-factor codes.
 The interpreter and its built-in libraries ship as **one self-contained static
-binary** - about 17 MB with everything, about 5 MB for the embeddable build -
+binary** - about 18 MB with everything, about 4.5 MB for the embeddable build -
 with no separate runtime and no dependency tree to install. The modules ship as plain `.j` source
 files (installed beside the binary and resolved through the module path),
 readable and editable with no compile step. Reaching past the built-ins is
@@ -100,16 +100,16 @@ writes correct `.j` from the start. See [Editor & AI support](user-guide/tooling
   the drop-in `JENNIFER.md` for AI-assisted coding.
 - **[Language reference](user-guide/index.md)** - syntax, types,
   functions, control flow, imports, style.
+- **[Technical reference](technical/index.md)** - implementation
+  details for the lexer, parser, interpreter, and CLI.
+- **[Project](roadmap.md)** - roadmap, milestones, design stances,
+  glossary.
 - **[Libraries](libraries/index.md)** - per-library reference plus
   an alphabetical [cheatsheet](libraries/cheatsheet.md) of every
   builtin.
 - **[Modules](modules/index.md)** - the bundled modules written in
   Jennifer (`import "name.j";`): formats, mail, stores, web, and protocol
   clients, each with its own reference page.
-- **[Technical reference](technical/index.md)** - implementation
-  details for the lexer, parser, interpreter, and CLI.
-- **[Project](roadmap.md)** - roadmap, milestones, design stances,
-  glossary.
 
 ## Status
 

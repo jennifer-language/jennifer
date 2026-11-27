@@ -64,7 +64,7 @@ covered too: [WebDAV](docs/modules/webdav.md) files, strict
 [TOTP](docs/modules/totp.md) two-factor codes, and more.
 
 The interpreter and its built-in libraries ship as **one self-contained static
-binary** - about 17 MB with everything, about 5 MB for the embeddable build - with
+binary** - about 18 MB with everything, about 4.5 MB for the embeddable build - with
 no separate runtime and no dependency tree to resolve. The modules ship as plain
 `.j` source files (installed beside the binary and resolved through the module
 path), readable and editable with no compile step. Third-party **decks**
