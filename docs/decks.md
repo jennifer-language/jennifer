@@ -77,14 +77,17 @@ Small everyday utilities.
 | ---- | ------ | ----------- |
 | [abif](https://registry.jennifer-lang.dev/deck/deckyard/abif) | Done | Reader for Applied Biosystems ABIF files (`.ab1`, `.fsa`, `.hid`): every element type, raw and analysed traces, base calls. `.hid` traces are encrypted and come back as raw bytes only. |
 | [bioinformatics](https://registry.jennifer-lang.dev/deck/deckyard/bioinformatics) | Done | DNA / RNA / protein toolkit after the Sequence Manipulation Suite: transforms, composition and properties, pattern and ORF search, restriction digests, FASTA / FASTQ, pairwise alignment. Pure `.j`. |
+| `scf` (name open) | Planned | The Staden package's open trace formats: SCF v2 / v3 (traces, base calls, qualities, comments) read and written, ZTR read with its chunk compressions (zlib over core `compress` among them). Traces shaped like `abif`'s, so trace tools work on any vendor's Sanger data. Small; could be a module of `abif` instead. Pure `.j`, both binaries. |
 
 ### M27.5 - forensic / statistical genetics
 
 | Deck | Status | Description |
 | ---- | ------ | ----------- |
+| `ansinist` (name open) | Planned | ANSI/NIST-ITL Type-18 DNA records, the published standard for exchanging DNA profiles between agencies: read and write in the traditional encoding (tagged fields, GS / RS / US separators), with the Type-1 transaction header and Type-2 text a record travels with; loci and allele calls to and from a `forensicgenetics` `Profile`. The fingerprint, face and other biometric record types are out of scope; the NIEM XML encoding later. Strict reader with caps. No core gap. |
 | [forensicgenetics](https://registry.jennifer-lang.dev/deck/deckyard/forensicgenetics) | Done | STR profile statistics: Hardy-Weinberg match probabilities with theta correction, CPI / CPE, mtDNA / Y-STR haplotype counts with Clopper-Pearson bounds, kinship and paternity LRs. Pure `.j`, no I/O. |
 | fragment analysis (no name yet) | Planned | Capillary-electrophoresis `.fsa` traces to called alleles over `abif`: baseline and pull-up, sizing against the lane standard, GeneMapper ID-X panels and bins, stutter filters, a `Profile` out. `.hid` traces are encrypted, so a 3500 lab needs `.fsa` or GeneMapper exports. Research and QC, not casework. |
 | [strider](https://registry.jennifer-lang.dev/deck/deckyard/strider) | Done | Reads STRidER allele-frequency XML tables into a `forensicgenetics` `FrequencyDb`. |
+| `strseq` (name open) | Planned | Forensic STR typing by sequencing (MPS) instead of capillary electrophoresis: reads STRait Razor and FDSTools output, names sequence alleles in the ISFG-recommended nomenclature (bracketed repeat notation, STRNaming), and gives each its length-equivalent CE allele, so a sequenced profile compares with a capillary one; profiles out as `forensicgenetics` `Profile`s. FASTQ input through `ngs`; vendor exports (ForenSeq UAS) later. Research and QC, not casework. |
 
 ### M27.6 - NGS / high-throughput sequencing
 
@@ -190,11 +193,24 @@ deck; core gaps, if any, are M entries in the [roadmap](roadmap.md).
 
 ## Scopes
 
-| Scope | What it holds |
-| --- | --- |
-| `@deckyard` | community decks, and every deck that was `@jennifer` (moved in 0.28.0) |
-| `@jennifer` | reserved for the project, no decks; its old names answer with a moved record |
-| `@<user>` | a single maintainer's decks (`@mplx/...`); promoted to `@deckyard` under deckyard's CONTRIBUTING rule |
+A scope says who looks after a deck and how much weight it carries. The
+`jennifer-language` organisation holds only what the core team maintains;
+every deck lives in a community organisation with its own maintainers, or
+under its author's name.
+
+| Tier | Scope | What it holds | How a deck gets there |
+| --- | --- | --- | --- |
+| 1 | core (no scope) | the interpreter, its built-in libraries and bundled modules, maintained by the core team | - |
+| 2 | `@deckyard` | major community decks, each with its own maintainers; every deck that was `@jennifer` (moved in 0.28.0) | the technical requirements, a recent user base and a vote of the Deckyard maintainers ([CONTRIBUTING](https://github.com/deckyard/.github/blob/main/CONTRIBUTING.md)) |
+| 3 | `@skiffyard` | smaller community decks: the same technical bar, a narrower audience | the technical requirements and a review by one maintainer ([CONTRIBUTING](https://github.com/skiffyard/.github/blob/main/CONTRIBUTING.md)) |
+| 4 | `@<user>` | a single maintainer's decks (`@mplx/...`) | `jvc publish` |
+| - | `@jennifer` | reserved for the project, no decks; its old names answer with a moved record | - |
+
+A deck moves up (`@<user>` to `@skiffyard` or straight to `@deckyard`,
+`@skiffyard` to `@deckyard`) or down (`@deckyard` to `@skiffyard` when its
+user base is gone) through a registry move record with the old versions
+yanked, so every move changes the users' import paths; moves are cheapest
+before 1.0.
 
 ## Ideas (not planned yet)
 
