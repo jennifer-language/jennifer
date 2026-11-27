@@ -558,9 +558,9 @@ import "./util.j" as u; # load util.j as a module, addressed u.fn(...) / u.CONST
 ### Decks (packages)
 
 A **deck** is a third-party package with a scoped name: `@deckyard/NAME`
-(community, curated), `@<user>/NAME`, others; versions and manuals in the
-registry <https://registry.jennifer-lang.dev/> (`/browse`,
-`/deck/<scope>/<deck>`). Bare names (`import "http.j";`) are the bundled modules
+(community, curated), `@skiffyard/NAME` (community, smaller),
+`@<user>/NAME`; versions and manuals in the registry
+<https://registry.jennifer-lang.dev/> (`/browse`, `/deck/<scope>/<deck>`). Bare names (`import "http.j";`) are the bundled modules
 below, never decks.
 
 ```sh
