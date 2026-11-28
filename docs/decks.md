@@ -35,7 +35,7 @@ LAN appliances and servers, usually behind a self-signed certificate.
 | [synology](https://registry.jennifer-lang.dev/deck/deckyard/synology) | Done | Synology DSM Web API: `SYNO.API.Auth` login to a session `sid`, JSON replies. |
 | [unraid](https://registry.jennifer-lang.dev/deck/deckyard/unraid) | Done | Unraid's GraphQL API (`/graphql`, 7.2+, `x-api-key`) over the `graphql` module: system, array, disks, shares, Docker, VMs, notifications. No subscriptions yet. |
 | [virtualbox](https://registry.jennifer-lang.dev/deck/deckyard/virtualbox) | Done | VirtualBox 7.x through `VBoxManage` (`--machinereadable` parsed into structs), locally or over an `ssh` prefix. Capability `exec`, default binary only. |
-| [virtualboxws](https://registry.jennifer-lang.dev/deck/deckyard/virtualboxws) | Done | The VirtualBox web service `vboxwebsrv`: SOAP to the Main API for a remote host without `exec`, every managed-object reference released. Capability `net`. |
+| [virtualboxws](https://registry.jennifer-lang.dev/deck/skiffyard/virtualboxws) | Done | The VirtualBox web service `vboxwebsrv`: SOAP to the Main API for a remote host without `exec`, every managed-object reference released. Capability `net`. |
 | [vmware](https://registry.jennifer-lang.dev/deck/deckyard/vmware) | Done | vCenter / vSphere Automation REST API with session auth; a bare ESXi host (SOAP, partial REST on 8.x) is best effort. |
 
 ### M27.2 - public / SaaS APIs
@@ -58,8 +58,8 @@ LAN appliances and servers, usually behind a self-signed certificate.
 | [openai](https://registry.jennifer-lang.dev/deck/deckyard/openai) | Done | OpenAI-compatible Chat Completions (Ollama, vLLM, OpenRouter and others by base URL; Azure as a config variant): tools, structured output, embeddings, models. Streaming waits for M30.9. |
 | `resend` | Planned | Resend API (bearer): emails with `Idempotency-Key`, batches of 100, scheduling, domains, contacts and broadcasts; Svix-style HMAC-SHA256 webhook signatures; backs off on `429`. No core gap. |
 | [seafile](https://registry.jennifer-lang.dev/deck/deckyard/seafile) | Done | Self-hosted Seafile Web API (`api2`, `api/v2.1`), account or per-library token: libraries including encrypted ones, files with chunked upload, history, shares, trash, search. |
-| [steam](https://registry.jennifer-lang.dev/deck/deckyard/steam) | Done | Steam Web API, JSON with `?key=` auth; parts of it are community reverse-engineered. |
-| [tmdb](https://registry.jennifer-lang.dev/deck/deckyard/tmdb) | Done | The Movie Database (TMDB) REST JSON API with bearer or key auth. |
+| [steam](https://registry.jennifer-lang.dev/deck/skiffyard/steam) | Done | Steam Web API, JSON with `?key=` auth; parts of it are community reverse-engineered. |
+| [tmdb](https://registry.jennifer-lang.dev/deck/skiffyard/tmdb) | Done | The Movie Database (TMDB) REST JSON API with bearer or key auth. |
 | [vies](https://registry.jennifer-lang.dev/deck/deckyard/vies) | Done | EU VAT number checks against the Commission's VIES SOAP service (`checkVat`, `checkVatApprox` with a consultation number as proof); offline syntax check per country, transient faults retried. |
 
 ### M27.3 - daily helpers
@@ -68,7 +68,7 @@ Small everyday utilities.
 
 | Deck | Status | Description |
 | ---- | ------ | ----------- |
-| [clispinner](https://registry.jennifer-lang.dev/deck/mplx/clispinner) | Done | Terminal progress spinners in many styles, each colourable and at its own speed; silent when stdout is not a TTY. |
+| [clispinner](https://registry.jennifer-lang.dev/deck/skiffyard/clispinner) | Done | Terminal progress spinners in many styles, each colourable and at its own speed; silent when stdout is not a TTY. |
 | `download` | Planned | HTTP(S) downloads over core `http` only: a `.part` file resumed by `Range` and checked by ETag / Last-Modified, retries, mirrors, sha256 or checksum-file verification, optional Ed25519 signature. Fixed 8 MiB range pieces until M30.9; `.torrent` web seeds (BEP 19) later. `net`. |
 
 ### M27.4 - bioinformatics
@@ -86,7 +86,7 @@ Small everyday utilities.
 | `ansinist` (name open) | Planned | ANSI/NIST-ITL Type-18 DNA records, the published standard for exchanging DNA profiles between agencies: read and write in the traditional encoding (tagged fields, GS / RS / US separators), with the Type-1 transaction header and Type-2 text a record travels with; loci and allele calls to and from a `forensicgenetics` `Profile`. The fingerprint, face and other biometric record types are out of scope; the NIEM XML encoding later. Strict reader with caps. No core gap. |
 | [forensicgenetics](https://registry.jennifer-lang.dev/deck/deckyard/forensicgenetics) | Done | STR profile statistics: Hardy-Weinberg match probabilities with theta correction, CPI / CPE, mtDNA / Y-STR haplotype counts with Clopper-Pearson bounds, kinship and paternity LRs. Pure `.j`, no I/O. |
 | fragment analysis (no name yet) | Planned | Capillary-electrophoresis `.fsa` traces to called alleles over `abif`: baseline and pull-up, sizing against the lane standard, GeneMapper ID-X panels and bins, stutter filters, a `Profile` out. `.hid` traces are encrypted, so a 3500 lab needs `.fsa` or GeneMapper exports. Research and QC, not casework. |
-| [strider](https://registry.jennifer-lang.dev/deck/deckyard/strider) | Done | Reads STRidER allele-frequency XML tables into a `forensicgenetics` `FrequencyDb`. |
+| [strider](https://registry.jennifer-lang.dev/deck/skiffyard/strider) | Done | Reads STRidER allele-frequency XML tables into a `forensicgenetics` `FrequencyDb`. |
 | `strseq` (name open) | Planned | Forensic STR typing by sequencing (MPS) instead of capillary electrophoresis: reads STRait Razor and FDSTools output, names sequence alleles in the ISFG-recommended nomenclature (bracketed repeat notation, STRNaming), and gives each its length-equivalent CE allele, so a sequenced profile compares with a capillary one; profiles out as `forensicgenetics` `Profile`s. FASTQ input through `ngs`; vendor exports (ForenSeq UAS) later. Research and QC, not casework. |
 
 ### M27.6 - NGS / high-throughput sequencing
@@ -109,6 +109,7 @@ Tooling on top of a core format, not a format of its own.
 | `pdfread` (name open) | Idea | Reads PDFs in pure `.j`, both binaries: trailer, xref tables and xref streams, object streams, incremental updates; Flate, LZW, ASCII85, ASCIIHex and RunLength filters with PNG / TIFF predictors; document info and XMP metadata, page tree, outline; text extraction through ToUnicode CMaps and the standard encodings (WinAnsi, MacRoman, Standard, PDFDoc, the glyph list); encrypted files (RC4 and AES, R2 to R6) with a password. Image streams handed over undecoded. Strict: a broken xref or offset is an error; xref reconstruction, if ever, is a separate call the caller chooses. Caps on objects, nesting, stream and decoded sizes. Starts under one maintainer's scope (promotion rule). Unlike `pdftools`, no external binary and no editing. Requires M30.26 (RC4) and M30.27 (LZW). |
 | `protobuf` | Planned | Protocol Buffers by schema over the M30.14 wire library: schemas from a `FileDescriptorSet`, messages as `json.Value` in canonical ProtoJSON, a `.proto` parser later. No gRPC. Requires M30.14. |
 | [sealbox](https://registry.jennifer-lang.dev/deck/deckyard/sealbox) | Done | Encryption formats over core `crypto`: AES-256-GCM sealed box, AES-CBC + HMAC-SHA256, Fernet. One opaque `sealbox` error; pure `.j`, both binaries. |
+| `tesseract` | Idea | OCR by driving the Tesseract CLI through `os.run` (the image on stdin): plain text, and words with boxes and confidences from its TSV output (page, block, paragraph, line, word), hOCR and ALTO passed through, searchable-PDF output; language, page segmentation and engine modes, `-c` variables, `--list-langs` and the version checked against a supported range. A missing binary or language pack is a typed error, and a non-zero exit carries stderr. Images go in as bytes, no decoding in `.j`; scanned PDFs pair with `pdftools` (poppler render). Capability `exec`, default binary only. Starts under one maintainer's scope (promotion rule). |
 | `torrent` | Planned | BitTorrent metadata only: strict bencode, v1 / v2 / hybrid `.torrent` read and create, info hashes, magnet links, piece verification, HTTP and UDP tracker announce and scrape. Never a peer client. Waits for a maintainer who uses BitTorrent. |
 | torrent client control (no name yet) | Idea | Drives a running Transmission, qBittorrent or Deluge over its RPC or Web API (add, progress, limits, remove), with `torrent` supplying hashes and magnet links. A plain HTTP client deck. |
 
