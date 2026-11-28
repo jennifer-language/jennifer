@@ -98,7 +98,7 @@ Built-ins take a variable number of arguments (`io.printf`, `path.join`,
 `os.run`'s optional stdin, `meta.call`); a user function cannot. Its
 arguments are fixed in number and type, so a function that wants "any number
 of these" takes a list (`sum([1, 2, 3])` instead of `sum(1, 2, 3)`), and a
-deck cannot offer a `printf`-like API at all: `@mplx/texttransform` ships a
+deck cannot offer a `printf`-like API at all: `@skiffyard/texttransform` ships a
 `t(value, spec)` transform that composes with the real `io.sprintf` for
 exactly this reason.
 

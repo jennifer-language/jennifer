@@ -228,7 +228,7 @@ function over a 2000-element `list of P` copy 726 MiB (1.0 s); without the line,
 nothing (0.02 s). Decks hit it: `@deckyard/forensicgenetics` `search` copied its
 whole profile database per call (64 MiB at 2000 profiles; on `jennifer-tiny` at
 5000 profiles `search` went from 25.5 s to 14.1 s after switching to
-`lists.sort` on plain keys), and `@deckyard/mitoleaf` reached `lists.sortBy`
+`lists.sort` on plain keys), and `@skiffyard/mitoleaf` reached `lists.sortBy`
 through `lineage.mtHaplotype` and copied its tree per `distance` call (36 ms a
 call, 10.5 ms without `sortBy`). Both decks now carry the workaround.
 
@@ -627,7 +627,7 @@ Hangul syllables built from jamo.
 
 Title case, capitalizing and swapping case stay out of `strings`: they change
 the value by rules (small words, locale, apostrophes) rather than being
-primitives, and belong with `@mplx/texttransform`'s transforms.
+primitives, and belong with `@skiffyard/texttransform`'s transforms.
 
 **Requires:** none.
 
